@@ -1,0 +1,22 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [release]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Remote deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }} 
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            export NODE_HOME=$HOME/opt/node-v22.17.1-linux-x64
+            export PATH=$NODE_HOME/bin:$PATH
+            bash -lc "~/apps/auralink/deploy.sh"

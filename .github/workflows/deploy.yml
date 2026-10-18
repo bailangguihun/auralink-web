@@ -56,26 +56,47 @@ jobs:
             fi
             chmod 600 "$deploy_lock"
 
-            fetch_ok=0
-            for attempt in 1 2 3; do
-              echo "Fetching release branch: attempt ${attempt}/3"
-              if timeout 60 git -c http.version=HTTP/1.1 \
-                -C "$staging_dir" \
-                fetch --no-tags origin release
-              then
-                fetch_ok=1
-                break
+            (
+              # AutoDL's root-owned environment is scoped to Git download only.
+              # Production SSH runs as root; -O verifies the executing identity.
+              network_turbo=/etc/network_turbo
+              if [ -L "$network_turbo" ] || [ ! -f "$network_turbo" ] || \
+                [ ! -r "$network_turbo" ] || [ ! -O "$network_turbo" ]; then
+                echo "AutoDL Git download environment is missing or unsafe" >&2
+                exit 1
+              fi
+              if ! network_turbo_mode="$(stat -c '%a' -- "$network_turbo")" || \
+                [[ ! "$network_turbo_mode" =~ ^[0-7]{3,4}$ ]] || \
+                (( (8#$network_turbo_mode & 0022) != 0 )); then
+                echo "AutoDL Git download environment permissions are unsafe" >&2
+                exit 1
+              fi
+              if ! source "$network_turbo" >/dev/null 2>&1; then
+                echo "AutoDL Git download environment could not be loaded" >&2
+                exit 1
               fi
 
-              if [ "$attempt" -lt 3 ]; then
-                sleep $((attempt * 5))
-              fi
-            done
+              fetch_ok=0
+              for attempt in 1 2 3; do
+                echo "Fetching release branch: attempt ${attempt}/3"
+                if timeout 60 git -c http.version=HTTP/1.1 \
+                  -C "$staging_dir" \
+                  fetch --no-tags origin release
+                then
+                  fetch_ok=1
+                  break
+                fi
 
-            if [ "$fetch_ok" -ne 1 ]; then
-              echo "Failed to fetch release after 3 attempts" >&2
-              exit 1
-            fi
+                if [ "$attempt" -lt 3 ]; then
+                  sleep $((attempt * 5))
+                fi
+              done
+
+              if [ "$fetch_ok" -ne 1 ]; then
+                echo "Failed to fetch release after 3 attempts" >&2
+                exit 1
+              fi
+            )
 
             fetched_sha="$(git -C "$staging_dir" rev-parse --verify 'FETCH_HEAD^{commit}')"
             if [ "$fetched_sha" != "$expected_sha" ]; then

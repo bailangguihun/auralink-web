@@ -32,6 +32,7 @@ jobs:
             expected_sha="${{ github.sha }}"
             staging_dir=/root/autodl-tmp/auralink-github-staging/auralink-web
             deploy_helper=/root/autodl-tmp/auralink-web-deploy/bin/deploy-web.sh
+            deploy_lock=/root/autodl-tmp/auralink-web-deploy/runtime/frontend-deployment.lock
 
             if ! staging_prefix="$(git -C "$staging_dir" rev-parse --show-prefix)" || [ -n "$staging_prefix" ]; then
               echo "Web staging directory is not a Git repository" >&2
@@ -42,6 +43,18 @@ jobs:
               echo "Web deployment helper is not executable" >&2
               exit 1
             fi
+
+            if [ -L "$deploy_lock" ]; then
+              echo "Web deployment lock must not be a symbolic link" >&2
+              exit 1
+            fi
+            if [ ! -e "$deploy_lock" ]; then
+              install -m 600 /dev/null "$deploy_lock"
+            fi
+            if [ "$(id -u)" -eq 0 ]; then
+              chown root:root "$deploy_lock"
+            fi
+            chmod 600 "$deploy_lock"
 
             fetch_ok=0
             for attempt in 1 2 3; do

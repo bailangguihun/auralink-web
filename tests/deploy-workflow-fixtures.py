@@ -18,6 +18,7 @@ import tempfile
 DEFAULT_WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/deploy.yml"
 REMOTE_STAGING = "/root/autodl-tmp/auralink-github-staging/auralink-web"
 REMOTE_HELPER = "/root/autodl-tmp/auralink-web-deploy/bin/deploy-web.sh"
+REMOTE_LOCK = "/root/autodl-tmp/auralink-web-deploy/runtime/frontend-deployment.lock"
 
 
 def run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
@@ -48,7 +49,7 @@ def extract_remote_script(workflow: Path) -> str:
     script = "\n".join(block).strip() + "\n"
     if script.count('${{ github.sha }}') != 1:
         raise AssertionError("Expected the event SHA to be assigned exactly once")
-    if REMOTE_STAGING not in script or REMOTE_HELPER not in script:
+    if REMOTE_STAGING not in script or REMOTE_HELPER not in script or REMOTE_LOCK not in script:
         raise AssertionError("Existing R25 helper and staging contract changed")
     return script
 
@@ -117,6 +118,7 @@ def main() -> None:
             counter = directory / "fetch-count.txt"
             helper_call = directory / "helper-args.txt"
             helper = directory / "deploy-web.sh"
+            lock = directory / "frontend-deployment.lock"
             write_shell(fixture_bin / "git", """#!/usr/bin/env bash
 set -eu
 if [[ " $* " == *" fetch --no-tags origin release "* ]]; then
@@ -144,6 +146,7 @@ exit "$FIXTURE_HELPER_EXIT"
             script = remote_script.replace('${{ github.sha }}', case["expected"])
             script = script.replace(REMOTE_STAGING, shlex.quote(shell_path(staging)))
             script = script.replace(REMOTE_HELPER, shlex.quote(shell_path(helper)))
+            script = script.replace(REMOTE_LOCK, shlex.quote(shell_path(lock)))
             script = 'export PATH="$FIXTURE_BIN:$PATH"\n' + script
             script_file = directory / "remote-script.sh"
             write_shell(script_file, script)

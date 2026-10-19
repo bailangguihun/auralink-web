@@ -12,13 +12,15 @@ import {
 } from "./studio-contracts.ts";
 import { parseUserProfile } from "./profile-contract.ts";
 import { parsePaintingStatistics, parsePoetryGraph } from "./knowledge-contracts.ts";
+import {
+  parseCritiqueCapability, parseHistoricalPaintingGuide, parsePaintingCritiqueTask, parsePaintingGuide,
+} from "./painting-insight-contracts.ts";
 import type {
   AuthRequest,
   AuthResponse,
   CreationSubmission,
   LegacyApiResponse,
   PaintingDetail,
-  PaintingGuide,
   PaintingPage,
   PaintingQuery,
   PaintingSummary,
@@ -266,12 +268,12 @@ export const api = {
     token,
     legacyEnvelope: true,
   })),
-  paintings: (query: PaintingQuery, token?: string | null) =>
-    apiRequest<PaintingPage>(`/api/v1/paintings${queryString(query)}`, { token }),
-  dailyPainting: (token?: string | null) =>
-    apiRequest<PaintingSummary>("/api/v1/paintings/daily", { token }),
-  painting: (paintingId: string, token: string) =>
-    apiRequest<PaintingDetail>(`/api/v1/paintings/${paintingId}`, { token }),
+  paintings: (query: PaintingQuery, token?: string | null, signal?: AbortSignal) =>
+    apiRequest<PaintingPage>(`/api/v1/paintings${queryString(query)}`, { token, signal }),
+  dailyPainting: (token?: string | null, signal?: AbortSignal) =>
+    apiRequest<PaintingSummary>("/api/v1/paintings/daily", { token, signal }),
+  painting: (paintingId: string, token: string, signal?: AbortSignal) =>
+    apiRequest<PaintingDetail>(`/api/v1/paintings/${encodeURIComponent(paintingId)}`, { token, signal }),
   favoritePainting: (paintingId: string, token: string) =>
     apiRequest<void>(`/api/v1/paintings/${paintingId}/favorite`, {
       method: "PUT",
@@ -287,13 +289,26 @@ export const api = {
       `/api/v1/me/favorites/paintings?page=${page}&size=${size}`,
       { token },
     ),
-  guide: (paintingId: string, token: string) =>
-    apiRequest<PaintingGuide>(`/api/v1/paintings/${paintingId}/guide`, { token }),
-  ensureGuide: (paintingId: string, token: string) =>
-    apiRequest<PaintingGuide>(`/api/v1/paintings/${paintingId}/guide`, {
+  guide: async (paintingId: string, token: string, signal?: AbortSignal) =>
+    parsePaintingGuide(await apiRequest<unknown>(`/api/v1/paintings/${encodeURIComponent(paintingId)}/guide`, { token, signal }), paintingId),
+  historicalGuide: async (paintingId: string, token: string, signal?: AbortSignal) =>
+    parseHistoricalPaintingGuide(await apiRequest<unknown>(`/api/v1/paintings/${encodeURIComponent(paintingId)}/guide/history`, { token, signal }), paintingId),
+  ensureGuide: async (paintingId: string, token: string, signal?: AbortSignal) =>
+    parsePaintingGuide(await apiRequest<unknown>(`/api/v1/paintings/${encodeURIComponent(paintingId)}/guide`, {
       method: "POST",
       token,
-    }),
+      signal,
+    }), paintingId),
+  critiqueCapability: async (token: string, signal?: AbortSignal) =>
+    parseCritiqueCapability(await apiRequest<unknown>("/api/v1/critic/capability", { token, signal })),
+  critique: async (paintingId: string, token: string, signal?: AbortSignal) =>
+    parsePaintingCritiqueTask(await apiRequest<unknown>(`/api/v1/paintings/${encodeURIComponent(paintingId)}/critic`, { token, signal }), paintingId),
+  critiqueTask: async (critiqueId: string, paintingId: string, token: string, signal?: AbortSignal) =>
+    parsePaintingCritiqueTask(await apiRequest<unknown>(`/api/v1/critic-tasks/${encodeURIComponent(critiqueId)}`, { token, signal }), paintingId, critiqueId),
+  submitCritique: async (paintingId: string, token: string, signal?: AbortSignal) =>
+    parsePaintingCritiqueTask(await apiRequest<unknown>(`/api/v1/paintings/${encodeURIComponent(paintingId)}/critic`, {
+      method: "POST", body: JSON.stringify({ profile: "authoritative_four" }), token, signal,
+    }), paintingId),
   workflowCapabilities: async (token: string, signal?: AbortSignal) =>
     parseWorkflowCapabilities(await apiRequest<unknown>("/api/v1/workflow/node-types", {
       token,

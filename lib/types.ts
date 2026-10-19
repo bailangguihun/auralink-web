@@ -89,6 +89,7 @@ export type PaintingPage = {
   first: boolean;
   last: boolean;
   hasNext: boolean;
+  orderDate?: string | null;
 };
 
 export type GuideSections = {
@@ -120,6 +121,46 @@ export type PaintingGuide = {
   updatedAt: string;
 };
 
+export type HistoricalPaintingGuide = Omit<PaintingGuide, "cacheStatus"> & {
+  resultScope: "HISTORICAL_LEGACY";
+  inputProvenance: "LEGACY_PARTIAL";
+  currentApplicability: "UNVERIFIED";
+};
+
+export type CritiqueCapability = { submissionAvailable: boolean; reason: string };
+export type CritiqueDimension = {
+  dimensionId: string;
+  dimensionName: string;
+  conclusion: string;
+  evidence: string[];
+  strengths: string[];
+  limitations: string[];
+};
+export type CritiqueReport = {
+  workOverview: string;
+  dimensions: CritiqueDimension[];
+  consensus: string[];
+  disagreements: string[];
+  holisticAssessment: string;
+  improvementSuggestions: string[];
+  viewingLimitations: string[];
+  partial: boolean;
+};
+export type PaintingCritiqueTask = {
+  critiqueId: string;
+  paintingId: string;
+  profile: "authoritative_four" | "requested_four";
+  status: string;
+  legacyOriginalStatus: string | null;
+  reused: boolean;
+  result: CritiqueReport | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
 export type PaintingQuery = {
   keyword?: string;
   dynasty?: string;
@@ -128,8 +169,9 @@ export type PaintingQuery = {
   subject?: string;
   page?: number;
   size?: number;
-  sort?: "source" | "title" | "author" | "dynasty";
+  sort?: "source" | "title" | "author" | "dynasty" | "daily";
   direction?: "asc" | "desc";
+  orderDate?: string;
 };
 
 export type WorkflowModality =

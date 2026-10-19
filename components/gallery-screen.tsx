@@ -10,15 +10,14 @@ import { useFavorites } from "@/components/favorite-provider";
 import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
 import { api, ApiError, errorMessage } from "@/lib/api";
+import { INITIAL_GALLERY_QUERY, requireGalleryOrder, turnGalleryPage } from "@/lib/gallery-order";
 import type { PaintingPage, PaintingQuery, PaintingSummary } from "@/lib/types";
-
-const initialQuery: PaintingQuery = { page: 0, size: 12, sort: "source", direction: "asc" };
 
 export function GalleryScreen() {
   const { token, status, sessionIdentity, signOutIfCurrent, isCurrentSession } = useSession();
   const { isFavorited, isFavoriteBusy, toggleFavorite: toggleSessionFavorite } = useFavorites();
   const authenticated = status === "authenticated" && Boolean(token);
-  const [query, setQuery] = useState<PaintingQuery>(initialQuery);
+  const [query, setQuery] = useState<PaintingQuery>(INITIAL_GALLERY_QUERY);
   const [page, setPage] = useState<PaintingPage | null>(null);
   const [daily, setDaily] = useState<PaintingSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,31 +27,37 @@ export function GalleryScreen() {
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
+    const requestIdentity = sessionIdentity;
     setLoading(true);
     setError(null);
-    void api.paintings(query, token).then((result) => {
-      if (active) setPage(result);
+    void api.paintings(query, token, controller.signal).then((result) => {
+      if (!active || !isCurrentSession(requestIdentity)) return;
+      requireGalleryOrder(query, result);
+      setPage(result);
     }).catch((caught) => {
-      if (active) setError(errorMessage(caught));
+      if (active && isCurrentSession(requestIdentity)) setError(errorMessage(caught));
     }).finally(() => {
-      if (active) setLoading(false);
+      if (active && isCurrentSession(requestIdentity)) setLoading(false);
     });
-    return () => { active = false; };
-  }, [query, token]);
+    return () => { active = false; controller.abort(); };
+  }, [query, token, sessionIdentity, isCurrentSession]);
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
+    const requestIdentity = sessionIdentity;
     setDailyLoading(true);
     setDailyError(null);
-    void api.dailyPainting(token).then((result) => {
-      if (active) setDaily(result);
+    void api.dailyPainting(token, controller.signal).then((result) => {
+      if (active && isCurrentSession(requestIdentity)) setDaily(result);
     }).catch((caught) => {
-      if (active) setDailyError(errorMessage(caught));
+      if (active && isCurrentSession(requestIdentity)) setDailyError(errorMessage(caught));
     }).finally(() => {
-      if (active) setDailyLoading(false);
+      if (active && isCurrentSession(requestIdentity)) setDailyLoading(false);
     });
-    return () => { active = false; };
-  }, [token]);
+    return () => { active = false; controller.abort(); };
+  }, [token, sessionIdentity, isCurrentSession]);
 
   const applyFilters = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -72,7 +77,7 @@ export function GalleryScreen() {
 
   const clearFilters = (form: HTMLFormElement) => {
     form.reset();
-    setQuery(initialQuery);
+    setQuery(INITIAL_GALLERY_QUERY);
   };
 
   const toggleFavorite = async (painting: PaintingSummary) => {
@@ -124,14 +129,14 @@ export function GalleryScreen() {
             <label><span>分类</span><input name="category" maxLength={512} defaultValue={query.category} placeholder="输入分类" /></label>
             <label><span>作者</span><input name="author" maxLength={512} defaultValue={query.author} placeholder="输入作者" /></label>
             <label><span>题材</span><input name="subject" maxLength={512} defaultValue={query.subject} placeholder="输入题材" /></label>
-            <label><span>排序</span><select name="sort" defaultValue={query.sort}><option value="source">目录顺序</option><option value="title">作品名</option><option value="author">作者</option><option value="dynasty">朝代</option></select></label>
+            <label><span>排序</span><select name="sort" defaultValue={query.sort}><option value="daily">每日换序</option><option value="source">目录顺序</option><option value="title">作品名</option><option value="author">作者</option><option value="dynasty">朝代</option></select></label>
             <label><span>方向</span><select name="direction" defaultValue={query.direction}><option value="asc">升序</option><option value="desc">降序</option></select></label>
           </div>
         </details>
         <div className="filter-actions"><button className="button button-primary" type="submit">检索画作</button><button className="button" type="button" onClick={(event) => clearFilters(event.currentTarget.form!)}>清除</button></div>
       </form>
 
-      {loading ? <StatePanel kind="loading" title="正在读取画作目录" description="画作会直接来自 Spring Boot 官方目录。" /> : null}
+      {loading ? <StatePanel kind="loading" title="正在读取画作目录" /> : null}
       {!loading && error ? <StatePanel kind="error" title="画作目录加载失败" description={error} actionLabel="重新加载" onAction={() => setQuery({ ...query })} /> : null}
       {!loading && !error && page?.items.length === 0 ? <StatePanel kind="empty" title="暂未找到匹配的作品" description="请尝试减少筛选条件或使用其他关键词。" /> : null}
       {!loading && !error && page?.items.length ? (
@@ -143,9 +148,9 @@ export function GalleryScreen() {
             })}
           </section>
           <nav className="pagination" aria-label="画作分页">
-            <button className="button" type="button" disabled={page.first} onClick={() => setQuery((current) => ({ ...current, page: Math.max(0, (current.page || 0) - 1) }))}><ArrowIcon direction="left" /> 上一页</button>
+            <button className="button" type="button" disabled={page.first} onClick={() => setQuery((current) => turnGalleryPage(current, page, -1))}><ArrowIcon direction="left" /> 上一页</button>
             <span>第 {page.page + 1} / {Math.max(page.totalPages, 1)} 页</span>
-            <button className="button" type="button" disabled={page.last} onClick={() => setQuery((current) => ({ ...current, page: (current.page || 0) + 1 }))}>下一页 <ArrowIcon /></button>
+            <button className="button" type="button" disabled={page.last} onClick={() => setQuery((current) => turnGalleryPage(current, page, 1))}>下一页 <ArrowIcon /></button>
           </nav>
         </>
       ) : null}

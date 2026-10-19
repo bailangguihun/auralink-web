@@ -585,7 +585,8 @@ h1, h2, h3 { font-family: var(--font-serif); line-height: 1.2; }
 .daily-card h3 { margin: 9px 0; font-size: clamp(1.6rem,3vw,2.35rem); }
 .daily-card p { color: var(--text-soft); }
 .daily-card b { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; color: var(--accent-strong); font-size: .9rem; }
-.gallery-filters { display: grid; grid-template-columns: minmax(250px, 1fr) auto auto; align-items: start; gap: 12px; padding: 18px; }
+/* Raise the whole filter context above cards with backdrop-filter/content containment. */
+.gallery-filters { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(250px, 1fr) auto auto; align-items: start; gap: 12px; padding: 18px; }
 .filter-search { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: rgba(255,252,245,.82); }
 .filter-search input { min-height: 40px; padding-inline: 0; border: 0; background: transparent; box-shadow: none !important; }
 .gallery-filters details { position: relative; }
@@ -699,6 +700,8 @@ h1, h2, h3 { font-family: var(--font-serif); line-height: 1.2; }
   .topbar-home .primary-nav a:hover, .topbar-home .primary-nav a[aria-current="page"] { color: var(--accent-strong); background: var(--accent-soft); }
   .session-actions { margin-left: auto; }
   .feature-grid, .painting-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gallery-filters { grid-template-columns: 1fr; }
+  .filter-grid { position: static; width: 100%; margin-top: 10px; box-shadow: none; }
   .detail-layout { grid-template-columns: 1fr; }
   .detail-artwork { position: static; }
   .detail-media { min-height: 420px; }
@@ -741,8 +744,7 @@ h1, h2, h3 { font-family: var(--font-serif); line-height: 1.2; }
   .daily-card { grid-template-columns: 1fr; }
   .daily-media { min-height: 210px; }
   .daily-card > div:last-child { padding: 24px; }
-  .gallery-filters { grid-template-columns: 1fr; }
-  .filter-grid { position: static; grid-template-columns: 1fr; width: 100%; margin-top: 10px; box-shadow: none; }
+  .filter-grid { grid-template-columns: 1fr; }
   .filter-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .pagination { gap: 8px; }
   .pagination .button { padding-inline: 10px; font-size: .8rem; }

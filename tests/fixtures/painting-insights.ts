@@ -21,7 +21,7 @@ export function critiquePayload(status = "SUCCEEDED") {
       report: {
         work_overview: "合成山水评析。",
         dimension_assessments: ["qiyun_yijing", "bimo_se_cai_zaoxing", "style_tradition_innovation", "composition_space"].map((id) => ({
-          dimension_id: id, dimension_name: id, conclusion: "结论仅用于本地测试。", evidence: ["合成画面依据"], strengths: ["层次清晰"], limitations: [],
+          dimension_id: id, dimension_name: id, conclusion: "结论仅用于本地测试。", evidence: ["合成画面依据"], strengths: ["层次清晰"], limitations: [] as string[],
         })),
         consensus: ["意境清远"], disagreements: [], holistic_assessment: "整体结构完整。",
         improvement_suggestions: ["加强笔墨变化"], viewing_limitations: ["本示例不代表真实模型评析"],

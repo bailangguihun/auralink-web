@@ -6,12 +6,18 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowIcon, HeartIcon } from "@/components/icons";
 import { useFavorites } from "@/components/favorite-provider";
 import { MediaImage } from "@/components/media-image";
+import { PaintingInsights } from "@/components/painting-insights";
 import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import type { PaintingDetail } from "@/lib/types";
 
 export function PaintingDetailScreen({ paintingId }: { paintingId: string }) {
+  const { sessionIdentity } = useSession();
+  return <PaintingDetailContent key={`${paintingId}:${sessionIdentity.generation}`} paintingId={paintingId} />;
+}
+
+function PaintingDetailContent({ paintingId }: { paintingId: string }) {
   const { token, sessionIdentity, signOutIfCurrent, isCurrentSession } = useSession();
   const { isFavorited, isFavoriteBusy, toggleFavorite: toggleSessionFavorite } = useFavorites();
   const [painting, setPainting] = useState<PaintingDetail | null>(null);
@@ -25,10 +31,11 @@ export function PaintingDetailScreen({ paintingId }: { paintingId: string }) {
   useEffect(() => {
     if (!token) return;
     let active = true;
+    const request = new AbortController();
     setLoading(true);
     setError(null);
-    void api.painting(paintingId, token).then((result) => {
-      if (active) setPainting(result);
+    void api.painting(paintingId, token, request.signal).then((result) => {
+      if (active && isCurrentSession(sessionIdentity)) setPainting(result);
     }).catch((caught) => {
       if (!active) return;
       handleAuthError(caught);
@@ -36,8 +43,8 @@ export function PaintingDetailScreen({ paintingId }: { paintingId: string }) {
     }).finally(() => {
       if (active) setLoading(false);
     });
-    return () => { active = false; };
-  }, [handleAuthError, paintingId, token]);
+    return () => { active = false; request.abort(); };
+  }, [handleAuthError, paintingId, token, isCurrentSession, sessionIdentity]);
 
   const toggleFavorite = async () => {
     if (!painting || !token) return;
@@ -101,8 +108,7 @@ export function PaintingDetailScreen({ paintingId }: { paintingId: string }) {
         <header><span>{painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"}</span><h1>{painting.title || "无题"}</h1><p>{painting.authorName || "佚名"}</p></header>
         {painting.generatedText ? <div className="detail-section"><h2>作品资料</h2><p>{painting.generatedText}</p></div> : null}
         <dl className="fact-grid">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || "未详"}</dd></div>)}</dl>
-        <StatePanel compact kind="unavailable" title="作品导览暂未开放" description="当前详情仅展示已存储的官方目录资料，不会发起导览生成或任何提供方请求。" />
-        <div className="unsupported-row"><div><h2>智能评析</h2><p>暂未开放</p></div><div><h2>导览音频</h2><p>暂未开放</p></div></div>
+        <PaintingInsights paintingId={painting.paintingId} imageAvailable={painting.imageAvailable && Boolean(painting.image)} />
       </section>
     </div>
   );

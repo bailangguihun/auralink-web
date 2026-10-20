@@ -109,13 +109,24 @@ export function GalleryScreen() {
       </header>
 
       <section className="daily-panel glass-panel" aria-labelledby="daily-title">
-        <div className="daily-heading"><div><span>今日画作</span><h2 id="daily-title">每日推荐</h2></div><time suppressHydrationWarning>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date())}</time></div>
+        <div className="daily-heading">
+          <h2 id="daily-title">每日一画</h2><span aria-hidden="true">·</span>
+          <time suppressHydrationWarning>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date())}</time>
+        </div>
         {dailyLoading ? <StatePanel compact kind="loading" title="正在选择今日画作" /> : null}
         {!dailyLoading && dailyError ? <StatePanel compact kind="error" title="每日推荐暂不可用" description={dailyError} /> : null}
         {!dailyLoading && daily ? (
           <Link className="daily-card" href={`/gallery/${daily.paintingId}`}>
             <div className="daily-media"><MediaImage image={daily.image} alt={daily.title || "每日推荐画作"} /></div>
-            <div><span>{daily.creationDynastyNormalized || daily.creationDynastyRaw || "年代未详"}</span><h3>{daily.title || "无题"}</h3><p>{daily.authorName || "佚名"}{daily.artisticConception ? ` · ${daily.artisticConception}` : ""}</p><b>查看作品 <ArrowIcon /></b></div>
+            <div className="daily-copy">
+              <h3>{daily.title || "无题"}</h3>
+              <p className="daily-meta">
+                <span className="daily-author">{daily.authorName || "佚名"}</span><span aria-hidden="true">·</span>
+                <span className="daily-dynasty">{daily.creationDynastyNormalized || daily.creationDynastyRaw || "年代未详"}</span>
+              </p>
+              {daily.artisticConception ? <p className="daily-description">{daily.artisticConception}</p> : null}
+              <b>查看作品 <ArrowIcon /></b>
+            </div>
           </Link>
         ) : null}
       </section>

@@ -1,0 +1,172 @@
+{
+  "workflowSchemaVersion": 2,
+  "featureEnabled": true,
+  "maxVisibleCards": 3,
+  "maxTransformSteps": 2,
+  "maxExecutionTransformSteps": 2,
+  "sourceModalities": [
+    "TEXT_DESCRIPTION",
+    "POEM",
+    "IMAGE",
+    "PAINTING"
+  ],
+  "operations": [
+    {
+      "code": "TEXT_TO_PAINTING",
+      "displayName": "Text description to painting",
+      "inputModality": "TEXT_DESCRIPTION",
+      "outputModality": "PAINTING",
+      "definitionEnabled": true,
+      "draftEnabled": true,
+      "executionAvailable": true,
+      "terminalOutput": false,
+      "availabilityReason": "READY_FOR_CONTROLLED_EXECUTION",
+      "executionConstraint": null,
+      "providers": [
+        {
+          "code": "seedream-5",
+          "displayName": "Seedream 5",
+          "definitionEnabled": true,
+          "executionAvailable": true,
+          "parameterSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "code": "POEM_TO_PAINTING",
+      "displayName": "Poem to painting",
+      "inputModality": "POEM",
+      "outputModality": "PAINTING",
+      "definitionEnabled": true,
+      "draftEnabled": true,
+      "executionAvailable": true,
+      "terminalOutput": false,
+      "availabilityReason": "READY_FOR_CONTROLLED_EXECUTION",
+      "executionConstraint": null,
+      "providers": [
+        {
+          "code": "qwen3vl-seedream5",
+          "displayName": "Qwen3-VL and Seedream 5",
+          "definitionEnabled": true,
+          "executionAvailable": true,
+          "parameterSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "code": "IMAGE_TO_PAINTING",
+      "displayName": "Image to painting",
+      "inputModality": "IMAGE",
+      "outputModality": "PAINTING",
+      "definitionEnabled": true,
+      "draftEnabled": true,
+      "executionAvailable": true,
+      "terminalOutput": false,
+      "availabilityReason": "READY_FOR_CONTROLLED_EXECUTION",
+      "executionConstraint": null,
+      "providers": [
+        {
+          "code": "seedream-5",
+          "displayName": "Seedream 5",
+          "definitionEnabled": true,
+          "executionAvailable": true,
+          "parameterSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "code": "PAINTING_TO_MUSIC",
+      "displayName": "Painting to music",
+      "inputModality": "PAINTING",
+      "outputModality": "AUDIO",
+      "definitionEnabled": true,
+      "draftEnabled": true,
+      "executionAvailable": true,
+      "terminalOutput": true,
+      "availabilityReason": "READY_FOR_CONTROLLED_EXECUTION",
+      "executionConstraint": "CATALOG_PAINTING_SINGLE_TRANSFORM_ONLY",
+      "providers": [
+        {
+          "code": "auralink-vmm",
+          "displayName": "Auralink VMM",
+          "definitionEnabled": true,
+          "executionAvailable": true,
+          "parameterSchema": {
+            "type": "object",
+            "properties": {
+              "durationSeconds": {
+                "type": "integer",
+                "minimum": 3,
+                "maximum": 30,
+                "defaultValue": 10
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "code": "PAINTING_TO_POEM",
+      "displayName": "Painting to poem",
+      "inputModality": "PAINTING",
+      "outputModality": "POEM",
+      "definitionEnabled": true,
+      "draftEnabled": true,
+      "executionAvailable": true,
+      "terminalOutput": true,
+      "availabilityReason": "READY_FOR_CONTROLLED_EXECUTION",
+      "executionConstraint": null,
+      "providers": [
+        {
+          "code": "qwen3-vl-plus",
+          "displayName": "Qwen3-VL-Plus",
+          "definitionEnabled": true,
+          "executionAvailable": true,
+          "parameterSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    {
+      "code": "PAINTING_TO_VIDEO",
+      "displayName": "Painting to video",
+      "inputModality": "PAINTING",
+      "outputModality": "VIDEO",
+      "definitionEnabled": false,
+      "draftEnabled": true,
+      "executionAvailable": false,
+      "terminalOutput": true,
+      "availabilityReason": "RESERVED_FOR_FUTURE_IMPLEMENTATION",
+      "executionConstraint": null,
+      "providers": [
+        {
+          "code": "reserved-video",
+          "displayName": "Reserved video",
+          "definitionEnabled": false,
+          "executionAvailable": false,
+          "parameterSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  ]
+}

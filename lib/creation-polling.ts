@@ -104,6 +104,12 @@ export async function pollCreation({
       globalThis.clearTimeout(requestTimer);
       signal.removeEventListener("abort", abortRequest);
     }
+    // A transport or a test double can resolve after abort. Never deliver that
+    // late response to a newly selected workflow, history item, or session.
+    if (signal.aborted) return { kind: "aborted", attempts };
+    if (requestController.signal.aborted || now() - startedAt >= policy.maxElapsedMs) {
+      return { kind: "timeout", attempts };
+    }
     attempts += 1;
     onUpdate(detail);
 

@@ -278,4 +278,53 @@ describe("Creation polling", () => {
     assert.equal(outcome.kind, "timeout");
     assert.equal(outcome.attempts, 0);
   });
+
+  it("rejects a detail response that resolves after the caller has aborted", async () => {
+    const controller = new AbortController();
+    const updates: string[] = [];
+    const outcome = await pollCreation({
+      signal: controller.signal,
+      policy,
+      sleep: async () => undefined,
+      getDetail: async () => {
+        controller.abort();
+        await Promise.resolve();
+        return detail("SUCCEEDED");
+      },
+      onUpdate: (value) => updates.push(value.status),
+    });
+    assert.equal(outcome.kind, "aborted");
+    assert.deepEqual(updates, []);
+  });
+
+  it("does not publish a response from a transport that resolves after its request timeout", async () => {
+    const updates: string[] = [];
+    const outcome = await pollCreation({
+      signal: new AbortController().signal,
+      policy: { ...policy, requestTimeoutMs: 2 },
+      sleep: async () => undefined,
+      getDetail: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return detail("SUCCEEDED");
+      },
+      onUpdate: (value) => updates.push(value.status),
+    });
+    assert.equal(outcome.kind, "timeout");
+    assert.deepEqual(updates, []);
+  });
+
+  it("does not publish a response that outlives the overall polling deadline", async () => {
+    let now = 0;
+    const updates: string[] = [];
+    const outcome = await pollCreation({
+      signal: new AbortController().signal,
+      policy,
+      now: () => now,
+      sleep: async () => undefined,
+      getDetail: async () => { now = policy.maxElapsedMs; return detail("SUCCEEDED"); },
+      onUpdate: (value) => updates.push(value.status),
+    });
+    assert.equal(outcome.kind, "timeout");
+    assert.deepEqual(updates, []);
+  });
 });

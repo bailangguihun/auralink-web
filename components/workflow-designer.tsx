@@ -53,6 +53,7 @@ type Props = {
   capabilities: WorkflowCapabilities | null;
   value: WorkflowEditorState;
   disabled?: boolean;
+  editingDisabled?: boolean;
   dirty: boolean;
   saving: boolean;
   executionDisabledReason: string | null;
@@ -80,6 +81,7 @@ export function WorkflowDesigner({
   capabilities,
   value,
   disabled = false,
+  editingDisabled = false,
   dirty,
   saving,
   executionDisabledReason,
@@ -142,16 +144,17 @@ export function WorkflowDesigner({
 
     if (item.id === "AUDIO") {
       if (source && current === "PAINTING" && appendable("PAINTING_TO_MUSIC") && hasRoom) {
-        return { enabled: true, hint: "追加音乐节点", run: () => append("PAINTING_TO_MUSIC") };
+        const available = next.find((operation) => operation.code === "PAINTING_TO_MUSIC")?.executionAvailable;
+        return { enabled: true, hint: available === true ? "追加音乐节点" : "追加音乐草稿节点；当前执行能力不可用", run: () => append("PAINTING_TO_MUSIC") };
       }
-      return { enabled: false, hint: "音乐节点需要前一步国画", run: () => undefined };
+      return { enabled: false, hint: outputUnavailableHint("AUDIO", "PAINTING_TO_MUSIC"), run: () => undefined };
     }
 
     if (item.id === "VIDEO") {
       if (source && current === "PAINTING" && appendable("PAINTING_TO_VIDEO") && hasRoom) {
         return { enabled: true, hint: "追加视频草稿节点", run: () => append("PAINTING_TO_VIDEO") };
       }
-      return { enabled: false, hint: "视频节点需要前一步国画", run: () => undefined };
+      return { enabled: false, hint: outputUnavailableHint("VIDEO", "PAINTING_TO_VIDEO"), run: () => undefined };
     }
 
     const modality = item.id as WorkflowModality;
@@ -160,6 +163,22 @@ export function WorkflowDesigner({
       hint: source === modality ? "当前输入类型" : `设为${SOURCE_LABELS[modality]}`,
       run: () => onChange(setEditorSource(modality)),
     };
+  };
+
+  const outputUnavailableHint = (output: "AUDIO" | "VIDEO", code: string): string => {
+    const label = output === "AUDIO" ? "音乐" : "视频";
+    if (!capabilities) return "节点能力尚未读取，暂时无法确认可添加的步骤。";
+    if (usedNodeTypes.has(output)) return repeatedWorkflowNodeTypeMessage(output);
+    const last = value.operations.at(-1);
+    if (last?.terminalOutput === true) return `当前${SOURCE_LABELS[last.outputModality as WorkflowModality] || "输出"}是终点，不能继续追加节点。`;
+    if (value.operations.length >= (capabilities.maxTransformSteps ?? 2)
+      || value.operations.length + (value.sourceModality ? 1 : 0) >= maximum) {
+      return "当前流程已达到节点数量上限。";
+    }
+    if ((last?.outputModality ?? value.sourceModality) !== "PAINTING") return `${label}节点需要前一步国画。`;
+    const operation = capabilities.operations.find((candidate) => candidate.code === code);
+    if (!operation || operation.draftEnabled !== true) return `当前能力未开放${label}节点的草稿定义。`;
+    return `当前链路不能追加${label}节点，请检查输入与已用节点。`;
   };
 
   return (
@@ -172,7 +191,7 @@ export function WorkflowDesigner({
         </div>
         <div className="workflow-designer-actions">
           <button className="button button-quiet" type="button" disabled={disabled} onClick={onOpen}>打开流程</button>
-          <button className="button" type="button" disabled={disabled || !value.sourceModality} onClick={onSave}>
+          <button className="button" type="button" disabled={disabled || editingDisabled || !value.sourceModality} onClick={onSave}>
             {saving ? "正在保存…" : "保存流程"}
           </button>
           <button
@@ -208,7 +227,7 @@ export function WorkflowDesigner({
                 <button
                   className="workflow-node-delete"
                   type="button"
-                  disabled={disabled}
+                  disabled={disabled || editingDisabled}
                   onClick={() => onChange(setEditorSource(null))}
                   aria-label="删除输入节点并清空工作流"
                 >×</button>
@@ -225,7 +244,7 @@ export function WorkflowDesigner({
                     <button
                       className="workflow-node-delete"
                       type="button"
-                      disabled={disabled}
+                      disabled={disabled || editingDisabled}
                       onClick={() => onChange(removeEditorTransform(value, index))}
                       aria-label={`删除${OUTPUT_LABELS[operation.code] || "此节点"}及其后续节点`}
                     >×</button>
@@ -250,7 +269,7 @@ export function WorkflowDesigner({
               key={item.id}
               type="button"
               className="workflow-toolbar-button"
-              disabled={disabled || !action.enabled}
+              disabled={disabled || editingDisabled || !action.enabled}
               title={action.hint}
               aria-describedby={`workflow-toolbar-${item.id}`}
               onClick={action.run}

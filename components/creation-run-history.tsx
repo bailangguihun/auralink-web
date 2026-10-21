@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useSession } from "@/components/session-provider";
 import { api, ApiError, errorMessage, isAbortError } from "@/lib/api";
 import { poemTitleLabel } from "@/lib/creation-poem";
+import type { SessionIdentity } from "@/lib/session-identity";
 import type { CreationDetail, CreationStep, WorkflowModality } from "@/lib/types";
 
 const operationLabels: Record<string, string> = {
@@ -43,49 +44,73 @@ type PrivateMediaPreviewProps = {
 
 /** Owner-scoped media is fetched with the current session and never exposed as a storage path. */
 export function PrivateMediaPreview({ url, modality, alt, className = "" }: PrivateMediaPreviewProps) {
-  const { token, sessionIdentity, signOutIfCurrent } = useSession();
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [mediaError, setMediaError] = useState<string | null>(null);
+  const { token, sessionIdentity, isCurrentSession, signOutIfCurrent } = useSession();
+  const requestGeneration = useRef(0);
+  const [media, setMedia] = useState<{
+    source: string;
+    modality: typeof modality;
+    identity: SessionIdentity;
+    objectUrl: string | null;
+    error: string | null;
+  } | null>(null);
+  const mediaLabel = modality === "AUDIO" ? "音频" : modality === "VIDEO" ? "视频"
+    : modality === "IMAGE" || modality === "PAINTING" ? "图片" : "媒体";
 
   useEffect(() => {
+    const generation = ++requestGeneration.current;
+    setMedia(null);
     if (!token || !url) {
-      setObjectUrl(null);
-      setMediaError(null);
       return;
     }
     const controller = new AbortController();
     let generatedUrl: string | null = null;
-    setObjectUrl(null);
-    setMediaError(null);
+    const current = () => !controller.signal.aborted
+      && requestGeneration.current === generation && isCurrentSession(sessionIdentity);
     void api.mediaBlob(url, token, controller.signal)
       .then((blob) => {
-        if (controller.signal.aborted) return;
+        if (!current()) return;
         generatedUrl = URL.createObjectURL(blob);
-        setObjectUrl(generatedUrl);
+        setMedia({ source: url, modality, identity: sessionIdentity, objectUrl: generatedUrl, error: null });
       })
       .catch((caught) => {
-        if (isAbortError(caught) || controller.signal.aborted) return;
-        if (caught instanceof ApiError && caught.kind === "unauthorized") signOutIfCurrent(sessionIdentity);
-        setMediaError(caught instanceof ApiError && caught.kind === "not_found"
-          ? "这张历史作品图片暂不可用；作品记录和登录状态已保留。"
-          : errorMessage(caught, "暂时无法读取本轮私有媒体；其他创作信息已保留，请稍后重试。"));
+        if (isAbortError(caught) || !current()) return;
+        if (caught instanceof ApiError && caught.kind === "unauthorized") {
+          signOutIfCurrent(sessionIdentity);
+          return;
+        }
+        setMedia({ source: url, modality, identity: sessionIdentity, objectUrl: null,
+          error: caught instanceof ApiError && caught.kind === "not_found"
+            ? `此历史作品${mediaLabel}暂不可用；作品记录和登录状态已保留。`
+            : errorMessage(caught, `暂时无法读取本轮私有${mediaLabel}；其他创作信息已保留，请稍后重试。`),
+        });
       });
     return () => {
       controller.abort();
       if (generatedUrl) URL.revokeObjectURL(generatedUrl);
     };
-  }, [sessionIdentity, signOutIfCurrent, token, url]);
+  }, [isCurrentSession, mediaLabel, modality, sessionIdentity, signOutIfCurrent, token, url]);
 
   if (!url) return null;
-  if (mediaError) return <p className="inline-error" role="alert">{mediaError}</p>;
+  // Do not render a previous URL for even one frame while the replacement
+  // effect is still pending (including a login-generation change).
+  const visibleMedia = media?.source === url && media.modality === modality
+    && media.identity === sessionIdentity && isCurrentSession(sessionIdentity) ? media : null;
+  const objectUrl = visibleMedia?.objectUrl;
+  const reportDecodeFailure = () => {
+    if (!visibleMedia || !isCurrentSession(sessionIdentity)) return;
+    setMedia((previous) => previous === visibleMedia
+      ? { ...previous, error: `此${mediaLabel}暂时无法${modality === "AUDIO" || modality === "VIDEO" ? "播放" : "显示"}；作品记录已保留。` }
+      : previous);
+  };
+  if (visibleMedia?.error) return <p className="inline-error" role="alert">{visibleMedia.error}</p>;
   if (!objectUrl) return <p className="creation-result-loading" aria-live="polite">正在读取媒体…</p>;
   if (modality === "AUDIO") {
-    return <audio className={`creation-audio ${className}`} controls preload="metadata" src={objectUrl}>浏览器无法播放此音频。</audio>;
+    return <audio className={`creation-audio ${className}`} controls preload="metadata" src={objectUrl} onError={reportDecodeFailure}>浏览器无法播放此音频。</audio>;
   }
   if (modality === "PAINTING" || modality === "IMAGE") {
     return (
       <figure className={`creation-media-preview ${className}`}>
-        <img src={objectUrl} alt={alt} />
+        <img src={objectUrl} alt={alt} onError={reportDecodeFailure} />
         <a href={objectUrl} target="_blank" rel="noreferrer">放大查看</a>
       </figure>
     );
@@ -108,7 +133,10 @@ export function CreationStepOutput({ step }: { step: CreationStep }) {
   if (step.outputText) return <p className="creation-text-result">{step.outputText}</p>;
   return <>
     {step.operation === "PAINTING_TO_MUSIC" && typeof step.requestedDurationSeconds === "number" ? (
-      <p className="creation-history-pending">设定音乐时长：{step.requestedDurationSeconds} 秒</p>
+      <p className="creation-history-pending">本次结果记录时长：{step.requestedDurationSeconds} 秒</p>
+    ) : null}
+    {step.status === "SUCCEEDED" && !step.outputAssetContentUrl ? (
+      <p className="inline-error" role="alert">此{step.outputModality === "AUDIO" ? "音频" : step.outputModality === "PAINTING" || step.outputModality === "IMAGE" ? "图片" : "媒体"}结果未提供可读取的媒体链接；历史记录已保留。</p>
     ) : null}
     <PrivateMediaPreview
       url={step.outputAssetContentUrl}

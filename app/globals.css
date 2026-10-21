@@ -463,10 +463,11 @@ h1, h2, h3 { font-family: var(--font-serif); line-height: 1.2; }
 .button-clear:hover:not(:disabled) { border-color: rgba(141,52,45,.42); background: rgba(141,52,45,.1); }
 .workflow-unsaved, .workflow-context-note { margin: -10px 0 18px; padding: 8px 11px; border-left: 2px solid var(--accent); color: var(--text-soft); background: rgba(139,107,82,.06); font-size: .76rem; }
 .workflow-context-note { border-left-color: #a57a35; }
+.studio-layout :is(button, input, textarea) { scroll-margin-block: 96px 24px; }
 .workflow-chain { display: flex; align-items: stretch; justify-content: center; min-height: 278px; padding: 18px 4px; overflow-x: auto; }
 .workflow-chain-empty { display: grid; place-items: center; width: min(100%, 420px); min-height: 220px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--text-soft); background: rgba(255,252,245,.3); text-align: center; font-family: var(--font-serif); }
 .workflow-node-wrap { display: flex; flex: 0 0 auto; align-items: stretch; }
-.workflow-connector { display: grid; place-items: center; width: 54px; color: var(--accent); font-size: 1.55rem; }
+.workflow-connector { pointer-events: none; display: grid; place-items: center; width: 54px; color: var(--accent); font-size: 1.55rem; }
 .workflow-connector span { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid var(--line); border-radius: 50%; background: var(--surface-strong); box-shadow: 0 4px 10px rgba(60,38,20,.07); }
 .workflow-node-card { display: grid; grid-template-rows: auto auto 1fr; width: min(28vw, 292px); min-width: 245px; min-height: 242px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,252,245,.66); box-shadow: inset 0 1px rgba(255,255,255,.8), 0 8px 20px rgba(60,38,20,.07); }
 .workflow-node-source { border-top: 3px solid var(--accent-strong); }
@@ -778,7 +779,8 @@ h1, h2, h3 { font-family: var(--font-serif); line-height: 1.2; }
   .workflow-chain { display: grid; justify-content: stretch; min-height: auto; padding-inline: 0; overflow: visible; }
   .workflow-node-wrap { display: grid; grid-template-columns: 1fr; }
   .workflow-node-card { width: 100%; min-width: 0; }
-  .workflow-connector { width: 100%; height: 44px; transform: rotate(90deg); }
+  .workflow-connector { width: 100%; height: 44px; }
+  .workflow-connector span { transform: rotate(90deg); }
   .workflow-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workflow-painting-actions { grid-template-columns: 1fr; }
   .creation-step-history header { grid-template-columns: auto minmax(0, 1fr); }

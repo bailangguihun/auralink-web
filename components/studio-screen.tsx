@@ -104,10 +104,11 @@ function userFacingAvailability(
   if (capabilities?.featureEnabled !== true) return "创作服务当前未开放，仍可保存和编辑流程。";
   if (editor.operations.some((operation) => operation.code === "PAINTING_TO_MUSIC")) {
     if (editor.operations.length !== 1 || editor.sourceModality !== "PAINTING") {
-      return "本轮音乐创作仅支持从画廊选择一幅国画后直接生成音乐；组合音乐流程仍可保存为草稿。";
+      return "音乐创作仅支持一幅画廊国画或本人上传国画直接生成音乐；组合音乐流程仍可保存为草稿。";
     }
-    if (painting?.kind !== "catalog") {
-      return "本轮音乐创作仅支持从画廊选择一幅国画；上传国画和生成国画暂不能用于音乐。";
+    if (painting?.kind === "upload" && capabilities.operations.find((item) => item.code === "PAINTING_TO_MUSIC")?.executionConstraint
+        !== "CATALOG_OR_OWNED_UPLOAD_PAINTING_SINGLE_TRANSFORM_ONLY") {
+      return "当前音乐服务尚不支持上传国画，请从画廊选择。";
     }
   }
   if (editor.operations.some((operation) => operation.executionAvailable !== true)) {

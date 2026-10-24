@@ -194,10 +194,27 @@ try{
   // same file again fires change. React owns the retained file and preview bytes.
   assert.equal(await input.inputValue(),'');await input.setInputFiles(file);await until(async()=>await view.getAttribute('src')!==before,'Same-file reselection should establish a new preview');record.checks={localFileBytesPreservedAcrossSave:true,sameFileReselection:true,sha256:createHash('sha256').update(Buffer.from(bytes)).digest('hex')};
  });
- await scenario('intentional-upload-music-restriction-and-duration-bounds',async({page,record,open,execute})=>{
-  await open(1);const slider=page.locator('input[type=range]');assert.equal(await slider.getAttribute('min'),'3');assert.equal(await slider.getAttribute('max'),'30');await page.locator('.workflow-painting-input input[type=file]').setInputFiles({name:'synthetic.png',mimeType:'image/png',buffer:png});
-  await page.getByText('本轮音乐创作仅支持从画廊选择一幅国画；上传国画和生成国画暂不能用于音乐。',{exact:true}).waitFor();assert(await execute().isDisabled());assert(await slider.isEnabled());record.checks.intentionalRestrictionAndBoundsPreserved=true;
+ await scenario('owned-upload-music-persistence-and-duration-bounds',async({page,state,record,open,execute,node,audioReady})=>{
+  await open(1);const slider=page.locator('input[type=range]');assert.equal(await slider.getAttribute('min'),'3');assert.equal(await slider.getAttribute('max'),'30');await slider.fill('3');
+  await page.locator('.workflow-painting-input input[type=file]').setInputFiles({name:'synthetic.png',mimeType:'image/png',buffer:png});
+  assert(await execute().isEnabled());await execute().click();await audioReady(node().locator('audio'));
+  assert.deepEqual(state.lastSubmitted.source,{modality:'PAINTING',assetId:id(60)});assert.equal(state.uploadCount,1);assert.equal(state.submissionCount,1);
+  assert.equal(await node().locator('audio').evaluate(a=>a.duration),3);
+  await page.reload();await page.locator('.creation-card').filter({hasText:'合成已确认执行'}).click();await audioReady(page.locator('.creation-step-history audio'));
+  assert.equal(state.submissionCount,1);assert.equal(state.uploadCount,1);assert.equal(state.creations[0].sourceAssetId,id(60));assert.equal(state.creations[0].sourcePaintingId,null);
+  record.checks={ownedUploadIdentity:true,threeSecondResult:true,refreshWithoutResubmit:true,range3To30:true};
  });
+ await scenario('catalog-upload-switch-clears-stale-identities',async({page,state,record,open,choose,execute,node,audioReady})=>{
+  await open(1);await choose(90);await page.getByRole('button',{name:'更换国画',exact:true}).click();
+  await page.locator('.workflow-painting-input input[type=file]').setInputFiles({name:'synthetic.png',mimeType:'image/png',buffer:png});
+  await execute().click();await audioReady(node().locator('audio'));assert.deepEqual(state.lastSubmitted.source,{modality:'PAINTING',assetId:id(60)});
+  await open(2);await choose(91);await execute().click();await audioReady(node().locator('audio'));
+  assert.deepEqual(state.lastSubmitted.source,{modality:'PAINTING',paintingId:id(91)});assert.equal(state.uploadCount,1);assert.equal(state.submissionCount,2);record.checks.noMixedSourceIds=true;
+ });
+ await scenario('old-core-still-refuses-upload-ui',async({page,record,open,execute})=>{
+  await open(1);await page.locator('.workflow-painting-input input[type=file]').setInputFiles({name:'synthetic.png',mimeType:'image/png',buffer:png});
+  await page.getByText('当前音乐服务尚不支持上传国画，请从画廊选择。',{exact:true}).waitFor();assert(await execute().isDisabled());record.checks.failClosedOlderCore=true;
+ },{legacyMusic:true});
  await scenario('capability-failure-is-distinct-from-empty-history',async({page,record})=>{await page.getByRole('heading',{name:'工作流暂时无法显示'}).waitFor();record.checks.explicitCapabilityFailure=true;},{capStatus:503});
  for(const width of [1440,390])await scenario(`layout-${width}`,async({page,record,open,history,choose,node})=>{
   await open(1);await history(11);await choose(90);const range=page.locator('input[type=range]');await range.focus();await page.keyboard.press('ArrowRight');assert.equal(await range.inputValue(),'11');assert.equal(await node().locator('img').count(),0);

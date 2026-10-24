@@ -96,7 +96,7 @@
       "executionAvailable": true,
       "terminalOutput": true,
       "availabilityReason": "READY_FOR_CONTROLLED_EXECUTION",
-      "executionConstraint": "CATALOG_PAINTING_SINGLE_TRANSFORM_ONLY",
+      "executionConstraint": "CATALOG_OR_OWNED_UPLOAD_PAINTING_SINGLE_TRANSFORM_ONLY",
       "providers": [
         {
           "code": "auralink-vmm",

@@ -455,14 +455,14 @@ export function workflowAvailability(
     };
   }
   // PAINTING_TO_MUSIC is structurally legal after a generated painting so it
-  // can remain a reusable draft.  This QA runtime deliberately admits only
-  // the direct, single-transform catalog-painting flow.  Apply that product
+  // can remain a reusable draft. Execution admits only a direct catalog or
+  // owned uploaded painting, in a single transform. Apply that product
   // boundary to restored ACTIVE workflows too, not only to unsaved editor UI.
   if (workflow.operationSequence.includes("PAINTING_TO_MUSIC")
       && (workflow.operationSequence.length !== 1 || workflow.sourceModality !== "PAINTING")) {
     return {
       available: false,
-      reason: "本轮音乐创作仅支持从画廊选择一幅国画后直接生成音乐；组合音乐流程仍可保存为草稿。",
+      reason: "音乐创作仅支持一幅画廊国画或本人上传国画直接生成音乐；组合音乐流程仍可保存为草稿。",
     };
   }
   for (const code of workflow.operationSequence) {

@@ -29,6 +29,7 @@ export function responseFor(state, method, url, body) {
   state.requests.push({method,path:p});
   const json=(body,status=200,delayMs=0)=>({status,body,delayMs,contentType:'application/json'});
   if(p==='/api/user/profile')return json({success:true,data:{id:900001,username:'synthetic-studio',fullName:'合成验收账户',email:'synthetic@example.invalid',createdAt:null,updatedAt:null}});
+  if(p==='/api/v1/workflow/node-types'&&state.legacyMusic){const copy=structuredClone(capabilities);copy.operations.find(x=>x.code==='PAINTING_TO_MUSIC').executionConstraint='CATALOG_PAINTING_SINGLE_TRANSFORM_ONLY';return json(copy);}
   if(p==='/api/v1/workflow/node-types')return json(state.capStatus?{message:'合成能力请求失败'}:capabilities,state.capStatus||200);
   if(p==='/api/v1/me/workflows'&&method==='GET')return state.failWorkflowList?json({message:'合成流程列表故障'},503):json(pageOf(state.workflows),200,state.delayWorkflowList||0);
   if(p.startsWith('/api/v1/me/workflows/')&&method==='GET')return state.failWorkflowId===p.split('/').at(-1)?json({message:'合成流程详情故障'},503):json(state.workflows.find(x=>x.workflowId===p.split('/').at(-1)),200,state.delayWorkflow||0);
@@ -53,13 +54,18 @@ export function responseFor(state, method, url, body) {
     if(state.failSubmit)return {abort:true,delayMs:state.delaySubmit||0};
     const w=state.workflows.find(x=>x.workflowId===body.workflowId),music=w.operationSequence.includes('PAINTING_TO_MUSIC');
     const c=creation(state.nextId++,music); c.workflowId=w.workflowId;c.workflowName='合成已确认执行';
-    c.sourceText=body.source?.text??null;c.sourcePaintingId=body.source?.paintingId??null;
+    c.sourceText=body.source?.text??null;c.sourcePaintingId=body.source?.paintingId??null;c.sourceAssetId=body.source?.assetId??null;
+    if(c.sourceAssetId){c.sourcePaintingTitle=null;c.sourcePaintingContentUrl=null;c.sourceAssetContentUrl=`/api/v1/assets/${c.sourceAssetId}/content`;}
     if(music)c.steps[0].requestedDurationSeconds=w.graph.nodes[1].parameters.durationSeconds??10;
     if(state.running){c.status='RUNNING';c.steps[0].status='RUNNING';}
     if(state.unknownStatus){c.status='UNRECOGNIZED_NEW_STATE';c.steps[0].status='RUNNING';}
     if(state.mismatchedStep){c.steps[0].operation='TEXT_TO_PAINTING';c.steps[0].inputModality='TEXT_DESCRIPTION';c.steps[0].outputModality='PAINTING';c.steps[0].outputAssetId=imageId;c.steps[0].outputAssetContentUrl=`/api/v1/assets/${imageId}/content`;}
     state.creations.unshift(c); state.lastSubmitted=structuredClone(body);
     return json({creationId:c.creationId,status:'QUEUED'},200,state.delaySubmit||0);
+  }
+  if(p==='/api/v1/assets/uploads'&&method==='POST'){
+    state.uploadCount=(state.uploadCount||0)+1;
+    return json({assetId:id(60),assetType:'IMAGE',semanticType:'PAINTING',sourceType:'USER_UPLOAD',visibility:'PRIVATE',status:'ACTIVE',mimeType:'image/png',fileSize:png.length,width:1,height:1,contentUrl:`/api/v1/assets/${id(60)}/content`,downloadUrl:`/api/v1/assets/${id(60)}/download`,createdAt:at,updatedAt:at});
   }
   if(p.startsWith('/api/v1/assets/')){
     if(state.mediaStatus)return json({message:'合成媒体故障'},state.mediaStatus,state.delayMedia||0);

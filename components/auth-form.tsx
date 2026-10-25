@@ -1,5 +1,6 @@
 "use client";
 
+import { PendingIndicator } from "@/components/loading";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
@@ -88,8 +89,8 @@ export function AuthForm({ mode, nextPath }: { mode: AuthMode; nextPath?: string
             <span>密码</span>
             <input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "register" ? 6 : undefined} maxLength={100} required disabled={submitting} />
           </label>
-          <button className="button button-primary button-wide" type="submit" disabled={submitting}>
-            {submitting ? "正在连接…" : mode === "login" ? "登录" : "完成注册"}
+          <button className="button button-primary button-wide" type="submit" disabled={submitting} aria-busy={submitting}>
+            {submitting ? <><PendingIndicator /> 正在连接…</> : mode === "login" ? "登录" : "完成注册"}
           </button>
         </form>
         <p className="auth-note">登录凭据仅发送给已配置的 Spring Boot API；前端不会保存密码或角色。</p>

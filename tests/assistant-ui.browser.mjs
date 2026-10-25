@@ -83,7 +83,7 @@ try {
   await page.getByRole('textbox',{name:'消息',exact:true}).fill('隔离请求');await page.getByRole('button',{name:'发送消息',exact:true}).click();await until(()=>state.writes.some(x=>x.path.endsWith('/runs')),'one synthetic admission');await page.reload({waitUntil:'domcontentloaded'});await page.getByTestId('assistant-live').waitFor();assert.equal(state.writes.filter(x=>x.path.endsWith('/runs')).length,1);assert(state.writes.some(x=>x.path.endsWith('/requests/resolve')));
  },{uncertainSubmit:true});
  await scenario('honest-loading-empty-errors',async({page,state,dialog,open,close})=>{
-  await open('会话纪要','☷ 会话纪要');await dialog('会话纪要').getByText('正在读取已保存摘要…',{exact:true}).waitFor();await dialog('会话纪要').getByText('当前分支暂无摘要。',{exact:true}).waitFor();await close();
+  await open('会话纪要','☷ 会话纪要');await dialog('会话纪要').getByRole('status').filter({hasText:'正在读取已保存摘要'}).waitFor();await dialog('会话纪要').getByText('当前分支暂无摘要。',{exact:true}).waitFor();await close();
   state.failSummary=true;await open('会话纪要','☷ 会话纪要');await dialog('会话纪要').getByRole('alert').filter({hasText:'隔离：摘要读取失败'}).waitFor();assert(!await dialog('会话纪要').getByText('当前分支暂无摘要。',{exact:true}).count());state.failSummary=false;await dialog('会话纪要').getByRole('button',{name:'重新读取',exact:true}).click();await dialog('会话纪要').getByText('当前分支暂无摘要。',{exact:true}).waitFor();await close();
   state.failSources=true;await open('资料来源','▤ 资料来源');await dialog('资料来源').getByRole('button',{name:/一、画面如何舒展/}).click();await dialog('资料来源').getByRole('alert').filter({hasText:'隔离：来源读取失败'}).waitFor();state.failSources=false;await dialog('资料来源').getByRole('button',{name:'重新读取本条来源'}).click();await dialog('资料来源').getByText(/隔离山水作品/).waitFor();assert.equal(state.writes.length,0);
  },{emptySummary:true,summaryDelay:400});

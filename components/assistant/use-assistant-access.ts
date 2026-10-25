@@ -11,9 +11,12 @@ export function useAssistantAccess(onError: (message: string) => void) {
   const requests = useRef(new Set<AbortController>());
   const errorRef = useRef(onError); errorRef.current = onError;
   useEffect(() => { mounted.current = true; const active = requests.current; return () => { mounted.current = false; active.forEach(controller => controller.abort()); active.clear(); }; }, [sessionIdentity]);
-  const request = useCallback(async <T,>(action: (token: string, signal: AbortSignal) => Promise<T>): Promise<T> => {
+  const request = useCallback(async <T,>(action: (token: string, signal: AbortSignal) => Promise<T>, externalSignal?: AbortSignal): Promise<T> => {
     if (!token || !mounted.current || !isCurrentSession(sessionIdentity)) throw new DOMException('Stale session', 'AbortError');
     const identity = sessionIdentity; const controller = new AbortController(); requests.current.add(controller);
+    const abort = () => controller.abort();
+    externalSignal?.addEventListener("abort", abort, { once: true });
+    if (externalSignal?.aborted) controller.abort();
     try {
       const result = await action(token, controller.signal);
       if (controller.signal.aborted || !isCurrentSession(identity)) throw new DOMException('Stale account', 'AbortError');
@@ -22,7 +25,7 @@ export function useAssistantAccess(onError: (message: string) => void) {
       if (controller.signal.aborted || !isCurrentSession(identity)) throw new DOMException('Stale account', 'AbortError');
       if (error instanceof ApiError && error.status === 401) signOutIfCurrent(identity);
       throw error;
-    } finally { requests.current.delete(controller); }
+    } finally { externalSignal?.removeEventListener("abort", abort); requests.current.delete(controller); }
   }, [token, sessionIdentity, isCurrentSession, signOutIfCurrent]);
   const report = useCallback((error: unknown) => {
     if (isAbortError(error)) return;

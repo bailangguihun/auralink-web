@@ -1,5 +1,6 @@
 "use client";
 
+import { PendingIndicator } from "@/components/loading";
 import type { ReactNode } from "react";
 
 import {
@@ -192,7 +193,7 @@ export function WorkflowDesigner({
         <div className="workflow-designer-actions">
           <button className="button button-quiet" type="button" disabled={disabled} onClick={onOpen}>打开流程</button>
           <button className="button" type="button" disabled={disabled || editingDisabled || !value.sourceModality} onClick={onSave}>
-            {saving ? "正在保存…" : "保存流程"}
+            {saving ? <><PendingIndicator /> 正在保存…</> : "保存流程"}
           </button>
           <button
             className="button button-clear"

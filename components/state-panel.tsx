@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { LoadingStatus } from "@/components/loading";
 
 type StateKind = "loading" | "empty" | "error" | "unavailable" | "pending";
 
@@ -31,6 +32,7 @@ export function StatePanel({
   onAction,
   compact = false,
 }: StatePanelProps) {
+  if (kind === "loading") return <div className="read-pending"><LoadingStatus label={title} onRetry={onAction} />{description ? <p>{description}</p> : null}</div>;
   return (
     <section className={`state-panel state-${kind}${compact ? " state-compact" : ""}`} aria-live="polite">
       <span className="state-symbol" aria-hidden="true">{symbols[kind]}</span>

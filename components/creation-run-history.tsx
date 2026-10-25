@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { MediaLoading } from "@/components/loading";
 import { useSession } from "@/components/session-provider";
 import { api, ApiError, errorMessage, isAbortError } from "@/lib/api";
 import { poemTitleLabel } from "@/lib/creation-poem";
@@ -46,6 +47,7 @@ type PrivateMediaPreviewProps = {
 export function PrivateMediaPreview({ url, modality, alt, className = "" }: PrivateMediaPreviewProps) {
   const { token, sessionIdentity, isCurrentSession, signOutIfCurrent } = useSession();
   const requestGeneration = useRef(0);
+  const [readAttempt, setReadAttempt] = useState(0);
   const [media, setMedia] = useState<{
     source: string;
     modality: typeof modality;
@@ -88,7 +90,7 @@ export function PrivateMediaPreview({ url, modality, alt, className = "" }: Priv
       controller.abort();
       if (generatedUrl) URL.revokeObjectURL(generatedUrl);
     };
-  }, [isCurrentSession, mediaLabel, modality, sessionIdentity, signOutIfCurrent, token, url]);
+  }, [readAttempt, isCurrentSession, mediaLabel, modality, sessionIdentity, signOutIfCurrent, token, url]);
 
   if (!url) return null;
   // Do not render a previous URL for even one frame while the replacement
@@ -102,8 +104,8 @@ export function PrivateMediaPreview({ url, modality, alt, className = "" }: Priv
       ? { ...previous, error: `此${mediaLabel}暂时无法${modality === "AUDIO" || modality === "VIDEO" ? "播放" : "显示"}；作品记录已保留。` }
       : previous);
   };
-  if (visibleMedia?.error) return <p className="inline-error" role="alert">{visibleMedia.error}</p>;
-  if (!objectUrl) return <p className="creation-result-loading" aria-live="polite">正在读取媒体…</p>;
+  if (visibleMedia?.error) return <p className="inline-error" role="alert"><span>{visibleMedia.error}</span> <button className="text-button" onClick={() => setReadAttempt(value => value + 1)}>重新读取媒体</button></p>;
+  if (!objectUrl) return <MediaLoading audio={modality === "AUDIO"} onRetry={() => setReadAttempt(value => value + 1)} />;
   if (modality === "AUDIO") {
     return <audio className={`creation-audio ${className}`} controls preload="metadata" src={objectUrl} onError={reportDecodeFailure}>浏览器无法播放此音频。</audio>;
   }

@@ -14,7 +14,7 @@ export function useKnowledgeResource<T>(loader: (token: string, signal?: AbortSi
     if (!token) return;
     const controller = new AbortController();
     const identity = sessionIdentity;
-    setState({ data: null, loading: true, error: null, unavailable: false });
+    setState(old => ({ data: old.data, loading: true, error: null, unavailable: false }));
     void loader(token, controller.signal).then((data) => {
       if (!controller.signal.aborted && isCurrentSession(identity)) setState({ data, loading: false, error: null, unavailable: false });
     }).catch((error: unknown) => {

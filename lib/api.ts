@@ -264,8 +264,8 @@ export const api = {
     body: JSON.stringify(payload),
     legacyEnvelope: true,
   }),
-  profile: async (token: string) => parseUserProfile(await apiRequest<unknown>("/api/user/profile", {
-    token,
+  profile: async (token: string, signal?: AbortSignal) => parseUserProfile(await apiRequest<unknown>("/api/user/profile", {
+    token, signal,
     legacyEnvelope: true,
   })),
   paintings: (query: PaintingQuery, token?: string | null, signal?: AbortSignal) =>
@@ -284,10 +284,10 @@ export const api = {
       method: "DELETE",
       token,
     }),
-  favoritePaintings: (page: number, size: number, token: string) =>
+  favoritePaintings: (page: number, size: number, token: string, signal?: AbortSignal) =>
     apiRequest<PaintingPage>(
       `/api/v1/me/favorites/paintings?page=${page}&size=${size}`,
-      { token },
+      { token, signal },
     ),
   guide: async (paintingId: string, token: string, signal?: AbortSignal) =>
     parsePaintingGuide(await apiRequest<unknown>(`/api/v1/paintings/${encodeURIComponent(paintingId)}/guide`, { token, signal }), paintingId),

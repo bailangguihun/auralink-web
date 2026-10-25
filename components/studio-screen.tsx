@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { CreationRunHistory, CreationStepOutput } from "@/components/creation-run-history";
+import { CreationGridSkeleton, LoadingSection, LoadingStatus, PendingIndicator, SkeletonRows } from "@/components/loading";
 import { StatePanel } from "@/components/state-panel";
 import { useSession } from "@/components/session-provider";
 import { WorkflowDesigner } from "@/components/workflow-designer";
@@ -190,6 +191,7 @@ function StudioWorkspace() {
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
 
+  const [discoveryAttempt, setDiscoveryAttempt] = useState(0);
   const [loadingDiscovery, setLoadingDiscovery] = useState(true);
   const [loadingWorkflows, setLoadingWorkflows] = useState(false);
   const [loadingCreations, setLoadingCreations] = useState(true);
@@ -295,14 +297,11 @@ function StudioWorkspace() {
     discoveryController.current?.abort();
     discoveryController.current = controller;
     setLoadingDiscovery(true);
+    setCapabilities(null);
     setDiscoveryError(null);
-    void Promise.all([
-      api.workflowCapabilities(token, controller.signal),
-      api.workflows(0, 100, token, controller.signal),
-    ]).then(([capabilityResult, workflowResult]) => {
+    void api.workflowCapabilities(token, controller.signal).then(capabilityResult => {
       if (controller.signal.aborted || !sessionCurrent()) return;
       setCapabilities(capabilityResult);
-      setWorkflows(workflowResult);
     }).catch((caught) => {
       if (isAbortError(caught) || controller.signal.aborted || !sessionCurrent()) return;
       handleSessionError(caught);
@@ -311,7 +310,7 @@ function StudioWorkspace() {
       if (!controller.signal.aborted && sessionCurrent()) setLoadingDiscovery(false);
     });
     return () => controller.abort();
-  }, [handleSessionError, sessionCurrent, stopPolling, token]);
+  }, [discoveryAttempt, handleSessionError, sessionCurrent, stopPolling, token]);
 
   const refreshCreations = useCallback(async () => {
     if (!token) return;
@@ -331,6 +330,9 @@ function StudioWorkspace() {
       if (isAbortError(caught) || controller.signal.aborted || !sessionCurrent()) return;
       handleSessionError(caught);
       setCreationError(errorMessage(caught, "暂时无法读取我的作品。请稍后重试。"));
+      if (caught instanceof ApiError && [401, 403].includes(caught.status)) {
+        setCreationPage(null); setSelectedCreation(null); hasCreationSnapshot.current = false;
+      }
       setCreationReadStale(hasCreationSnapshot.current);
     } finally {
       if (!controller.signal.aborted && sessionCurrent() && creationsController.current === controller) setLoadingCreations(false);
@@ -440,6 +442,7 @@ function StudioWorkspace() {
     workflowListController.current?.abort();
     const controller = new AbortController();
     workflowListController.current = controller;
+    setLoadingWorkflows(true);
     const valid = () => sessionCurrent() && !controller.signal.aborted && workflowListController.current === controller;
     try {
       const result = await api.workflows(0, 100, token, controller.signal);
@@ -451,11 +454,16 @@ function StudioWorkspace() {
     } catch (caught) {
       if (valid()) {
         handleSessionError(caught);
+        if (caught instanceof ApiError && [401, 403].includes(caught.status)) setWorkflows(null);
         setWorkflowListError(errorMessage(caught, "流程列表暂时无法刷新。"));
       }
       return false;
+    } finally {
+      if (valid()) setLoadingWorkflows(false);
     }
   }, [handleSessionError, sessionCurrent, token]);
+
+  useEffect(() => { void refreshWorkflowList(); return () => workflowListController.current?.abort(); }, [refreshWorkflowList]);
 
   const updateEditor = useCallback((next: WorkflowEditorState) => {
     abortForInputChange();
@@ -813,9 +821,10 @@ function StudioWorkspace() {
             <label><span className="sr-only">搜索画廊</span><input value={gallerySearch} onChange={(event) => setGallerySearch(event.target.value)} placeholder="搜索画作或作者" /></label>
             <button className="button" type="submit" disabled={galleryLoading}>搜索</button>
           </form>
+          {galleryLoading ? <LoadingStatus label={galleryChoices ? "正在检索，以下仍为上次查询结果" : "正在检索画廊"} /> : null}
           {galleryError ? <p className="inline-error" role="alert">{galleryError}</p> : null}
           <div className="gallery-picker-results">
-            {galleryChoices?.items.map((painting) => <button key={painting.paintingId} type="button" onClick={() => {
+            {galleryChoices?.items.map((painting) => <button key={painting.paintingId} type="button" disabled={galleryLoading || !!galleryError} onClick={() => {
               abortForInputChange(); setPaintingInput({ kind: "catalog", painting }); setShowGalleryPicker(false);
             }}><span>{painting.title || "未题画作"}</span><small>{painting.authorName || "作者信息暂无"}</small></button>)}
           </div>
@@ -845,16 +854,15 @@ function StudioWorkspace() {
     return <p className="workflow-node-waiting">完成后将在这里显示本轮生成的国画。</p>;
   }, [actionPhase, selectedRunStep, updateEditor, workflowEditor, workflowSaveUncertain]);
 
-  if (loadingDiscovery) return <StatePanel kind="loading" title="正在准备工作流设计器" description="正在读取你的流程与可用功能。" />;
-  if (discoveryError && !capabilities) return <StatePanel kind="error" title="工作流暂时无法显示" description={discoveryError} />;
 
   return (
     <div className="studio-layout studio-layout-redesigned">
+      {loadingDiscovery ? <LoadingStatus label="正在确认创作能力，暂不能执行" onRetry={() => setDiscoveryAttempt(value => value + 1)} /> : discoveryError ? <StatePanel compact kind="error" title="创作能力暂时无法确认" description={discoveryError} actionLabel="重新读取能力" onAction={() => setDiscoveryAttempt(value => value + 1)} /> : null}
       <WorkflowDesigner
         capabilities={capabilities}
         value={workflowEditor}
         disabled={actionPhase !== "idle"}
-        editingDisabled={workflowSaveUncertain || workflowLoadState !== "ready"}
+        editingDisabled={!capabilities || loadingDiscovery || workflowSaveUncertain || workflowLoadState !== "ready"}
         dirty={workflowDirty}
         saving={actionPhase === "savingWorkflow"}
         executionDisabledReason={executionDisabledReason}
@@ -869,12 +877,12 @@ function StudioWorkspace() {
 
       {showWorkflowPicker ? <section className="workflow-small-panel glass-panel" aria-label="打开已保存流程">
         <header><h3>打开流程</h3>{selectedWorkflowId ? <button type="button" className="button" onClick={() => void openWorkflow(selectedWorkflowId, true)}>重新载入当前流程</button> : null}<button className="button button-quiet" type="button" onClick={newWorkflow}>新建流程</button></header>
-        {loadingWorkflows ? <p>正在读取流程…</p> : null}
+        {loadingWorkflows ? workflows ? <LoadingStatus label="正在更新流程列表，暂保留已读取内容" /> : <LoadingSection label="正在读取流程" onRetry={() => void refreshWorkflowList()}><SkeletonRows /></LoadingSection> : null}
         {workflows?.items.length ? <ul>{workflows.items.map((workflow) => <li key={workflow.workflowId}>
           <button type="button" onClick={() => void openWorkflow(workflow.workflowId)}>
             <strong>{workflow.name}</strong><span>{workflow.status === "DRAFT" ? "草稿" : "可执行流程"} · {modalityLabels[workflow.sourceModality]} → {modalityLabels[workflow.terminalModality]}</span>
           </button>
-        </li>)}</ul> : <p>还没有保存的流程。</p>}
+        </li>)}</ul> : !loadingWorkflows && !workflowListError && workflows ? <p>还没有保存的流程。</p> : null}
         {workflowSaveUncertain ? <button className="button" type="button" onClick={() => void refreshWorkflowList()}>重新读取流程</button> : null}
       </section> : null}
 
@@ -896,11 +904,12 @@ function StudioWorkspace() {
       <section className="studio-creations" aria-labelledby="my-creations-title">
         <div className="section-heading section-heading-left studio-list-heading">
           <div><h2 id="my-creations-title">我的作品</h2><p>每一条记录保存本轮输入和每一步实际产出的结果。</p></div>
-          <button className="button" type="button" disabled={loadingCreations} onClick={() => void refreshCreations()}>刷新</button>
+          <button className="button" type="button" disabled={loadingCreations} onClick={() => void refreshCreations()}>{loadingCreations ? <PendingIndicator /> : null}刷新</button>
         </div>
         {creationError ? <p className="inline-error" role="alert">{creationError}</p> : null}
         {creationReadStale ? <p className="studio-reason" role="status">当前卡片与详情展示的是上次成功读取的状态，可能已经更新；请使用“刷新”或“刷新详情”核对。</p> : null}
-        {loadingCreations && !creationPage ? <StatePanel kind="loading" title="正在读取我的作品" /> : null}
+        {loadingCreations && !creationPage ? <LoadingSection label="正在读取我的作品" onRetry={() => void refreshCreations()}><CreationGridSkeleton /></LoadingSection> : null}
+        {loadingCreations && creationPage ? <LoadingStatus label={creationPage.page === creationPageNumber ? "正在更新本页作品，暂保留已读取状态" : `正在读取第 ${creationPageNumber + 1} 页，以下仍为第 ${creationPage.page + 1} 页作品`} /> : null}
         {creationPage?.items.length ? <>
           <div className="creation-grid">
             {creationPage.items.map((creation) => <button className="creation-card glass-panel" type="button" key={creation.creationId} onClick={() => void openCreation(creation.creationId)}>
@@ -911,14 +920,14 @@ function StudioWorkspace() {
             </button>)}
           </div>
           <nav className="pagination" aria-label="我的作品分页">
-            <button className="button" type="button" disabled={creationPage.first} onClick={() => setCreationPageNumber((current) => Math.max(0, current - 1))}>上一页</button>
+            <button className="button" type="button" disabled={loadingCreations || creationPage.first} onClick={() => setCreationPageNumber((current) => Math.max(0, current - 1))}>上一页</button>
             <span>第 {creationPage.page + 1} / {Math.max(creationPage.totalPages, 1)} 页</span>
-            <button className="button" type="button" disabled={creationPage.last} onClick={() => setCreationPageNumber((current) => current + 1)}>下一页</button>
+            <button className="button" type="button" disabled={loadingCreations || creationPage.last} onClick={() => setCreationPageNumber((current) => current + 1)}>下一页</button>
           </nav>
         </> : !loadingCreations && !creationError && creationPage ? <StatePanel kind="empty" title="还没有作品" description="保存流程不会创建作品；提交成功后，每一轮创作都会在这里显示。" /> : null}
       </section>
 
-      {detailLoading ? <p role="status">正在读取历史详情…</p> : null}
+      {detailLoading ? <LoadingStatus label="正在读取历史详情" /> : null}
       {detailError ? <p className="inline-error" role="alert">{detailError}</p> : null}
       {currentExecution ? <p className="studio-reason" role="status">本次提交已确认{pollState === "polling" ? "，正在读取执行状态" : ""}。<button className="button" type="button" onClick={() => void openCreation(currentExecution.creationId)}>在历史区查看本次执行</button></p> : null}
       {selectedCreation ? <section className="creation-detail glass-panel" aria-labelledby="creation-detail-title">

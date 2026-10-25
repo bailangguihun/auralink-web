@@ -25,7 +25,7 @@ export function GuidePanel({ guide, state, error, onGenerate, onRetry }: GuidePa
   if (state === "missing") {
     return <StatePanel compact kind="empty" title="这幅作品尚无导览" description="点击生成后，可阅读作品的构图、笔墨与文化意涵。" actionLabel="生成作品导览" onAction={onGenerate} />;
   }
-  if (state === "generating") return <StatePanel compact kind="loading" title="正在生成作品导览" description="请稍候；离开页面后可重新进入查看已保存的结果。" />;
+  if (state === "generating") return <StatePanel compact kind="pending" title="正在生成作品导览" description="请稍候；离开页面后可重新进入查看已保存的结果。" />;
   const readError = state === "error" ? <StatePanel compact kind="error" title="作品导览读取未完成" description={error || undefined} actionLabel="重试读取" onAction={onRetry} /> : null;
   if (!guide) return readError;
 

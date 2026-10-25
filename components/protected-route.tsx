@@ -1,13 +1,13 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 
 import { StatePanel } from "@/components/state-panel";
 import { useSession } from "@/components/session-provider";
 
-export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { status, restore } = useSession();
+export function ProtectedRoute({ children, fallback }: { children: React.ReactNode; fallback?: React.ReactNode }) {
+  const { status, restore, sessionIdentity } = useSession();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -19,7 +19,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }, [pathname, router, status]);
 
   if (status === "loading") {
-    return <StatePanel kind="loading" title="正在确认登录状态" description="正在连接 ArtLIVE 服务。" />;
+    return fallback ?? <StatePanel kind="loading" title="正在确认登录状态" description="正在连接 ArtLIVE 服务。" />;
   }
   if (status === "error") {
     return (
@@ -35,5 +35,5 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (status !== "authenticated") {
     return <StatePanel kind="loading" title="正在前往登录" />;
   }
-  return children;
+  return <Fragment key={sessionIdentity.generation}>{children}</Fragment>;
 }

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { DetailSkeleton, LoadingSection } from "@/components/loading";
 import { ArrowIcon, HeartIcon } from "@/components/icons";
 import { useFavorites } from "@/components/favorite-provider";
 import { MediaImage } from "@/components/media-image";
@@ -21,6 +22,7 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
   const { token, sessionIdentity, signOutIfCurrent, isCurrentSession } = useSession();
   const { isFavorited, isFavoriteBusy, toggleFavorite: toggleSessionFavorite } = useFavorites();
   const [painting, setPainting] = useState<PaintingDetail | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,7 +46,7 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
       if (active) setLoading(false);
     });
     return () => { active = false; request.abort(); };
-  }, [handleAuthError, paintingId, token, isCurrentSession, sessionIdentity]);
+  }, [attempt, handleAuthError, paintingId, token, isCurrentSession, sessionIdentity]);
 
   const toggleFavorite = async () => {
     if (!painting || !token) return;
@@ -63,8 +65,8 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
     }
   };
 
-  if (loading) return <StatePanel kind="loading" title="正在展开作品详情" />;
-  if (error && !painting) return <StatePanel kind="error" title="作品详情加载失败" description={error} actionLabel="返回画廊" actionHref="/gallery" />;
+  if (loading) return <><Link className="text-button" href="/gallery">返回画廊</Link><LoadingSection label="正在展开作品详情" onRetry={() => setAttempt(value => value + 1)}><DetailSkeleton /></LoadingSection></>;
+  if (error && !painting) return <StatePanel kind="error" title="作品详情加载失败" description={error} actionLabel="重新读取作品" onAction={() => setAttempt(value => value + 1)} />;
   if (!painting) return <StatePanel kind="empty" title="作品不存在或当前不可用" actionLabel="返回画廊" actionHref="/gallery" />;
 
   const favorited = isFavorited(painting.paintingId, painting.favorited);

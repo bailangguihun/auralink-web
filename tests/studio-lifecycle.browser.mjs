@@ -215,7 +215,7 @@ try{
   await open(1);await page.locator('.workflow-painting-input input[type=file]').setInputFiles({name:'synthetic.png',mimeType:'image/png',buffer:png});
   await page.getByText('当前音乐服务尚不支持上传国画，请从画廊选择。',{exact:true}).waitFor();assert(await execute().isDisabled());record.checks.failClosedOlderCore=true;
  },{legacyMusic:true});
- await scenario('capability-failure-is-distinct-from-empty-history',async({page,record})=>{await page.getByRole('heading',{name:'工作流暂时无法显示'}).waitFor();record.checks.explicitCapabilityFailure=true;},{capStatus:503});
+ await scenario('capability-failure-is-distinct-from-empty-history',async({page,record})=>{await page.getByRole('heading',{name:'创作能力暂时无法确认'}).waitFor();record.checks.explicitCapabilityFailure=true;},{capStatus:503});
  for(const width of [1440,390])await scenario(`layout-${width}`,async({page,record,open,history,choose,node})=>{
   await open(1);await history(11);await choose(90);const range=page.locator('input[type=range]');await range.focus();await page.keyboard.press('ArrowRight');assert.equal(await range.inputValue(),'11');assert.equal(await node().locator('img').count(),0);
   const size=await page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth,body:document.body.scrollWidth}));assert(size.document<=size.viewport+1,JSON.stringify(size));record.checks={size,keyboardDuration:true,historySeparate:true};

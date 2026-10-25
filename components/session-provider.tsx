@@ -22,6 +22,7 @@ type SessionContextValue = {
   status: SessionStatus;
   token: string | null;
   user: UserProfile | null;
+  profileVerified: boolean;
   establish: (auth: AuthResponse) => void;
   signOut: () => void;
   restore: () => Promise<void>;
@@ -47,14 +48,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<SessionStatus>("loading");
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [profileVerified, setProfileVerified] = useState(false);
+  const restoreController = useRef<AbortController | null>(null);
   const identities = useRef(new SessionIdentityTracker());
   const [sessionIdentity, setSessionIdentity] = useState(identities.current.capture());
 
   const signOut = useCallback(() => {
+    restoreController.current?.abort();
     setSessionIdentity(identities.current.replace(null));
     window.localStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setUser(null);
+    setProfileVerified(false);
     setStatus("anonymous");
   }, []);
 
@@ -70,11 +75,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [signOut]);
 
   const restore = useCallback(async () => {
+    restoreController.current?.abort();
+    const controller = new AbortController(); restoreController.current = controller;
     const storedToken = window.localStorage.getItem(TOKEN_KEY);
     if (!storedToken) {
+      restoreController.current?.abort();
       setSessionIdentity(identities.current.replace(null));
       setToken(null);
       setUser(null);
+      setProfileVerified(false);
       setStatus("anonymous");
       return;
     }
@@ -83,32 +92,39 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setSessionIdentity(requestIdentity);
     setToken(storedToken);
     setStatus("loading");
+    setUser(null);
+    setProfileVerified(false);
     try {
-      const profile = await api.profile(storedToken);
-      if (!identities.current.matches(requestIdentity)) return;
+      const profile = await api.profile(storedToken, controller.signal);
+      if (controller.signal.aborted || !identities.current.matches(requestIdentity)) return;
       setUser(profile);
+      setProfileVerified(true);
       setStatus("authenticated");
     } catch (error) {
-      if (!identities.current.matches(requestIdentity)) return;
+      if (controller.signal.aborted || !identities.current.matches(requestIdentity)) return;
       if (error instanceof ApiError && error.kind === "unauthorized") {
         signOutIfCurrent(requestIdentity);
         return;
       }
       setUser(null);
+      setProfileVerified(false);
       setStatus("error");
     }
   }, [signOutIfCurrent]);
 
   const establish = useCallback((auth: AuthResponse) => {
+    restoreController.current?.abort();
     setSessionIdentity(identities.current.replace(auth.token));
     window.localStorage.setItem(TOKEN_KEY, auth.token);
     setToken(auth.token);
     setUser(profileFromAuth(auth));
+    setProfileVerified(false);
     setStatus("authenticated");
   }, []);
 
   useEffect(() => {
     void restore();
+    return () => restoreController.current?.abort();
   }, [restore]);
 
   useEffect(() => {
@@ -120,8 +136,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [restore]);
 
   const value = useMemo(
-    () => ({ status, token, user, establish, signOut, restore, sessionIdentity, isCurrentSession, signOutIfCurrent }),
-    [establish, isCurrentSession, restore, sessionIdentity, signOut, signOutIfCurrent, status, token, user],
+    () => ({ status, token, user, profileVerified, establish, signOut, restore, sessionIdentity, isCurrentSession, signOutIfCurrent }),
+    [establish, isCurrentSession, restore, sessionIdentity, signOut, signOutIfCurrent, status, token, user, profileVerified],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { PendingIndicator } from "@/components/loading";
 import { HeartIcon } from "@/components/icons";
 import { MediaImage } from "@/components/media-image";
 import type { PaintingSummary } from "@/lib/types";
@@ -30,9 +31,10 @@ export function PaintingCard({ painting, authenticated, favoriteBusy, onFavorite
             aria-label={painting.favorited ? `取消收藏${painting.title || "画作"}` : `收藏${painting.title || "画作"}`}
             aria-pressed={painting.favorited}
             disabled={favoriteBusy}
+            aria-busy={favoriteBusy}
             onClick={() => onFavorite(painting)}
           >
-            <HeartIcon filled={painting.favorited} />
+            {favoriteBusy ? <PendingIndicator /> : <HeartIcon filled={painting.favorited} />}
           </button>
         ) : (
           <Link className="favorite-button" href={`/login?next=${encodeURIComponent(detailPath)}`} aria-label="登录后收藏"><HeartIcon /></Link>

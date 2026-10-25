@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from '@/components/session-provider';
+import { LoadingSection, LoadingStatus, SkeletonRows, PendingIndicator } from '@/components/loading';
+import { AssistantLoading, ConversationLoading } from './assistant-loading';
 import { StatePanel } from '@/components/state-panel';
 import { ApiError, isAbortError } from '@/lib/api';
 import { assistantPage, assistantRequest, exportAssistant, OperationLedger } from '@/lib/assistant-api';
@@ -23,25 +25,45 @@ const empty = <T,>(): Page<T> => ({ items: [], nextCursor: null, hasMore: false 
 type Access = ReturnType<typeof useAssistantAccess>;
 function usePage<T>(path: string | null, access: Access, id: (row: T) => string, revision = 0, prepend = false, keepItems = false, reportErrors = true) {
   const [retry, setRetry] = useState(0);
-  const [page, setPage] = useState<Page<T>>(empty); const [loading, setLoading] = useState(false); const [error, setError] = useState('');
+  const [snapshot, setSnapshot] = useState<{ path: string | null; page: Page<T> }>({ path: null, page: empty() });
+  const [loading, setLoading] = useState(Boolean(path)); const [error, setError] = useState('');
   const epoch = useRef(0); const idRef = useRef(id); idRef.current = id;
+  const readController = useRef<AbortController | null>(null);
   const { request, report } = access;
+  const page = snapshot.path === path ? snapshot.page : empty<T>();
   useEffect(() => {
-    const current = ++epoch.current; if (!keepItems) setPage(empty()); setError(''); if (!path) return;
-    setLoading(true);
-    void request((token, signal) => assistantPage<T>(path, token, signal)).then(value => { if (current === epoch.current) setPage(value); }).catch(error => { if (current === epoch.current && !isAbortError(error)) { setError(error instanceof Error ? error.message : '读取失败'); if (reportErrors) report(error); } }).finally(() => { if (current === epoch.current) setLoading(false); });
-    return () => { epoch.current = current + 1; };
-  }, [path, revision, request, report, keepItems, retry, reportErrors]);
+    const current = ++epoch.current; const controller = new AbortController(); readController.current = controller;
+    setSnapshot(old => old.path === path ? old : { path, page: empty() }); setError(''); setLoading(Boolean(path));
+    if (path) void request((token, signal) => assistantPage<T>(path, token, signal), controller.signal).then(value => {
+      if (current === epoch.current) setSnapshot(old => {
+        // Messages are append-only in this branch. Keep explicitly paged older
+        // messages and their cursor when refreshing the latest page.
+        const retainOlder = prepend && old.path === path && old.page.items.length > value.items.length;
+        return { path, page: retainOlder ? { ...old.page, items: mergeItems(old.page.items, value.items, idRef.current) } : value };
+      });
+    }).catch(error => {
+      if (current !== epoch.current || isAbortError(error)) return;
+      if (error instanceof ApiError && [401, 403, 404, 410].includes(error.status)) setSnapshot({ path, page: empty() });
+      setError(error instanceof Error ? error.message : '读取失败'); if (reportErrors) report(error);
+    }).finally(() => { if (current === epoch.current) setLoading(false); });
+    return () => { epoch.current = current + 1; controller.abort(); };
+  }, [path, revision, request, report, keepItems, retry, reportErrors, prepend]);
   const more = async () => {
     if (!path || loading || !page.hasMore || !page.nextCursor) return; const current = epoch.current; setLoading(true); setError('');
-    try { const value = await request((token, signal) => assistantPage<T>(path, token, signal, page.nextCursor)); if (current === epoch.current) setPage(old => ({ ...value, items: prepend ? mergeItems(value.items, old.items, idRef.current) : mergeItems(old.items, value.items, idRef.current) })); }
-    catch (error) { if (current === epoch.current && !isAbortError(error)) { setError(error instanceof Error ? error.message : '读取失败'); if (reportErrors) report(error); } }
-    finally { if (current === epoch.current) setLoading(false); }
+    try {
+      const value = await request((token, signal) => assistantPage<T>(path, token, signal, page.nextCursor), readController.current?.signal);
+      if (current === epoch.current) setSnapshot(old => ({ path, page: { ...value, items: prepend ? mergeItems(value.items, old.page.items, idRef.current) : mergeItems(old.page.items, value.items, idRef.current) } }));
+    } catch (error) {
+      if (current === epoch.current && !isAbortError(error)) {
+        if (error instanceof ApiError && [401, 403, 404, 410].includes(error.status)) setSnapshot({ path, page: empty() });
+        setError(error instanceof Error ? error.message : '读取失败'); if (reportErrors) report(error);
+      }
+    } finally { if (current === epoch.current) setLoading(false); }
   };
-  return { ...page, loading, error, more, retry: () => setRetry(value => value + 1) };
+  return { ...page, loading: loading || (!!path && snapshot.path !== path), error: snapshot.path === path ? error : '', more, retry: () => setRetry(value => value + 1) };
 }
 function LoadMore({ page, label }: { page: { hasMore: boolean; loading: boolean; error?: string; more: () => Promise<void>; retry?: () => void }; label: string }) {
-  return <>{page.error ? <p role="alert" className={styles.error}>{page.error}{!page.hasMore && page.retry ? <button type="button" className={styles.small} onClick={page.retry}>重新读取</button> : null}</p> : null}{page.hasMore ? <button type="button" className={styles.small} disabled={page.loading} onClick={() => void page.more()}>{page.loading ? '正在读取…' : label}</button> : null}</>;
+  return <>{page.error ? <p role="alert" className={styles.error}>{page.error}{!page.hasMore && page.retry ? <button type="button" className={styles.small} onClick={page.retry}>重新读取</button> : null}</p> : null}{page.hasMore ? <button type="button" className={styles.small} disabled={page.loading} onClick={() => void page.more()}>{page.loading ? <><PendingIndicator /> 正在读取…</> : label}</button> : null}</>;
 }
 function EmptyConversation({ action }: { action?: () => void }) {
   return <div className={styles.emptyConversation}><span className={styles.seal} aria-hidden>画</span><span className={styles.eyebrow}>ARTLIVE · 国画助手</span><h1>落笔之前，一起想想</h1><p>从一幅画、一个念头开始。<br />聊笔墨、构图与设色，让灵感慢慢成形。</p>{action ? <button className="button button-primary" onClick={action}>开始新的对话</button> : <p className={styles.meta}>写下画题，或选用平台作品、附上自己的图片。</p>}<small>对话与图片归当前账号所有，登录后可继续查看。</small></div>;
@@ -57,6 +79,8 @@ export function AssistantScreen() {
 }
 function AssistantAccount() {
   const { user } = useSession(); const [error, setError] = useState(''); const access = useAssistantAccess(setError); const [status, setStatus] = useState<AssistantStatus | null>(null); const [registry, setRegistry] = useState<Registry | null>(null); const [unavailable, setUnavailable] = useState(false); const [revision, setRevision] = useState(0); const [selected, setSelected] = useState<string | null>(null); const [dialog, setDialog] = useState(false); const [title, setTitle] = useState('新的国画对话'); const [busy, setBusy] = useState(false); const opBusy = useRef(false);
+  const [generationChecking, setGenerationChecking] = useState(true);
+  const [generationReady, setGenerationReady] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -72,14 +96,14 @@ function AssistantAccount() {
     const id = new URLSearchParams(window.location.search).get('session'); if (id && /^[0-9a-f-]{36}$/i.test(id)) setSelected(id);
   }, []);
   useEffect(() => {
-    let alive = true; setUnavailable(false); setError('');
+    let alive = true; setUnavailable(false); setError(''); setGenerationReady(false); setGenerationChecking(true);
     void request((token, signal) => assistantRequest<AssistantStatus>('/status', token, signal)).then(async value => {
       if (!alive) return; setStatus(value);
       if (value.executionAvailable) {
-        try { const models = await request((token, signal) => assistantRequest<Registry>('/models', token, signal)); if (alive) setRegistry(models); }
+        try { const models = await request((token, signal) => assistantRequest<Registry>('/models', token, signal)); if (alive) { setRegistry(models); setGenerationReady(true); } }
         catch (error) { if (alive) report(error); }
       }
-    }).catch(error => { if (alive) { setUnavailable(true); report(error); } });
+    }).catch(error => { if (alive) { setUnavailable(true); report(error); } }).finally(() => { if (alive) setGenerationChecking(false); });
     return () => { alive = false; };
   }, [request, report, revision]);
   useEffect(() => {
@@ -100,23 +124,24 @@ function AssistantAccount() {
   };
   const newSession = () => { setSessionsOpen(false); setTitle('新的国画对话'); setDialog(true); };
   const sessionList = <><div className={styles.sidebarHeading}><span className={styles.eyebrow}>ARTLIVE ASSISTANT</span><h2>国画助手</h2></div><button className={styles.newSession} onClick={newSession}><span aria-hidden>＋</span> 新建对话</button><p className={styles.meta}>我的对话</p>
-    {sessions.loading && !sessions.items.length ? <p role="status">正在读取会话…</p> : !sessions.error && !sessions.items.length ? <p>还没有对话，从一次提问开始。</p> : null}
+    {sessions.loading && !sessions.items.length ? <LoadingSection label="正在读取会话" onRetry={sessions.retry}><SkeletonRows lines={5} /></LoadingSection> : !sessions.error && !sessions.items.length ? <p>还没有对话，从一次提问开始。</p> : null}
     <ul>{sessions.items.map(session => <li key={session.id}><button className={styles.session} data-testid="assistant-session" aria-current={selected === session.id} onClick={() => select(session.id)}><strong>{session.title}</strong><time>{assistantDate(session.createdAt).toLocaleDateString('zh-CN')}</time></button></li>)}</ul><LoadMore page={sessions} label="更多会话" /><p className={styles.sidebarNote}>私有会话 · 随账号保存</p></>;
   return <div ref={pageRef} className={styles.page}>
     {process.env.NEXT_PUBLIC_ASSISTANT_SIMULATED === 'true' ? <span className={styles.previewBadge}>隔离预览 · 模拟模型与资料</span> : null}
     {error ? <div className={`${styles.notice} ${styles.error}`} role="alert">{error}<button className={styles.small} onClick={() => { setError(''); setRevision(value => value + 1); }}>刷新记录</button></div> : null}
-    {!status && !unavailable ? <StatePanel kind="loading" title="正在连接助手" /> : unavailable ? <StatePanel kind="unavailable" title="助手暂不可用" description="其他 ArtLIVE 页面仍可使用。" actionLabel="重新连接" onAction={() => setRevision(value => value + 1)} /> : !status?.enabled ? <StatePanel kind="unavailable" title="助手尚未启用" description="当前服务未开放助手；不会发起模型请求。" /> : <>
+    {!status && !unavailable ? <AssistantLoading embedded /> : unavailable && !status ? <StatePanel kind="unavailable" title="助手暂不可用" description="其他 ArtLIVE 页面仍可使用。" actionLabel="重新连接" onAction={() => setRevision(value => value + 1)} /> : !status?.enabled ? <StatePanel kind="unavailable" title="助手尚未启用" description="当前服务未开放助手；不会发起模型请求。" /> : <>
+      {status.executionAvailable && !generationReady ? <div className={styles.notice}>{generationChecking ? <LoadingStatus label="正在确认生成能力，已保存内容仍可浏览" /> : <><span>生成能力未确认，暂不能发送。</span><button className={styles.small} onClick={() => setRevision(value => value + 1)}>重新核对能力</button></>}</div> : null}
       {!status.executionAvailable ? <p className={styles.notice}>当前为历史模式：可以浏览、导出与管理已保存记录；新对话生成暂不可用。</p> : !assistantGenerationAvailable(status) ? <p className={styles.notice} role="status">{assistantGenerationNotice(status.generationState)}<button className={styles.small} onClick={() => setRevision(value => value + 1)}>刷新生成状态</button></p> : null}
       <div className={styles.layout}><aside className={styles.sidebar} aria-label="会话列表">{sessionList}</aside><main className={styles.main}>
         <div className={styles.mobileSessions}><button className={styles.small} onClick={() => setSessionsOpen(true)} aria-haspopup="dialog">☰ 我的对话</button><span>国画助手</span><button className={styles.small} onClick={newSession} aria-label="新建会话">＋</button></div>
-        {selected ? <SessionWorkspace key={selected} id={selected} status={status} registry={registry} ledger={ledger} onChanged={() => setRevision(value => value + 1)} onDeleted={() => { select(null); setRevision(value => value + 1); }} /> : <EmptyConversation action={newSession} />}
+        {selected ? <SessionWorkspace key={selected} id={selected} status={status} registry={registry} generationReady={generationReady} ledger={ledger} onChanged={() => setRevision(value => value + 1)} onDeleted={() => { select(null); setRevision(value => value + 1); }} /> : <EmptyConversation action={newSession} />}
       </main></div>
       {sessionsOpen ? <AssistantPanel title="我的对话" eyebrow="SESSIONS" close={() => setSessionsOpen(false)}><div className={styles.sessionDrawer}>{sessionList}</div></AssistantPanel> : null}
     </>}
     {dialog ? <Dialog title="新建会话" close={() => setDialog(false)}><form onSubmit={event => void create(event)}>{error ? <p role="alert" className={styles.error}>{error}</p> : null}<label>会话名称<input autoFocus value={title} maxLength={160} required onChange={event => setTitle(event.target.value)} /></label><footer><button type="button" className="button" onClick={() => setDialog(false)}>返回</button><button className="button button-primary" disabled={busy}>创建会话</button></footer></form></Dialog> : null}
   </div>;
 }
-function SessionWorkspace({ id, status, registry, ledger, onChanged, onDeleted }: { id: string; status: AssistantStatus; registry: Registry | null; ledger: OperationLedger; onChanged: () => void; onDeleted: () => void }) {
+function SessionWorkspace({ id, status, registry, generationReady, ledger, onChanged, onDeleted }: { id: string; status: AssistantStatus; registry: Registry | null; generationReady: boolean; ledger: OperationLedger; onChanged: () => void; onDeleted: () => void }) {
   const [error, setError] = useState(''); const access = useAssistantAccess(setError); const { request, report } = access;
   const deletedRef = useRef(onDeleted); deletedRef.current = onDeleted;
   const [session, setSession] = useState<AssistantSession | null>(null); const [branchId, setBranchId] = useState<string | null>(null); const [revision, setRevision] = useState(0); const [busy, setBusy] = useState(false); const opBusy = useRef(false);
@@ -126,7 +151,7 @@ function SessionWorkspace({ id, status, registry, ledger, onChanged, onDeleted }
   const [dialog, setDialog] = useState<'rename' | 'delete' | null>(null); const [title, setTitle] = useState(''); const [exportHistory, setExportHistory] = useState(false);
   const branches = usePage<Branch>(`/sessions/${enc(id)}/branches/page`, access, row => row.id, revision);
   const reload = useCallback(() => setRevision(value => value + 1), []);
-  useEffect(() => { let alive = true; void request((token, signal) => assistantRequest<AssistantSession>(`/sessions/${enc(id)}`, token, signal)).then(value => { if (alive) { setSession(value); setBranchId(current => current || value.activeBranchId); } }).catch(error => { if (alive) { if (error instanceof ApiError && [404, 410].includes(error.status)) deletedRef.current(); else report(error); } }); return () => { alive = false; }; }, [id, revision, request, report]);
+  useEffect(() => { let alive = true; void request((token, signal) => assistantRequest<AssistantSession>(`/sessions/${enc(id)}`, token, signal)).then(value => { if (alive) { setSession(value); setBranchId(current => current || value.activeBranchId); } }).catch(error => { if (alive) { if (error instanceof ApiError && [403, 404, 410].includes(error.status)) deletedRef.current(); else report(error); } }); return () => { alive = false; }; }, [id, revision, request, report]);
   const update = async (payload: object) => { if (!session) return; const current = await request((token, signal) => assistantRequest<AssistantSession>(`/sessions/${enc(id)}`, token, signal)); const result = await request((token, signal) => assistantRequest<AssistantSession>(`/sessions/${enc(id)}`, token, signal, 'PATCH', { expectedVersion: current.version, ...payload })); setSession(result); onChanged(); };
   const switchBranch = async (next: string) => { if (opBusy.current) return; opBusy.current = true; setBusy(true); try { await update({ activeBranchId: next }); setBranchId(next); reload(); } catch (error) { report(error); } finally { opBusy.current = false; setBusy(false); } };
   const mutate = async (event: React.FormEvent) => {
@@ -138,16 +163,16 @@ function SessionWorkspace({ id, status, registry, ledger, onChanged, onDeleted }
   return <>
     {error ? <div role="alert" className={`${styles.notice} ${styles.error}`}>{error}<button className={styles.small} onClick={() => { setError(''); reload(); }}>刷新会话</button></div> : null}
     {session ? <><header className={styles.conversationHeader}><div><span className={styles.eyebrow}>对话 · 当前分支</span><h2>{session.title}</h2></div><button className={styles.small} aria-haspopup="dialog" onClick={() => setManagementOpen(true)}>会话与分支</button></header>
-      {branchId ? <BranchWorkspace key={branchId} id={id} branchId={branchId} status={status} registry={registry} session={session} ledger={ledger} revision={revision} reload={reload} onBranch={next => { setBranchId(next); reload(); onChanged(); }} onAuto={async value => { await update({ summaryAutoEnabled: value }); reload(); }} onRevoked={() => deletedRef.current()} /> : null}
+      {branchId ? <BranchWorkspace key={branchId} id={id} branchId={branchId} status={status} registry={registry} generationReady={generationReady} session={session} ledger={ledger} revision={revision} reload={reload} onBranch={next => { setBranchId(next); reload(); onChanged(); }} onAuto={async value => { await update({ summaryAutoEnabled: value }); reload(); }} onRevoked={() => deletedRef.current()} /> : null}
       {managementOpen ? <AssistantPanel title="会话与分支" eyebrow="CONVERSATION" close={() => setManagementOpen(false)}><div className={styles.inline}><button className="button" onClick={() => { setTitle(session.title); setDialog('rename'); }}>重命名</button><button className="button" onClick={reload}>刷新会话</button><button className="button" onClick={() => setDialog('delete')}>删除会话</button></div>
       <div className={styles.tools}><label className={styles.inline}>分支<select aria-label="分支" value={branchId || session.activeBranchId} disabled={busy} onChange={event => void switchBranch(event.target.value)}>{!branches.items.some(branch => branch.id === branchId) && branchId ? <option value={branchId}>当前分支</option> : null}{branches.items.map((branch, index) => <option key={branch.id} value={branch.id}>{branch.parentBranchId ? `编辑分支 ${index + 1}` : '原始分支'} · {branch.id.slice(0, 6)}</option>)}</select></label><LoadMore page={branches} label="更多分支" /><span className={styles.meta}>切换只读取历史，不发起生成。</span></div>
       <details className={`glass-panel ${styles.tools}`}><summary>导出与保存说明</summary><p>对话和原图保存在当前账号的私有记录中。默认导出当前分支；阶段标签是规则或用户分类，不是对实际作画行为的证明。导出文件不包含登录令牌或图片字节。</p><label className={styles.inline}><input type="checkbox" checked={exportHistory} onChange={event => setExportHistory(event.target.checked)} />包含历史分支</label><div className={styles.inline}><button className="button" onClick={() => void download('json')}>JSON导出</button><button className="button" onClick={() => void download('csv')}>CSV导出</button></div><p className={styles.meta}>超出服务端导出上限时会明确拒绝，不会悄悄截断。主动删除立即撤销应用访问；备份与上游已处理内容不承诺同步抹除。</p></details>
       </AssistantPanel> : null}
-    </> : <StatePanel kind="loading" title="正在读取会话" />}
+    </> : error ? null : <ConversationLoading />}
     {dialog ? <Dialog title={dialog === 'delete' ? '删除会话' : '重命名会话'} close={() => setDialog(null)}><form onSubmit={event => void mutate(event)}>{error ? <p role="alert" className={styles.error}>{error}</p> : null}{dialog === 'delete' ? <p>删除「{session?.title}」后，对话、分支及私有图片立即不可访问。此操作不能从页面撤销。</p> : <label>会话名称<input autoFocus value={title} maxLength={160} required onChange={event => setTitle(event.target.value)} /></label>}<footer><button className="button" type="button" onClick={() => setDialog(null)}>返回</button><button className="button button-primary" disabled={busy}>{dialog === 'delete' ? '确认删除' : '保存名称'}</button></footer></form></Dialog> : null}
   </>;
 }
-function BranchWorkspace({ id, branchId, status, registry, session, ledger, revision, reload, onBranch, onAuto, onRevoked }: { id: string; branchId: string; status: AssistantStatus; registry: Registry | null; session: AssistantSession; ledger: OperationLedger; revision: number; reload: () => void; onBranch: (id: string) => void; onAuto: (value: boolean) => Promise<void>; onRevoked: () => void }) {
+function BranchWorkspace({ id, branchId, status, registry, generationReady, session, ledger, revision, reload, onBranch, onAuto, onRevoked }: { id: string; branchId: string; status: AssistantStatus; registry: Registry | null; generationReady: boolean; session: AssistantSession; ledger: OperationLedger; revision: number; reload: () => void; onBranch: (id: string) => void; onAuto: (value: boolean) => Promise<void>; onRevoked: () => void }) {
   const [error, setError] = useState(''); const access = useAssistantAccess(setError); const { request, report, token, sessionIdentity, isCurrentSession, signOutIfCurrent } = access;
   const revokedRef = useRef(onRevoked); revokedRef.current = onRevoked;
   const branchRef = useRef(onBranch); branchRef.current = onBranch;
@@ -171,8 +196,8 @@ function BranchWorkspace({ id, branchId, status, registry, session, ledger, revi
   const timeline = usePage<Timeline>(status.executionAvailable && timelineOpen ? `/sessions/${enc(id)}/timeline/page?branchId=${enc(branchId)}` : null, access, row => row.messageId, revision, true);
   const speech = useBrowserSpeech(value => setText(current => `${current}${current ? '\n' : ''}${value}`), setError);
   const selectedModel = registry?.models.find(item => item.id === model);
-  const generationAvailable = assistantGenerationAvailable(status);
-  const requireGeneration = () => { if (!generationAvailable) throw new Error(assistantGenerationNotice(status.generationState)); };
+  const generationAvailable = generationReady && assistantGenerationAvailable(status);
+  const requireGeneration = () => { if (!generationAvailable) throw new Error(generationReady ? assistantGenerationNotice(status.generationState) : '正在确认生成能力，请稍候。'); };
   useEffect(() => { if (!model && registry?.models.length) setModel(registry.models.find(item => item.enabled && item.configured && item.capabilities.streaming)?.id || ''); }, [registry, model]);
   useEffect(() => { let alive = true; void request((token, signal) => assistantRequest<Branch>(`/sessions/${enc(id)}/branches/${enc(branchId)}`, token, signal)).then(value => { if (alive) setBranch(value); }).catch(error => { if (alive) report(error); }); return () => { alive = false; }; }, [id, branchId, revision, request, report]);
   useEffect(() => {
@@ -283,6 +308,7 @@ function BranchWorkspace({ id, branchId, status, registry, session, ledger, revi
       <button className={styles.pill} aria-haspopup="dialog" onClick={() => setSummaryOpen(true)}>☷ <span>会话纪要</span></button>
       <button className={styles.pill} aria-haspopup="dialog" onClick={() => setPanel('history')}>↳ <span>输入历史</span></button>
       <button className={styles.pill} aria-haspopup="dialog" onClick={() => showSources()}>▤ <span>资料来源</span></button>
+
       {!status.executionAvailable ? <button className={styles.pill} onClick={() => setPanel('tools')}>图片存储与说明</button> : null}
     </nav>
     {error ? <div role="alert" className={`${styles.notice} ${styles.error}`}>{error}<button className={styles.small} onClick={() => { setError(''); reload(); }}>重新读取</button></div> : null}
@@ -290,7 +316,7 @@ function BranchWorkspace({ id, branchId, status, registry, session, ledger, revi
     <section ref={messageScroll} tabIndex={0} aria-label="对话历史" className={styles.messages} onScroll={event => { const area = event.currentTarget; followBottom.current = area.scrollHeight - area.scrollTop - area.clientHeight < 80; priorScroll.current = { ...priorScroll.current, height: area.scrollHeight, top: area.scrollTop }; }}>
       <div className={styles.messageColumn}>
       <LoadMore page={messages} label="加载更早消息" />
-      {messages.error ? <StatePanel compact kind="error" title="历史暂未读取成功" description="这不表示会话为空，已保存的消息和图片尚未核对。" actionLabel="重新读取历史" onAction={messages.retry} /> : messages.loading && !messages.items.length ? <p role="status">正在读取历史…</p> : !messages.items.length ? <EmptyConversation /> : null}
+      {messages.error ? <StatePanel compact kind="error" title="历史暂未读取成功" description="这不表示会话为空，已保存的消息和图片尚未核对。" actionLabel="重新读取历史" onAction={messages.retry} /> : messages.loading && !messages.items.length ? <LoadingSection label="正在读取历史" onRetry={messages.retry}><SkeletonRows lines={5} /></LoadingSection> : !messages.items.length ? <EmptyConversation /> : null}
       {messages.items.map(message => <article className={styles.message} data-role={message.role} data-testid="assistant-message" data-message-id={message.id} key={message.id}>
         <header><strong>{message.role === 'USER' ? '我' : '国画助手'}</strong><span>{stateLabel(message.state)} · {assistantDate(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span></header>
         {message.role === 'ASSISTANT' ? <AssistantMarkdown>{message.body}</AssistantMarkdown> : <p className={styles.body}>{message.body}</p>}
@@ -302,7 +328,7 @@ function BranchWorkspace({ id, branchId, status, registry, session, ledger, revi
       </div>
     </section>
     {status.executionAvailable ? <form className={styles.composer} onSubmit={event => void submit(event)} aria-label="发送消息">
-      <div className={styles.composerStatus} aria-label="附件与发送状态">      {draft.loading ? <p role="status">正在核对待发送图片…</p> : null}
+      <div className={styles.composerStatus} aria-label="附件与发送状态">{!generationReady ? <span className={styles.meta}>生成能力尚未确认，草稿保留。</span> : null}      {draft.loading ? <LoadingStatus label="正在核对待发送图片" /> : null}
       {draft.error ? <p role="alert" className={styles.error}>{draft.error}<button type="button" className={styles.small} onClick={() => void draft.refresh()}>核对上传状态</button></p> : null}
       {draft.notice ? <p role="status">{draft.notice}</p> : null}
       {draft.pending.map(item => <p key={item.scope} role="status">{item.state === 'uploading' ? '上次上传仍未完成。可核对状态，或明确移除后重新选择图片。' : '上次图片尚未获服务器确认。请重新选择原文件；若文件从未被接受，刷新后无法恢复本地字节。'}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void draft.refresh()}>核对上传状态</button>{item.id ? <button type="button" className={styles.small} disabled={busy} onClick={() => void act(() => draft.remove(item.id!, item.scope))}>移除未完成上传</button> : null}</p>)}
@@ -318,10 +344,10 @@ function BranchWorkspace({ id, branchId, status, registry, session, ledger, revi
       {running ? <button type="button" className={styles.sendButton} disabled={busy} onClick={() => void cancel(pendingChat || running)} aria-label="取消生成">停止</button> : <button type="submit" className={styles.sendButton} disabled={busy || !generationAvailable || !model || !branch || messages.loading || !!messages.error || draft.loading || !!draft.error || draft.hasMore || attachments.length > 4 || (!text.trim() && !attachments.length) || (!!attachments.length && !selectedModel?.capabilities.images)} aria-label="发送消息">发送 <span aria-hidden>↑</span></button>}
       </div>
       <div className={styles.composerActions}>
-        <AssistantModelPicker registry={registry} value={model} onChange={setModel} disabled={busy} />
+        <AssistantModelPicker registry={registry} value={model} onChange={setModel} disabled={busy || !generationReady} />
         <div className={styles.inputTools}>
           <button type="button" className={styles.small} onClick={() => setPanel('artworks')} aria-haspopup="dialog">平台作品</button>
-          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png" disabled={busy || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
+          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png" disabled={busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
           {speech.supported ? <button type="button" className={styles.small} onClick={speech.listen}>{speech.listening ? '停止语音' : '语音输入'}</button> : null}
           {speech.speaking ? <button type="button" className={styles.small} onClick={speech.stop}>停止朗读</button> : null}
           <button type="button" className={styles.small} onClick={() => setPanel('tools')} aria-haspopup="dialog" aria-label="更多工具与恢复">•••</button>
@@ -329,11 +355,11 @@ function BranchWorkspace({ id, branchId, status, registry, session, ledger, revi
       </div>
     </form> : null}
     {summaryOpen ? <AssistantPanel title="会话纪要" eyebrow="CONVERSATION SUMMARY" close={() => setSummaryOpen(false)} footer={status.executionAvailable ? <><button className="button" disabled={busy || !!running || !generationAvailable} onClick={() => void summary()}>生成新纪要</button><button className="button" disabled={!summaries.items.some(item => item.body)} onClick={() => { void Promise.resolve().then(() => navigator.clipboard.writeText(summaries.items.map(item => item.body).filter(Boolean).join('\n\n---\n\n'))).then(() => setCopyStatus('已复制载入的纪要。')).catch(() => setCopyStatus('复制失败，请选择纪要文字手动复制。')); }}>复制已载入纪要</button><small>生成新纪要会调用模型；自动摘要默认关闭。</small></> : undefined}>
-      {copyStatus ? <p role="status">{copyStatus}</p> : null}{error ? <p className={styles.error} role="alert">{error}</p> : null}{status.executionAvailable ? <><p className={styles.meta}>这里是当前分支已保存的纪要。打开面板只读取记录，不会调用模型。</p><div className={styles.summaryRecords}>{summaries.items.map(item => <article key={item.id}><strong>{stateLabel(item.status)}{item.stale ? ' · 历史摘要（已过时）' : ''}</strong><AssistantMarkdown>{item.body || '暂无已保存摘要内容'}</AssistantMarkdown><span className={styles.meta}>模型 {item.model_id} · 摘要独立记录调用与用量</span></article>)}{!summaries.error && !summaries.loading && !summaries.items.length ? <p>当前分支暂无摘要。</p> : null}{summaries.loading ? <p role="status">正在读取已保存摘要…</p> : null}<LoadMore page={summaries} label="更多摘要" /></div><details className={styles.summaryPolicy}><summary>自动摘要与调用说明</summary><p>摘要继承本分支最近成功对话的模型。同一上下文会去重。</p><label className={styles.inline}><input type="checkbox" checked={session.summaryAutoEnabled} disabled={busy || !status.automaticSummaryAvailable || !generationAvailable} onChange={event => void act(() => onAuto(event.target.checked))} />自动摘要</label><p className={styles.meta}>{status.automaticSummaryAvailable ? `新增 ${status.summaryTurnThreshold} 轮、空闲 ${status.summaryIdleSeconds} 秒，每小时最多 ${status.maxSummaryPerHour} 次；仅此会话主动开启后生效。` : '服务器未开放自动摘要；会话设置不会绕过全局限制。'}</p></details></> : <p>当前为历史模式，摘要读取接口暂不可用；未发起生成。</p>}
+      {copyStatus ? <p role="status">{copyStatus}</p> : null}{error ? <p className={styles.error} role="alert">{error}</p> : null}{status.executionAvailable ? <><p className={styles.meta}>这里是当前分支已保存的纪要。打开面板只读取记录，不会调用模型。</p><div className={styles.summaryRecords}>{summaries.items.map(item => <article key={item.id}><strong>{stateLabel(item.status)}{item.stale ? ' · 历史摘要（已过时）' : ''}</strong><AssistantMarkdown>{item.body || '暂无已保存摘要内容'}</AssistantMarkdown><span className={styles.meta}>模型 {item.model_id} · 摘要独立记录调用与用量</span></article>)}{!summaries.error && !summaries.loading && !summaries.items.length ? <p>当前分支暂无摘要。</p> : null}{summaries.loading ? <LoadingSection label="正在读取已保存摘要" onRetry={summaries.retry}><SkeletonRows /></LoadingSection> : null}<LoadMore page={summaries} label="更多摘要" /></div><details className={styles.summaryPolicy}><summary>自动摘要与调用说明</summary><p>摘要继承本分支最近成功对话的模型。同一上下文会去重。</p><label className={styles.inline}><input type="checkbox" checked={session.summaryAutoEnabled} disabled={busy || !status.automaticSummaryAvailable || !generationAvailable} onChange={event => void act(() => onAuto(event.target.checked))} />自动摘要</label><p className={styles.meta}>{status.automaticSummaryAvailable ? `新增 ${status.summaryTurnThreshold} 轮、空闲 ${status.summaryIdleSeconds} 秒，每小时最多 ${status.maxSummaryPerHour} 次；仅此会话主动开启后生效。` : '服务器未开放自动摘要；会话设置不会绕过全局限制。'}</p></details></> : <p>当前为历史模式，摘要读取接口暂不可用；未发起生成。</p>}
     </AssistantPanel> : null}
     {panel === 'history' ? <AssistantPanel title="输入历史" eyebrow="INPUT HISTORY" close={() => setPanel(null)}>
       <p className={styles.meta}>当前分支 · 已载入 {messages.items.filter(message => message.role === 'USER').length} 条用户输入{messages.hasMore ? ' · 更早记录尚未载入' : ''}。编辑会保留原分支。</p>
-      {messages.loading ? <p role="status">正在读取历史…</p> : null}<LoadMore page={messages} label="加载更早输入记录" />
+      {messages.loading ? <LoadingSection label="正在读取历史" onRetry={messages.retry}><SkeletonRows lines={5} /></LoadingSection> : null}<LoadMore page={messages} label="加载更早输入记录" />
       {!messages.loading && !messages.error && !messages.items.some(message => message.role === 'USER') ? <p>已载入的记录中暂无用户输入。</p> : null}
       {messages.items.filter(message => message.role === 'USER').map(message => <article key={message.id} className={styles.historyCard} data-message-id={message.id}><time>{assistantDate(message.createdAt).toLocaleString('zh-CN')}</time><p className={styles.body}>{message.body || '图片输入'}</p>{message.attachmentIds.map(image => <PrivateAttachment key={image} id={image} />)}<button className={styles.small} onClick={() => { setPanel(null); requestAnimationFrame(() => { const node = document.querySelector(`[data-testid="assistant-message"][data-message-id="${message.id}"]`) as HTMLElement | null; if (node) { node.tabIndex = -1; node.focus({ preventScroll: true }); node.scrollIntoView({ block: 'center' }); } }); }}>定位原消息</button></article>)}
     </AssistantPanel> : null}
@@ -376,7 +402,7 @@ function SourceDetails({ message, access }: { message: Message; access: Access }
     return () => { alive = false; };
   }, [message.runId, message.sessionId, request, revision]);
   if (error) return <p role="alert">{error}<button className={styles.small} onClick={() => setRevision(value => value + 1)}>重新读取本条来源</button></p>;
-  if (!data) return <p role="status">正在读取本条回复的来源…</p>;
+  if (!data) return <LoadingSection label="正在读取本条回复的来源" onRetry={() => setRevision(value => value + 1)}><SkeletonRows lines={5} /></LoadingSection>;
   return <div className={styles.sourceBody}><p className={styles.meta}>回复 {message.id}<br />执行 {data.run.id} · {data.run.modelKey}</p>
     {Object.entries(data.run.retrieval || {}).map(([source, result]) => <p className={styles.meta} key={source}>{source === 'artworks' ? '平台作品' : source === 'ragflow' ? 'RAG 文档' : source}：{retrievalLabel(result && typeof result === 'object' && 'state' in result ? result.state : result)}</p>)}
     {data.citations.length ? data.citations.map(citation => <CitationView key={citation.id} citation={citation} />) : <p>本次执行没有保存可追溯来源。模型的回答与编号不能替代来源证据。</p>}
@@ -387,7 +413,7 @@ function RunDetails({ id, known, access, choose, retry, disabled }: { id: string
   const [data, setData] = useState<{ run: Run; choices: Choice[] } | null>(null); const [error, setError] = useState(''); const [attempt, setAttempt] = useState(0); const { request, report } = access;
   useEffect(() => { let alive = true; void request(async (token, signal) => { const [run, choices] = await Promise.all([known ? Promise.resolve(known) : assistantRequest<Run>(`/runs/${enc(id)}`, token, signal), assistantRequest<Choice[]>(`/runs/${enc(id)}/choices`, token, signal)]); return { run, choices }; }).then(value => { if (alive) setData(value); }).catch(error => { if (alive && !isAbortError(error)) { setError('执行记录或选择卡未能读取。'); report(error); } }); return () => { alive = false; }; }, [id, known, request, report, attempt]);
   if (error) return <p>{error}<button className={styles.small} onClick={() => { setError(''); setAttempt(value => value + 1); }}>重新读取执行记录</button></p>;
-  if (!data) return <p className={styles.meta} role="status">正在读取执行记录…</p>;
+  if (!data) return <LoadingStatus label="正在读取执行记录" />;
   return <>
     <p className={styles.meta}>模型 {data.run.modelKey} · 尝试 {data.run.attempt}</p>
     {artworkRunFailureNotice(data.run.errorCode) ? <p className={styles.notice} role="alert">{artworkRunFailureNotice(data.run.errorCode)}</p> : null}

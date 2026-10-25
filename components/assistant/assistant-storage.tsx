@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { isAbortError } from '@/lib/api';
+import { LoadingStatus, SkeletonRows } from '@/components/loading';
+import { ApiError, isAbortError } from '@/lib/api';
 import { assistantRequest } from '@/lib/assistant-api';
 import { assistantBytes, assistantStorageNotice, type AssistantStorageUsage } from '@/lib/assistant-storage';
 import { useAssistantAccess } from './use-assistant-access';
@@ -14,14 +15,18 @@ export function AssistantStorage({ access, revision }: { access: ReturnType<type
   useEffect(() => {
     let alive = true; setLoading(true); setError('');
     void request((token, signal) => assistantRequest<AssistantStorageUsage>('/storage', token, signal)).then(value => { if (alive) setUsage(value); }).catch(failure => {
-      if (alive && !isAbortError(failure)) setError('暂未核对最新图片用量。已有记录仍可读取、下载、导出和删除；请重新读取用量。');
+      if (alive && !isAbortError(failure)) {
+        if (failure instanceof ApiError && [401, 403].includes(failure.status)) { setUsage(null); setError('图片用量访问未获确认，已清除旧用量。请重新读取。'); }
+        else setError('暂未核对最新图片用量。已有记录仍可读取、下载、导出和删除；请重新读取用量。');
+      }
     }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [request, revision, refresh]);
   const notice = usage ? assistantStorageNotice(usage) : null;
   return <section className={`glass-panel ${styles.tools}`} aria-label="图片存储用量" data-testid="assistant-storage">
-    <div className={styles.inline}><strong>图片存储</strong><button type="button" className={styles.small} disabled={loading} onClick={() => setRefresh(value => value + 1)}>刷新用量</button>{loading ? <span role="status">正在核对…</span> : null}</div>
+    <div className={styles.inline}><strong>图片存储</strong><button type="button" className={styles.small} disabled={loading} onClick={() => setRefresh(value => value + 1)}>刷新用量</button>{loading ? <LoadingStatus label={usage ? "正在核对，暂保留上次用量" : "正在核对图片用量"} onRetry={() => setRefresh(value => value + 1)} /> : null}</div>
     {error ? <p role="alert">{error}</p> : null}
+    {loading && !usage ? <SkeletonRows /> : null}
     {usage ? <>
       <p>{error ? '上次读取：' : ''}已占配额 <strong>{assistantBytes(usage.chargedBytes)}</strong>{usage.quotaBytes !== null ? <> / {assistantBytes(usage.quotaBytes)}；可用 {assistantBytes(usage.availableBytes!)}</> : '；配额尚未配置'}</p>
       {notice ? <p role="status">{notice}</p> : null}

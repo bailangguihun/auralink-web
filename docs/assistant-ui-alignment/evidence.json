@@ -1,0 +1,183 @@
+{
+  "capturedAt": "2026-10-25T07:00:37.851888+00:00",
+  "boundary": "Real Assistant React; loopback-only intercepted fixtures. No paid model, production write or provider call.",
+  "browser": "145.0.7632.6",
+  "buildId": "y5Rm4R7u1QISOI4xC5rF4",
+  "baseCommit": "d5486df5924fa3f074b03e7106bc7322f9b763b1",
+  "viewports": [
+    "1440x1000",
+    "390x1000",
+    "390x540",
+    "390x844 with VisualViewport.height=440"
+  ],
+  "cases": [
+    {
+      "name": "desktop-reference-states",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "mobile-reference-states",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "long-composer-attachments-refresh",
+      "status": "PASS",
+      "fixtureWrites": 1
+    },
+    {
+      "name": "branch-pagination-and-source-association",
+      "status": "PASS",
+      "fixtureWrites": 1
+    },
+    {
+      "name": "markdown-safety-and-server-choices",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "stream-cancel-refresh-recovery",
+      "status": "PASS",
+      "fixtureWrites": 1
+    },
+    {
+      "name": "uncertain-submit-resolves-without-replay",
+      "status": "PASS",
+      "fixtureWrites": 2
+    },
+    {
+      "name": "honest-loading-empty-errors",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "suspended-history-account-isolation",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "keyboard-picker-speech-artwork-selection",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "pagination-failure-preserves-loaded-input",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "source-identity-mismatch-refused",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "history-only-retains-records",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "visual-viewport-keyboard",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "other-route-style-isolation",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "unavailable",
+      "status": "PASS",
+      "fixtureWrites": 0
+    },
+    {
+      "name": "empty-conversation",
+      "status": "PASS",
+      "fixtureWrites": 0
+    }
+  ],
+  "unexpectedNetworkRequests": [],
+  "pageErrors": [],
+  "console": [
+    {
+      "case": "honest-loading-empty-errors",
+      "type": "error",
+      "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "case": "honest-loading-empty-errors",
+      "type": "error",
+      "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "case": "suspended-history-account-isolation",
+      "type": "error",
+      "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "case": "pagination-failure-preserves-loaded-input",
+      "type": "error",
+      "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "case": "unavailable",
+      "type": "error",
+      "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "conversation-desktop.png",
+      "sha256": "014c9107eb7b11114f75dabb33a5189a6c9dfe8e5225f10aa523d8c549be8bea"
+    },
+    {
+      "file": "summary-desktop.png",
+      "sha256": "8c0187c82b55e208bcab4b2c30144c925a7b08a340c2f552df1463236310427d"
+    },
+    {
+      "file": "input-history-desktop.png",
+      "sha256": "f7a3caca3fc817c23e8178fc138a807756d9b58c21b7ec039585d3d1031d91cd"
+    },
+    {
+      "file": "sources-desktop.png",
+      "sha256": "f1c0ef8eea52191b696d0a3ad7e81453a3ad6f6801593a0c0a0cb6a0dc0f2756"
+    },
+    {
+      "file": "model-picker-desktop.png",
+      "sha256": "62a4609e72703173041d4d110ce1c1f9b47e3e471b7e90d43b52ce1f2ee53d47"
+    },
+    {
+      "file": "conversation-mobile.png",
+      "sha256": "5deef002ada33eda0accded1c673ce5f0686f440e9bdec396aff31752a16c147"
+    },
+    {
+      "file": "summary-mobile.png",
+      "sha256": "c668204cda84f5f1ad8171f9eb81287be40e8178029179c87154ebcb7e68850b"
+    },
+    {
+      "file": "input-history-mobile.png",
+      "sha256": "f43626741435c05e82ef1c7a7aee131308918b31afa0cc41bbfad9e89d6de9ee"
+    },
+    {
+      "file": "sources-mobile.png",
+      "sha256": "6af331f23026e1587d38fa69345e390322ad01ca12d704053e2859e158869d47"
+    },
+    {
+      "file": "model-picker-mobile.png",
+      "sha256": "3e43311ae3946912cb76b130875bfe8b00c2b93a0c02002dcda4accd3141e476"
+    },
+    {
+      "file": "sessions-mobile.png",
+      "sha256": "c602cc6dd5c745d1d8df73dc0278268e57475ba47b4df7aac7080c6514d3da81"
+    },
+    {
+      "file": "keyboard-visual-viewport.png",
+      "sha256": "c2fb462d866dbcc195316acbd220df51444b9dedb9318537ca2cef6374975505"
+    },
+    {
+      "file": "streaming.png",
+      "sha256": "8fe661c9ef3523ef809b5db0b46146336a097ec97cdc21d72fb50d8097c04f6d"
+    }
+  ]
+}

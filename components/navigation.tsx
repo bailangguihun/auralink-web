@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { BrandIcon, CloseIcon, MenuIcon, UserIcon } from "@/components/icons";
+import { PendingIndicator } from "@/components/loading";
 import { useSession } from "@/components/session-provider";
 
 const links = [
@@ -56,7 +57,7 @@ export function Navigation() {
       </nav>
 
       <div className="session-actions">
-        {status === "authenticated" ? (
+        {status === "loading" ? <span className="session-restoring" role="status"><PendingIndicator />确认账号</span> : status === "authenticated" ? (
           <>
             <Link className="user-link" href="/account" title="账号">
               <UserIcon />

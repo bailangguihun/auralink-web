@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { MediaLoading } from "@/components/loading";
 import { useSession } from "@/components/session-provider";
 import { api, ApiError, errorMessage, isAbortError } from "@/lib/api";
 import { poemTitleLabel } from "@/lib/creation-poem";
@@ -55,7 +56,7 @@ export function CreationResult({ creation }: { creation: CreationDetail }) {
   }
   if (!creation.finalAssetContentUrl) return null;
   if (mediaError) return <p className="inline-error" role="alert">{mediaError}</p>;
-  if (!objectUrl) return <p className="creation-result-loading" aria-live="polite">正在安全读取结果媒体…</p>;
+  if (!objectUrl) return <MediaLoading audio={creation.finalModality === "AUDIO"} />;
   if (creation.finalModality === "AUDIO") {
     return <audio className="creation-audio" src={objectUrl} controls preload="metadata">浏览器无法播放此音频。</audio>;
   }

@@ -1,0 +1,64 @@
+# 前端加载体验：默认约定
+
+适用于已有页面与未来前端功能。加载表达与数据访问权必须分开：骨架不能授权执行、推测业务进度或替代服务端状态。
+
+## 选用组件
+
+- `components/loading.tsx`：`Skeleton`、`SkeletonRows` 只提供纸色装饰并隐藏于辅助技术；`LoadingSection` 配合页面真实布局，提供一个可读状态。`LoadingStatus` 用于局部读操作，10 秒后说明仍在等待；只有调用方传入**只读重试**时才提供“重新读取”。没有最低展示时间、自动重试或虚构进度。
+- `PendingIndicator` 用于按钮内部；同时保留按钮名称、`disabled` / `aria-busy` 和原来的业务保护。
+- `DailyPaintingSkeleton` / `PaintingGridSkeleton` / `DetailSkeleton` / `KnowledgeSkeleton` / `StudioSkeleton` / `ProfileSkeleton` 对应页面布局；`MediaLoading` 为已保存媒体的读取预留容器。
+- `components/page-loading.tsx` 与各路由 `loading.tsx` 只覆盖路由块加载。客户端 API 读取仍由各屏幕控制，不能仅添加路由 loading 文件。
+- `components/assistant/assistant-loading.tsx` 复用已接受助手工作区 CSS：侧栏、消息区、底部输入框。登录/会话尚未核实时只显示禁用控件；不会创建会话或调用模型。
+- `StatePanel` 保留 empty/error/unavailable/pending 的含义；loading 兼容入口变为紧凑读状态。新页面优先使用对应布局骨架，不用巨型通用面板占满页面。
+
+## 读取与状态规则
+
+1. 固定导航、标题、选项卡、筛选器和分页位置；权限已确认且无依赖的控件继续可用。分页读取中控件保留但禁止针对未知页继续操作。
+2. 独立资源并行读取，各自错误、重试与空态。不要为方便写一个 `Promise.all`，把已经就绪的分区绑在无关慢请求上。
+3. `useReadResource(queryKey, loader, enabled)` 适用于组件内**只读**资源。loader 使用 `useCallback`；queryKey 必须完整标识筛选、页号、目标记录。hook 加入登录 generation，仅相同账号代际 + 相同 query 的主动刷新保留内容。变更 key 当次 render 即隐藏旧数据；退出/切换账号会卸载私有工作区。响应还需通过取消与代际检查；401 清理会话，403 清理该资源。
+4. 此 hook 不可用于能力授权、提交、上传、生成、支付等写操作。不能从上次成功返回的 capabilities 推断当前可执行。工坊能力读取时清空能力；助手生成状态/模型核对完成前，原回复仍可浏览，生成禁用。已有提交前校验、idempotency、UNKNOWN 和取消逻辑继续生效。
+5. 相同查询后台更新应标明“暂保留已读取内容”；不同查询若保留旧页必须明确标识旧页/旧查询，并禁止误选。画廊与收藏直接以新查询骨架替换结果；工坊显示旧页页号；助手作品搜索明确说明上次查询。错误不等于无结果。
+6. 重试只重新读取失败分区，绝不暗中重放写操作。AI 任务保留真实排队/执行/部分输出/取消/不确定状态；无需等待模型生成完成再出现整个工作区。
+7. 不引入持久浏览器数据缓存。助手历史、附件、分支继续使用认证服务端记录；原操作账本不清空。同分支刷新保留已载入的更早消息及分页游标，切换分支/账号不混用。
+
+```tsx
+const loader = useCallback(signal => api.favoritePaintings(page, 12, token!, signal), [page, token]);
+const read = useReadResource(`favorites:${page}`, loader, Boolean(token));
+// auth boundary must already be verified; this is not an execution authorization.
+return <section>
+  <h2>我的收藏</h2>
+  {read.loading && !read.data ? <LoadingSection label="正在读取收藏" onRetry={read.retry}><PaintingGridSkeleton personal /></LoadingSection> : null}
+  {read.refreshing ? <LoadingStatus label="正在更新本页收藏，暂保留已读取内容" /> : null}
+  {/* Independently render errors, valid data, and confirmed empty results. */}
+</section>;
+```
+
+## 视觉和无障碍
+
+- 保持纸、墨、浅边框。`content-reveal` 为 180ms 透明度变化，无延迟、不移动布局；已就绪内容立即显示。`prefers-reduced-motion` 禁用骨架、旋转和 reveal 动画。
+- 图片使用服务端宽高或既有容器比例预留空间。画廊卡片仍为 4:3 cover、每日推荐和详情仍 contain；不要为骨架改动作品裁切。私有附件先读取真实尺寸；尺寸尚未知时仅使用既有预览容器的占位比例，不宣称是原图比例。
+- 骨架不提供虚构数值/图例/图表点。真实标题可见、装饰 `aria-hidden`；一个读取分区一个 `role=status`，避免轮询逐条消息反复播报。慢加载只提示仍在等待，不编造百分比或预计时间。
+- 局部刷新不得卸载输入框、移动焦点或把滚动强制拉到底部。错误重试按钮、分页、弹层保持键盘可达；账号变化清理私有内容优先于保留焦点。
+- 新页面必须同时检验 1440px / 390px、长内容、多行输入、减弱动画、初次/返回、部分失败、401/403、快速切换和旧响应；用真实 DOM 截图，不用设计稿替代渲染证据。
+
+## 本次读取路径审计
+
+| 入口 | 读取范围 / 已处理问题 | 保留的业务语义 |
+| --- | --- | --- |
+| 路由、导航、登录恢复、小程序跳转 | 每页骨架；账号恢复紧凑状态；中止过期 profile 请求并代际隔离 | 未认证时不运行私有页面读请求；错误可明确重连 |
+| 画廊 | 每日图文和网格独立；鉴权恢复结束后读取，避免匿名后立即认证的重复初读；查询切换不混用旧页 | 每日顺序与日期由 Core 给出；收藏依然由原接口处理 |
+| 作品详情 | 原布局占位、服务端图片尺寸、局部只读重试 | 导览与评析仍需原显式生成操作，pending 不是读取骨架 |
+| 知识库 | 统计卡和图表容器；图谱首次打开才请求，已访问选项卡在同账号页面内保留 | 不模拟统计和图谱；未开放、失败和空集独立 |
+| 工坊 | 能力、流程列表、Creation 列表独立请求；编辑器结构稳定、列表刷新有旧页说明 | 原能力发现、上传/保存/提交约束、队列轮询、取消及 UNKNOWN 完整保留 |
+| 助手 | 初始化完整工作区；同分支消息刷新不清空；抽屉/附件局部占位；模型核对时禁用生成 | 服务器消息、引用与选择卡、自动摘要 opt-in、语音先编辑、操作恢复保持原合同 |
+| 个人页 | 已核实 profile 复用；收藏独立分页/错误/重试 | 登录响应缺少完整资料时仍请求 profile；收藏失败不伪装成零条 |
+| 账号/首页/关于/社区 | 账号复用会话；静态页面不添加假的数据加载；未开放页面保留 unavailable | 不以 skeleton 暗示尚无后端的社区在加载 |
+| 媒体、翻页、局部操作 | 解码前纸色、固定比例；已保存音频尺寸占位；紧凑待办标识与只读重试 | 不重放上传/生成；已有媒体内容和存取保护不改变 |
+
+## 性能与证据边界
+
+发现并修正的是明确的请求依赖与重复读取：个人页旧实现每次收藏翻页重复 profile；工坊旧 Promise.all 将编辑器展示绑在列表；知识库旧选项卡切回会重拉整份快照；助手旧刷新会先清空消息。用隔离请求记录验证计数/独立性，不能把夹具延迟说成生产提速。
+
+图片 API 只提供现有逻辑媒体 URL，没有本次可用的缩略图变换合同；不加任意尺寸参数、不代理私有媒体。宽高预留和解码反馈属于视觉稳定性改善，不减少原文件字节。Next Link 原有预取保持，图表模块继续按需动态加载。未测生产网络、LCP 或真实设备帧率，不宣称提升幅度。
+
+运行方式与实际结果见 `docs/loading-experience/README.md`；隔离夹具不使用生产账号、Cookie 或付费模型。

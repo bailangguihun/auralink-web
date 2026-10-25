@@ -2,13 +2,14 @@
 
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
+import { ChartSkeleton, KnowledgeSkeleton, LoadingSection, LoadingStatus } from "@/components/loading";
 import { StatePanel } from "@/components/state-panel";
 import { useKnowledgeResource } from "@/components/knowledge-resource";
 import { api } from "@/lib/api";
 import { chartTruncatesItems } from "@/lib/knowledge-presentation";
 import { chronologicalItems, filterNodes, graphPage, neighborIds, topGroups, type CountItem, type PaintingMetric, type PoetryGraph, type PoetryLink } from "@/lib/knowledge-contracts";
 
-const chartLoading = () => <StatePanel compact kind="loading" title="正在准备图表" />;
+const chartLoading = () => <LoadingSection label="正在准备图表"><ChartSkeleton compact /></LoadingSection>;
 const MetricChart = dynamic(() => import("@/components/knowledge-charts").then((module) => module.MetricChart), { ssr: false, loading: chartLoading });
 const PoetryChart = dynamic(() => import("@/components/knowledge-charts").then((module) => module.PoetryChart), { ssr: false, loading: chartLoading });
 const format = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
@@ -50,12 +51,13 @@ function MetricPanel({ title, metric, children, description, ruleBased = false, 
 
 function PaintingView() {
   const statistics = useKnowledgeResource(api.paintingStatistics);
-  if (statistics.loading) return <StatePanel kind="loading" title="正在读取画作统计" description="从当前可浏览画作的公开字段汇总。" />;
+  if (statistics.loading && !statistics.data) return <LoadingSection label="正在读取画作统计" onRetry={statistics.retry}><KnowledgeSkeleton /></LoadingSection>;
   if (statistics.error) return <ResourceFailure {...statistics} error={statistics.error} subject="画作统计" />;
   if (!statistics.data) return null;
   const { population, authorNames, metrics } = statistics.data;
   return <div id="knowledge-paintings" role="tabpanel" aria-labelledby="knowledge-tab-paintings">
-    <div className="knowledge-counts">
+    {statistics.loading ? <LoadingStatus label="正在更新统计，暂保留当前已读取的数据" /> : null}
+    <div className="knowledge-counts content-reveal">
       <section className="knowledge-count glass-panel"><span>作品数</span><strong>{format.format(population.count)}</strong></section>
       <section className="knowledge-count glass-panel"><span>作者名称数</span><strong>{format.format(authorNames.count)}</strong></section>
     </div>
@@ -127,16 +129,19 @@ function PoetryExplorer({ graph }: { graph: PoetryGraph }) {
 
 function PoetryView() {
   const resource = useKnowledgeResource(api.poetryGraph);
-  if (resource.loading) return <StatePanel kind="loading" title="正在读取诗词图谱" description="正在载入既有实体与关系快照。" />;
+  if (resource.loading && !resource.data) return <LoadingSection label="正在读取诗词图谱" onRetry={resource.retry}><KnowledgeSkeleton graph /></LoadingSection>;
   if (resource.error) return <ResourceFailure {...resource} error={resource.error} subject="诗词图谱" />;
   return resource.data ? <PoetryExplorer graph={resource.data} /> : null;
 }
 
 export function KnowledgeScreen() {
   const [view, setView] = useState<"paintings" | "poetry">("paintings");
+  const [poetryVisited, setPoetryVisited] = useState(false);
+  const selectView = (next: "paintings" | "poetry") => { setView(next); if (next === "poetry") setPoetryVisited(true); };
   return <main className="page-shell knowledge-page">
     <header className="knowledge-header glass-panel"><h1>观画有据，读诗有脉</h1><span className="knowledge-header-mark" aria-hidden="true">知</span></header>
-    <div className="knowledge-tabs" role="tablist" aria-label="知识库视图">{([['paintings', '国画统计'], ['poetry', '诗词图谱']] as const).map(([key, title]) => <button type="button" key={key} id={`knowledge-tab-${key}`} role="tab" aria-selected={view === key} aria-controls={`knowledge-${key}`} tabIndex={view === key ? 0 : -1} onKeyDown={(event) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) { event.preventDefault(); const next = event.key === "Home" ? "paintings" : event.key === "End" ? "poetry" : view === "paintings" ? "poetry" : "paintings"; setView(next); document.getElementById(`knowledge-tab-${next}`)?.focus(); } }} onClick={() => setView(key)}><strong>{title}</strong></button>)}</div>
-    {view === "paintings" ? <PaintingView /> : <PoetryView />}
+    <div className="knowledge-tabs" role="tablist" aria-label="知识库视图">{([['paintings', '国画统计'], ['poetry', '诗词图谱']] as const).map(([key, title]) => <button type="button" key={key} id={`knowledge-tab-${key}`} role="tab" aria-selected={view === key} aria-controls={`knowledge-${key}`} tabIndex={view === key ? 0 : -1} onKeyDown={(event) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) { event.preventDefault(); const next = event.key === "Home" ? "paintings" : event.key === "End" ? "poetry" : view === "paintings" ? "poetry" : "paintings"; selectView(next); document.getElementById(`knowledge-tab-${next}`)?.focus(); } }} onClick={() => selectView(key)}><strong>{title}</strong></button>)}</div>
+    <div hidden={view !== "paintings"}><PaintingView /></div>
+    {poetryVisited ? <div hidden={view !== "poetry"}><PoetryView /></div> : null}
   </main>;
 }

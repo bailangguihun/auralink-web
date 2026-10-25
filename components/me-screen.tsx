@@ -4,61 +4,45 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { LoadingSection, LoadingStatus, PaintingGridSkeleton, Skeleton, SkeletonRows } from "@/components/loading";
+import { useReadResource } from "@/components/use-read-resource";
 import { useFavorites } from "@/components/favorite-provider";
 import { PaintingCard } from "@/components/painting-card";
 import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { formatProfileDate } from "@/lib/profile-contract";
-import type { PaintingPage, PaintingSummary, UserProfile } from "@/lib/types";
+import type { PaintingSummary } from "@/lib/types";
 
 export function MeScreen() {
   const router = useRouter();
-  const { token, sessionIdentity, signOut, signOutIfCurrent, isCurrentSession } = useSession();
+  const { token, user, profileVerified, sessionIdentity, signOut, signOutIfCurrent, isCurrentSession } = useSession();
   const { isFavorited, isFavoriteBusy, toggleFavorite } = useFavorites();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [favorites, setFavorites] = useState<PaintingPage | null>(null);
   const [pageNumber, setPageNumber] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadProfile = useCallback((signal: AbortSignal) => api.profile(token!, signal), [token]);
+  const profileRead = useReadResource("profile", loadProfile, Boolean(token) && !profileVerified);
+  const profile = profileVerified ? user : profileRead.data;
+  const loadFavorites = useCallback((signal: AbortSignal) => api.favoritePaintings(pageNumber, 12, token!, signal), [pageNumber, token]);
+  const favoriteRead = useReadResource(`favorites:${pageNumber}`, loadFavorites, Boolean(token));
+  const favorites = favoriteRead.data;
+  useEffect(() => {
+    if (favorites && !favoriteRead.loading && favorites.items.length === 0 && pageNumber > 0) setPageNumber(value => value - 1);
+  }, [favorites, favoriteRead.loading, pageNumber]);
 
   const handleError = useCallback((caught: unknown) => {
     if (caught instanceof ApiError && caught.kind === "unauthorized") signOutIfCurrent(sessionIdentity);
     setError(errorMessage(caught));
   }, [sessionIdentity, signOutIfCurrent]);
 
-  useEffect(() => {
-    if (!token) return;
-    let active = true;
-    setLoading(true);
-    setError(null);
-    void Promise.all([api.profile(token), api.favoritePaintings(pageNumber, 12, token)])
-      .then(([profileResult, favoriteResult]) => {
-        if (!active) return;
-        setProfile(profileResult);
-        setFavorites(favoriteResult);
-      })
-      .catch((caught) => {
-        if (active) handleError(caught);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => { active = false; };
-  }, [handleError, pageNumber, token]);
-
   const removeFavorite = async (painting: PaintingSummary) => {
     if (!token) return;
-    const requestToken = token;
     const requestIdentity = sessionIdentity;
     setError(null);
     try {
       await toggleFavorite(painting.paintingId, isFavorited(painting.paintingId, painting.favorited));
       if (!isCurrentSession(requestIdentity)) return;
-      const refreshed = await api.favoritePaintings(pageNumber, 12, requestToken);
-      if (!isCurrentSession(requestIdentity)) return;
-      setFavorites(refreshed);
-      if (refreshed.items.length === 0 && pageNumber > 0) setPageNumber((current) => current - 1);
+      favoriteRead.retry();
     } catch (caught) {
       if (!isCurrentSession(requestIdentity)) return;
       handleError(caught);
@@ -74,51 +58,50 @@ export function MeScreen() {
     (painting) => isFavorited(painting.paintingId, painting.favorited),
   ) ?? [];
 
-  if (loading) return <StatePanel kind="loading" title="正在读取个人空间" />;
-  if (error && !profile) return <StatePanel kind="error" title="个人空间加载失败" description={error} />;
-  if (!profile) return null;
-
   return (
     <div className="me-layout">
       <aside className="me-sidebar glass-panel">
-        <span className="me-avatar" aria-hidden="true">{(profile.fullName || profile.username).slice(0, 1)}</span>
+        {profile ? <><span className="me-avatar" aria-hidden="true">{(profile.fullName || profile.username).slice(0, 1)}</span>
         <h1>{profile.fullName || profile.username}</h1>
         <p>@{profile.username}</p>
         <dl>
-          <div><dt>收藏</dt><dd>{favorites?.totalElements ?? 0}</dd></div>
+          <div><dt>收藏</dt><dd>{favorites ? favorites.totalElements : favoriteRead.error ? "暂不可用" : "读取中"}</dd></div>
           <div><dt>账号 ID</dt><dd>{profile.id}</dd></div>
-        </dl>
+        </dl></> : profileRead.error ? <StatePanel compact kind="error" title="资料读取失败" description={profileRead.error} actionLabel="重新读取资料" onAction={profileRead.retry} /> : <LoadingSection label="正在读取个人资料" onRetry={profileRead.retry}><Skeleton className="skeleton-avatar" /><SkeletonRows /></LoadingSection>}
         <button className="button button-wide" type="button" onClick={logout}>退出登录</button>
       </aside>
 
       <div className="me-content">
         <section className="profile-panel glass-panel" aria-labelledby="profile-title">
           <div className="section-heading section-heading-left"><h2 id="profile-title">账号信息</h2><p>以下信息由当前登录用户接口返回。</p></div>
-          <dl className="profile-facts">
+          {profile ? <dl className="profile-facts content-reveal">
             <div><dt>用户名</dt><dd>{profile.username}</dd></div>
             <div><dt>姓名</dt><dd>{profile.fullName || "未填写"}</dd></div>
             <div><dt>邮箱</dt><dd>{profile.email}</dd></div>
             {profile.createdAt ? <div><dt>注册时间</dt><dd>{formatProfileDate(profile.createdAt)}</dd></div> : null}
-          </dl>
+          </dl> : <SkeletonRows lines={4} />}
           <div className="profile-unavailable"><strong>资料与头像编辑</strong><span>暂未开放</span></div>
         </section>
 
         <section className="favorites-panel" aria-labelledby="favorites-title">
           <div className="section-heading section-heading-left"><h2 id="favorites-title">我的收藏</h2><p>取消收藏会立即调用真实后端并刷新列表。</p></div>
           {error ? <p className="inline-error" role="alert">{error}</p> : null}
+          {favoriteRead.error ? <StatePanel compact kind="error" title="收藏读取失败" description={`${favoriteRead.error}${favorites ? " 当前保留本页上次成功读取的收藏。" : ""}`} actionLabel="重新读取收藏" onAction={favoriteRead.retry} /> : null}
+          {favoriteRead.loading ? favorites ? <LoadingStatus label="正在更新本页收藏，暂保留已读取内容" /> : <LoadingSection label="正在读取收藏" onRetry={favoriteRead.retry}><PaintingGridSkeleton personal count={6} /></LoadingSection> : null}
           {favorites && displayedFavorites.length ? (
             <>
               <div className="painting-grid me-painting-grid">
                 {displayedFavorites
                   .map((painting) => <PaintingCard key={painting.paintingId} painting={{ ...painting, favorited: isFavorited(painting.paintingId, painting.favorited) }} authenticated favoriteBusy={isFavoriteBusy(painting.paintingId)} onFavorite={removeFavorite} />)}
               </div>
-              <nav className="pagination" aria-label="收藏分页">
-                <button className="button" type="button" disabled={favorites.first} onClick={() => setPageNumber((current) => Math.max(0, current - 1))}>上一页</button>
-                <span>第 {favorites.page + 1} / {Math.max(favorites.totalPages, 1)} 页</span>
-                <button className="button" type="button" disabled={favorites.last} onClick={() => setPageNumber((current) => current + 1)}>下一页</button>
-              </nav>
+
             </>
-          ) : <StatePanel kind="empty" title="还没有收藏作品" description="去画廊发现喜欢的作品吧。" actionLabel="前往画廊" actionHref="/gallery" />}
+          ) : !favoriteRead.loading && !favoriteRead.error && favorites ? <StatePanel kind="empty" title="还没有收藏作品" description="去画廊发现喜欢的作品吧。" actionLabel="前往画廊" actionHref="/gallery" /> : null}
+          <nav className="pagination" aria-label="收藏分页">
+            <button className="button" disabled={favoriteRead.loading || !favorites || favorites.first} onClick={() => setPageNumber(value => Math.max(0, value - 1))}>上一页</button>
+            <span>{favorites ? `第 ${favorites.page + 1} / ${Math.max(favorites.totalPages, 1)} 页` : `第 ${pageNumber + 1} 页 · ${favoriteRead.loading ? "读取中" : "暂不可用"}`}</span>
+            <button className="button" disabled={favoriteRead.loading || !favorites || favorites.last} onClick={() => setPageNumber(value => value + 1)}>下一页</button>
+          </nav>
         </section>
 
         <section className="me-unavailable-grid">

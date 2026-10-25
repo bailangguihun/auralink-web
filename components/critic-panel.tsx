@@ -20,7 +20,7 @@ export function CriticPanel({ state, imageAvailable, onSubmit, onRead }: {
   return (
     <div className="guide-result">
       {state.state === "loading" ? <StatePanel compact kind="loading" title="正在读取已有评析" /> : null}
-      {state.state === "submitting" ? <StatePanel compact kind="loading" title="正在提交评析" /> : null}
+      {state.state === "submitting" ? <StatePanel compact kind="pending" title="正在提交评析" /> : null}
       {state.state === "active" ? <StatePanel compact kind="pending" title={state.task?.status === "QUEUED" ? "评析正在排队" : "正在评析这幅作品"} description="可离开页面后重新进入查看进度，不需要重复提交。" /> : null}
       {state.state === "missing" ? <p>这幅作品尚未保存你的智能评析。</p> : null}
       {state.state === "failure" ? <StatePanel compact kind="error" title="本次评析未完成" description={state.task?.errorMessage || "请查看任务状态，或手动重新发起评析。"} /> : null}

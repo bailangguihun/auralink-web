@@ -1,0 +1,2587 @@
+{
+  "baselineMain": "923e5b66cb24c4eabc725cd67d7608b3e51c7827",
+  "acceptedRelease": "cb4af4c7f7f27e35408efd908a9688e28a963d0c",
+  "fixtureBuildId": "1Zfhbf1dhh0VIyzsLTIyQ",
+  "boundary": "Isolated synthetic read-only API; no production I/O or paid requests. Delays are controlled fixtures, not network performance measurements.",
+  "browser": "145.0.7632.6",
+  "loading": [
+    {
+      "name": "desktop-gallery",
+      "loadingGeometry": {
+        ".page-header": {
+          "x": 150,
+          "y": 112,
+          "width": 1140,
+          "height": 123.75
+        },
+        ".gallery-filters": {
+          "x": 150,
+          "y": 553.34375,
+          "width": 1140,
+          "height": 85.59375
+        },
+        ".daily-media": {
+          "x": 170,
+          "y": 313.34375,
+          "width": 200,
+          "height": 200
+        }
+      },
+      "readyGeometry": {
+        ".page-header": {
+          "x": 150,
+          "y": 112,
+          "width": 1140,
+          "height": 123.75
+        },
+        ".gallery-filters": {
+          "x": 150,
+          "y": 553.34375,
+          "width": 1140,
+          "height": 85.59375
+        },
+        ".daily-media": {
+          "x": 170,
+          "y": 313.34375,
+          "width": 200,
+          "height": 200
+        }
+      },
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792926960315
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings",
+          "query": "?page=0&size=12&sort=daily&direction=asc",
+          "account": "A",
+          "at": 1792926960723
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings/daily",
+          "query": "",
+          "account": "A",
+          "at": 1792926960724
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926961827
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962632
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962632
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962633
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001093/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962633
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001094/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962633
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001095/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962634
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001096/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962634
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001097/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962634
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001098/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962634
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001099/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962634
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001100/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962634
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001101/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926962635
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "desktop-knowledge",
+      "loadingGeometry": {
+        ".knowledge-tabs": {
+          "x": 150,
+          "y": 207.1875,
+          "width": 1140,
+          "height": 50.59375
+        }
+      },
+      "readyGeometry": {
+        ".knowledge-tabs": {
+          "x": 150,
+          "y": 212,
+          "width": 1140,
+          "height": 49
+        }
+      },
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792926965326
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/knowledge/painting-statistics",
+          "query": "",
+          "account": "A",
+          "at": 1792926965731
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "desktop-studio",
+      "loadingGeometry": {
+        ".page-header": {
+          "x": 150,
+          "y": 112,
+          "width": 1140,
+          "height": 157.34375
+        }
+      },
+      "readyGeometry": {
+        ".page-header": {
+          "x": 150,
+          "y": 112,
+          "width": 1140,
+          "height": 157.34375
+        }
+      },
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792926970284
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/workflow/node-types",
+          "query": "",
+          "account": "A",
+          "at": 1792926970690
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/creations",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792926970691
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/workflows",
+          "query": "?page=0&size=100",
+          "account": "A",
+          "at": 1792926970691
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "desktop-assistant",
+      "loadingGeometry": {},
+      "readyGeometry": {},
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792926976856
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/status",
+          "query": "",
+          "account": "A",
+          "at": 1792926977265
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/models",
+          "query": "",
+          "account": "A",
+          "at": 1792926978569
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792926978571
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001",
+          "query": "",
+          "account": "A",
+          "at": 1792926978571
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792926978572
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/attachments/draft",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792926978587
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/messages/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792926978588
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792926978588
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?activeOnly=true&limit=50",
+          "account": "A",
+          "at": 1792926978589
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/00000000-0000-4000-8000-000000000002",
+          "query": "",
+          "account": "A",
+          "at": 1792926978589
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110",
+          "query": "",
+          "account": "A",
+          "at": 1792926978616
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792926978616
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112",
+          "query": "",
+          "account": "A",
+          "at": 1792926978617
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792926978617
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792926978623
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792926978623
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?activeOnly=true&limit=50",
+          "account": "A",
+          "at": 1792926981089
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001",
+          "query": "",
+          "account": "A",
+          "at": 1792926981090
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "desktop-me",
+      "loadingGeometry": {},
+      "readyGeometry": {},
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792926981181
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/favorites/paintings",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792926981600
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926983405
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926983406
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926983406
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "mobile-gallery",
+      "loadingGeometry": {
+        ".page-header": {
+          "x": 18,
+          "y": 96,
+          "width": 354,
+          "height": 149.90625
+        },
+        ".gallery-filters": {
+          "x": 18,
+          "y": 481.5,
+          "width": 354,
+          "height": 200.78125
+        },
+        ".daily-media": {
+          "x": 32,
+          "y": 315.5,
+          "width": 90,
+          "height": 132
+        }
+      },
+      "readyGeometry": {
+        ".page-header": {
+          "x": 18,
+          "y": 96,
+          "width": 354,
+          "height": 149.90625
+        },
+        ".gallery-filters": {
+          "x": 18,
+          "y": 481.5,
+          "width": 354,
+          "height": 200.78125
+        },
+        ".daily-media": {
+          "x": 32,
+          "y": 315.5,
+          "width": 90,
+          "height": 132
+        }
+      },
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792926984111
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings",
+          "query": "?page=0&size=12&sort=daily&direction=asc",
+          "account": "A",
+          "at": 1792926984517
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings/daily",
+          "query": "",
+          "account": "A",
+          "at": 1792926984517
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926985621
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986423
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986423
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986423
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001093/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986423
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001094/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986424
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001095/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986424
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001096/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986424
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001097/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986424
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001098/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986424
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001099/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986424
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001100/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986425
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001101/content",
+          "query": "",
+          "account": "A",
+          "at": 1792926986425
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "mobile-knowledge",
+      "loadingGeometry": {
+        ".knowledge-tabs": {
+          "x": 18,
+          "y": 176.390625,
+          "width": 354,
+          "height": 50.59375
+        }
+      },
+      "readyGeometry": {
+        ".knowledge-tabs": {
+          "x": 18,
+          "y": 180.796875,
+          "width": 354,
+          "height": 49
+        }
+      },
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792926988914
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/knowledge/painting-statistics",
+          "query": "",
+          "account": "A",
+          "at": 1792926989320
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "mobile-studio",
+      "loadingGeometry": {
+        ".page-header": {
+          "x": 18,
+          "y": 96,
+          "width": 354,
+          "height": 151.578125
+        }
+      },
+      "readyGeometry": {
+        ".page-header": {
+          "x": 18,
+          "y": 96,
+          "width": 354,
+          "height": 151.578125
+        }
+      },
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792926993722
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/workflow/node-types",
+          "query": "",
+          "account": "A",
+          "at": 1792926994130
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/creations",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792926994130
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/workflows",
+          "query": "?page=0&size=100",
+          "account": "A",
+          "at": 1792926994130
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "mobile-assistant",
+      "loadingGeometry": {},
+      "readyGeometry": {},
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792926998805
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/status",
+          "query": "",
+          "account": "A",
+          "at": 1792926999214
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/models",
+          "query": "",
+          "account": "A",
+          "at": 1792927000518
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927000519
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001",
+          "query": "",
+          "account": "A",
+          "at": 1792927000520
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927000520
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/attachments/draft",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927000537
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/messages/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927000537
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927000538
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?activeOnly=true&limit=50",
+          "account": "A",
+          "at": 1792927000538
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/00000000-0000-4000-8000-000000000002",
+          "query": "",
+          "account": "A",
+          "at": 1792927000538
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110",
+          "query": "",
+          "account": "A",
+          "at": 1792927000569
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927000570
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112",
+          "query": "",
+          "account": "A",
+          "at": 1792927000570
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927000570
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927000573
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927000574
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "mobile-me",
+      "loadingGeometry": {},
+      "readyGeometry": {},
+      "profileReads": 1,
+      "reducedMotion": true,
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927003090
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/favorites/paintings",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792927003511
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927005315
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927005316
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927005316
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "gallery-independent-query-race",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927006398
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings",
+          "query": "?page=0&size=12&sort=daily&direction=asc",
+          "account": "A",
+          "at": 1792927006421
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings/daily",
+          "query": "",
+          "account": "A",
+          "at": 1792927006422
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006431
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006431
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006433
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001093/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006433
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001094/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006435
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001095/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006435
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001096/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006436
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001097/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006436
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001098/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006436
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001099/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006437
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001100/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006437
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001101/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927006439
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings",
+          "query": "?keyword=%E6%97%A7%E6%9F%A5%E8%AF%A2&sort=daily&direction=asc&page=0&size=12",
+          "account": "A",
+          "at": 1792927006717
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings",
+          "query": "?keyword=%E6%96%B0%E6%9F%A5%E8%AF%A2&sort=daily&direction=asc&page=0&size=12",
+          "account": "A",
+          "at": 1792927006798
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007305
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007305
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001093/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007305
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001094/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007305
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001095/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007305
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001096/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007305
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001097/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007306
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001098/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007306
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001099/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007306
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001100/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007306
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001101/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927007307
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927009485
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings",
+          "query": "?keyword=%E6%96%B0%E6%9F%A5%E8%AF%A2&sort=daily&direction=asc&page=1&size=12&orderDate=2026-10-25",
+          "account": "A",
+          "at": 1792927010771
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001102/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011675
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001103/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011676
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001104/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011676
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001105/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011676
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001106/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011676
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001107/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011677
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001108/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011677
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001109/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011677
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001110/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011677
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001111/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011677
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001112/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011677
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001113/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927011677
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "profile-independent-failure-retry-account",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927012240
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/favorites/paintings",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792927012251
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/favorites/paintings",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792927012454
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927012468
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927012468
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927012468
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/favorites/paintings",
+          "query": "?page=1&size=12",
+          "account": "A",
+          "at": 1792927012527
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001102/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927012534
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001103/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927012534
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001104/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927012534
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/favorites/paintings",
+          "query": "?page=2&size=12",
+          "account": "A",
+          "at": 1792927012603
+        },
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "B",
+          "at": 1792927012606
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/favorites/paintings",
+          "query": "?page=0&size=12",
+          "account": "B",
+          "at": 1792927012620
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927012623
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927012623
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927012624
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "studio-list-failure-keeps-editor-and-results",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927014529
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/workflow/node-types",
+          "query": "",
+          "account": "A",
+          "at": 1792927014536
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/creations",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792927014536
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/workflows",
+          "query": "?page=0&size=100",
+          "account": "A",
+          "at": 1792927014536
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/workflows",
+          "query": "?page=0&size=100",
+          "account": "A",
+          "at": 1792927014936
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "knowledge-tab-revisit-error-and-keyboard",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927015112
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/knowledge/painting-statistics",
+          "query": "",
+          "account": "A",
+          "at": 1792927015124
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/knowledge/poetry-graph",
+          "query": "",
+          "account": "A",
+          "at": 1792927015240
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/knowledge/poetry-graph",
+          "query": "",
+          "account": "A",
+          "at": 1792927015420
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "assistant-refresh-draft-scroll-drawers",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927016607
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/status",
+          "query": "",
+          "account": "A",
+          "at": 1792927016615
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/models",
+          "query": "",
+          "account": "A",
+          "at": 1792927016621
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927016623
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001",
+          "query": "",
+          "account": "A",
+          "at": 1792927016624
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927016624
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/attachments/draft",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927016653
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/messages/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927016654
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927016654
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?activeOnly=true&limit=50",
+          "account": "A",
+          "at": 1792927016654
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/00000000-0000-4000-8000-000000000002",
+          "query": "",
+          "account": "A",
+          "at": 1792927016654
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927016686
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927016686
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927016828
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927016829
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/attachments/draft",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927016830
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/messages/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927016830
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927016830
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?activeOnly=true&limit=50",
+          "account": "A",
+          "at": 1792927016830
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/00000000-0000-4000-8000-000000000002",
+          "query": "",
+          "account": "A",
+          "at": 1792927016831
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927016831
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001",
+          "query": "",
+          "account": "A",
+          "at": 1792927016831
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927016845
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927016845
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/summaries/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927018275
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/messages/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50&cursor=older",
+          "account": "A",
+          "at": 1792927018471
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927018573
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927018574
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/attachments/draft",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927018574
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/messages/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927018574
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927018575
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?activeOnly=true&limit=50",
+          "account": "A",
+          "at": 1792927018575
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/00000000-0000-4000-8000-000000000002",
+          "query": "",
+          "account": "A",
+          "at": 1792927018575
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927018576
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001",
+          "query": "",
+          "account": "A",
+          "at": 1792927018576
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927018604
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927018605
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?activeOnly=true&limit=50",
+          "account": "A",
+          "at": 1792927019146
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001",
+          "query": "",
+          "account": "A",
+          "at": 1792927019147
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "assistant-capability-read-failure-never-authorizes",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927020153
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/status",
+          "query": "",
+          "account": "A",
+          "at": 1792927020164
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/models",
+          "query": "",
+          "account": "A",
+          "at": 1792927020168
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927020172
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001",
+          "query": "",
+          "account": "A",
+          "at": 1792927020172
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927020173
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/attachments/draft",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927020203
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/messages/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927020203
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927020204
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?activeOnly=true&limit=50",
+          "account": "A",
+          "at": 1792927020204
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/00000000-0000-4000-8000-000000000002",
+          "query": "",
+          "account": "A",
+          "at": 1792927020204
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927020237
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927020237
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927020389
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/status",
+          "query": "",
+          "account": "A",
+          "at": 1792927020389
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/models",
+          "query": "",
+          "account": "A",
+          "at": 1792927020404
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "studio-permission-failure-clears-retained-records",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927022139
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/workflow/node-types",
+          "query": "",
+          "account": "A",
+          "at": 1792927022145
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/creations",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792927022145
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/workflows",
+          "query": "?page=0&size=100",
+          "account": "A",
+          "at": 1792927022145
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/creations",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792927022242
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "assistant-storage-permission-clears-retained-usage",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927022487
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/status",
+          "query": "",
+          "account": "A",
+          "at": 1792927022502
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/models",
+          "query": "",
+          "account": "A",
+          "at": 1792927022510
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927022513
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001",
+          "query": "",
+          "account": "A",
+          "at": 1792927022513
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/page",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927022514
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/attachments/draft",
+          "query": "?limit=50",
+          "account": "A",
+          "at": 1792927022542
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/messages/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927022543
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?branchId=00000000-0000-4000-8000-000000000002&limit=50",
+          "account": "A",
+          "at": 1792927022543
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/runs/page",
+          "query": "?activeOnly=true&limit=50",
+          "account": "A",
+          "at": 1792927022543
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/sessions/00000000-0000-4000-8000-000000000001/branches/00000000-0000-4000-8000-000000000002",
+          "query": "",
+          "account": "A",
+          "at": 1792927022544
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000110/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927022578
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/runs/00000000-0000-4000-8000-000000000112/choices",
+          "query": "",
+          "account": "A",
+          "at": 1792927022579
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/storage",
+          "query": "",
+          "account": "A",
+          "at": 1792927022629
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assistant/storage",
+          "query": "",
+          "account": "A",
+          "at": 1792927022669
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "auth-slow-retry-expiry-motion",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927022858
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/favorites/paintings",
+          "query": "?page=0&size=12",
+          "account": "A",
+          "at": 1792927033864
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927033881
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927033881
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927033881
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me/favorites/paintings",
+          "query": "?page=1&size=12",
+          "account": "A",
+          "at": 1792927033949
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "detail-and-image-loading",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927034090
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings/00000000-0000-4000-8000-000000000090",
+          "query": "",
+          "account": "A",
+          "at": 1792927034100
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927035504
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings/00000000-0000-4000-8000-000000000090/guide",
+          "query": "",
+          "account": "A",
+          "at": 1792927035516
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/critic/capability",
+          "query": "",
+          "account": "A",
+          "at": 1792927035516
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings/00000000-0000-4000-8000-000000000090/critic",
+          "query": "",
+          "account": "A",
+          "at": 1792927035517
+        }
+      ],
+      "unknown": []
+    },
+    {
+      "name": "rapid-route-navigation",
+      "status": "PASS",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/user/profile",
+          "query": "",
+          "account": "A",
+          "at": 1792927038176
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings",
+          "query": "?page=0&size=12&sort=daily&direction=asc",
+          "account": "A",
+          "at": 1792927038198
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings/daily",
+          "query": "",
+          "account": "A",
+          "at": 1792927038198
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927038210
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/knowledge/painting-statistics",
+          "query": "",
+          "account": "A",
+          "at": 1792927038312
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings",
+          "query": "?page=0&size=12&sort=daily&direction=asc",
+          "account": "A",
+          "at": 1792927040687
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/paintings/daily",
+          "query": "",
+          "account": "A",
+          "at": 1792927040687
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927040690
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001090/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044048
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001091/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044048
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001092/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044048
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001093/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044048
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001094/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044048
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001095/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044048
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001096/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044048
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001097/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044049
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001098/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044049
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001099/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044049
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001100/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044049
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/assets/00000000-0000-4000-8000-000000001101/content",
+          "query": "",
+          "account": "A",
+          "at": 1792927044049
+        }
+      ],
+      "unknown": []
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "screenshots/desktop-gallery-loading.png",
+      "sha256": "18309b061da07c82d99d3b8b81e3a1e8dacf6b92f8fb4ad97f1342fc1a1d3fc4"
+    },
+    {
+      "file": "screenshots/desktop-gallery-ready.png",
+      "sha256": "a4a6ca9f30bfe37dd94f349a76cf7efe87ef310ffc03276d9f907dc7451b3210"
+    },
+    {
+      "file": "screenshots/desktop-knowledge-loading.png",
+      "sha256": "3c62df55e17f4f8ed4927de84b6741a7f365d46499c9a111ade71ac5ca55c22d"
+    },
+    {
+      "file": "screenshots/desktop-knowledge-ready.png",
+      "sha256": "d0942ed87b05eb240b5db71381bfbd5a69cef0330e7c09a4f139d4ed65ebb15a"
+    },
+    {
+      "file": "screenshots/desktop-studio-loading.png",
+      "sha256": "23d5a156fe08052593b07cb1e0a6dba483b9601691623363076e4e94b6fd790d"
+    },
+    {
+      "file": "screenshots/desktop-studio-ready.png",
+      "sha256": "26e240e1a23a235a7485c948d37bbc451a65cae5d173b759beff677ed7ab2e9e"
+    },
+    {
+      "file": "screenshots/desktop-assistant-loading.png",
+      "sha256": "ea11cd8db7e6a437841b9f2c869749efe3b25893cd8f814c2c4a68f2f2b1b439"
+    },
+    {
+      "file": "screenshots/desktop-assistant-ready.png",
+      "sha256": "e23be8862fea5cc6186cb37ab618dc837ae86a9baeab194cc7cd6f7e7ec3e713"
+    },
+    {
+      "file": "screenshots/desktop-me-loading.png",
+      "sha256": "c5ba032fc842c68a6929efd4ed158642ea6df4a6c4b2c26e89c709d559623095"
+    },
+    {
+      "file": "screenshots/desktop-me-ready.png",
+      "sha256": "4966a10162034e16e9ffa284c0bf2a6277aa3c764ef3557a149bf734718b80e5"
+    },
+    {
+      "file": "screenshots/mobile-gallery-loading.png",
+      "sha256": "713cf8b157c0951c87c4c927eae171c7db6494f0c93ba39a6ef1a6855490ca1b"
+    },
+    {
+      "file": "screenshots/mobile-gallery-ready.png",
+      "sha256": "599b55c18934f813a6b4e387c1e6def64a4cfefd80ca39044095e9ac42cdf975"
+    },
+    {
+      "file": "screenshots/mobile-knowledge-loading.png",
+      "sha256": "51fe20beebe5be12bd9a804afb81f36bb57f8bca40c0b4210a431abef63c8567"
+    },
+    {
+      "file": "screenshots/mobile-knowledge-ready.png",
+      "sha256": "0785149961600506e0e3228a07d0b52b57067c42bd50d605fcb7cb32728d28aa"
+    },
+    {
+      "file": "screenshots/mobile-studio-loading.png",
+      "sha256": "5bdb932e7644b28ff68a5a37d2d18c7bed94960dcb2ad9d8479b1df9dbbbac22"
+    },
+    {
+      "file": "screenshots/mobile-studio-ready.png",
+      "sha256": "1de36439ea2b19a2587e8ce9c35fd6cf53175b4b5c914a7a5b6a40fabfba010f"
+    },
+    {
+      "file": "screenshots/mobile-assistant-loading.png",
+      "sha256": "047618d74d97f780a5c1df14cdfb47cd7165ff9fb64d1cdf69fcb5b7279b31fa"
+    },
+    {
+      "file": "screenshots/mobile-assistant-ready.png",
+      "sha256": "e7bb9937c3a48edb14167b7242c5e9b6426e1cb1a8db103d59966f4eea4c2a5f"
+    },
+    {
+      "file": "screenshots/mobile-me-loading.png",
+      "sha256": "c80d31c4bd1772d8df589a6a25e402948057f4ddebd70e1989c16dc49e943fc1"
+    },
+    {
+      "file": "screenshots/mobile-me-ready.png",
+      "sha256": "42002b04759371659791e908f57412f3e04c4ede357644344953918653fd11de"
+    },
+    {
+      "file": "screenshots/profile-independent-failure-retry-account-partial-error.png",
+      "sha256": "6f744ce64b09ed946ddf97d475dfdfecdab57609056f825ff4fbcd22ad1e4831"
+    },
+    {
+      "file": "screenshots/studio-list-failure-keeps-editor-and-results-partial-failure.png",
+      "sha256": "838217f1ce8f527fcf37dda790ec59ebe5f1764d9bfaa56e0533715ddf71cdf0"
+    },
+    {
+      "file": "screenshots/assistant-capability-read-failure-never-authorizes-model-unverified.png",
+      "sha256": "86230590e5fb8786145e9828459818244028435b4a75f56e78320054c8d146f8"
+    },
+    {
+      "file": "screenshots/assistant-storage-permission-clears-retained-usage-forbidden-usage.png",
+      "sha256": "694b2b22bce2c1d430ad521a5b7fcf0b87b584a2e246b57b8da02e503acce5a8"
+    },
+    {
+      "file": "screenshots/detail-and-image-loading-detail-skeleton.png",
+      "sha256": "70e0cbe9c9dabe4d775742f8996492c243973792df1c766b9e69a13282c20aeb"
+    },
+    {
+      "file": "screenshots/gallery-independent-query-race-pagination.png",
+      "sha256": "bcce5ec40fc99a9074998cd1f58c17a7cbdae5ab2defdf29bb39097b5edacc96"
+    },
+    {
+      "file": "screenshots/assistant-refresh-draft-scroll-drawers-retained-history.png",
+      "sha256": "4303b07773e5c7fa0dca208df80412d6e0226a06bf41c7b79e1c72348e5a5da1"
+    }
+  ],
+  "assistant": [
+    {
+      "name": "desktop-reference-states",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "mobile-reference-states",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "long-composer-attachments-refresh",
+      "status": "PASS",
+      "source": "assistant-attachment-final"
+    },
+    {
+      "name": "branch-pagination-and-source-association",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "markdown-safety-and-server-choices",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "stream-cancel-refresh-recovery",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "uncertain-submit-resolves-without-replay",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "honest-loading-empty-errors",
+      "status": "PASS",
+      "source": "assistant-2"
+    },
+    {
+      "name": "suspended-history-account-isolation",
+      "status": "PASS",
+      "source": "assistant-2"
+    },
+    {
+      "name": "keyboard-picker-speech-artwork-selection",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "pagination-failure-preserves-loaded-input",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "source-identity-mismatch-refused",
+      "status": "PASS",
+      "source": "assistant-2"
+    },
+    {
+      "name": "history-only-retains-records",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "visual-viewport-keyboard",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "other-route-style-isolation",
+      "status": "PASS",
+      "source": "assistant-1"
+    },
+    {
+      "name": "unavailable",
+      "status": "PASS",
+      "source": "assistant-2"
+    },
+    {
+      "name": "empty-conversation",
+      "status": "PASS",
+      "source": "assistant-1"
+    }
+  ],
+  "studio": [
+    {
+      "name": "history-does-not-populate-music-editor",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "modified-save-does-not-resurrect-history",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "acknowledged-audio-controls-and-duration-invalidation",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "new-music-default-acknowledges-ten-second-audio",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "definitive-422-does-not-become-uncertain",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "definitive-503-does-not-become-uncertain",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "source-replacement-invalidates-acknowledged-audio",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "save-preserves-text-and-same-workflow-draft",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "save-preserves-catalog-source",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "save-success-list-refresh-failure-does-not-duplicate",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "definitive-workflow-422-preserves-editable-save-state",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "unresolved-save-500-remains-guarded-after-list-refresh",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "workflow-load-failure-cannot-save-previous-editor",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "late-history-after-clear-is-rejected",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "late-workflow-response-after-clear-is-rejected",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "late-gallery-results-cannot-replace-new-context",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "late-save-after-normal-logout-cannot-restore-editor",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "late-poll-after-context-change-cannot-populate-editor",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "uncertain-submit-blocks-button-edits-open-new-and-remount",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "rapid-double-click-one-acknowledged-submission",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "fast-ack-second-mouse-click-does-not-resubmit-before-poll",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "old-current-poll-cannot-regress-history-terminal",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "old-history-detail-cannot-regress-current-terminal",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "unknown-acknowledged-state-keeps-guard-until-new-context",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "explicit-same-ack-terminal-read-resolves-observation-guard",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "mismatched-step-cannot-render-as-current-music",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "history-failure-is-not-empty",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "history-loading-is-not-empty",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "successful-empty-history-shows-empty",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "audio-unavailable-message-does-not-call-it-image",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "logout-rejects-late-history-and-media",
+      "status": "PASS",
+      "source": "studio-2"
+    },
+    {
+      "name": "late-media-after-normal-logout-is-rejected",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "late-audio-media-cannot-overwrite-other-history",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "invalid-wav-has-audio-playback-error",
+      "status": "PASS",
+      "source": "studio-2"
+    },
+    {
+      "name": "save-preserves-selected-local-file",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "owned-upload-music-persistence-and-duration-bounds",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "catalog-upload-switch-clears-stale-identities",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "old-core-still-refuses-upload-ui",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "capability-failure-is-distinct-from-empty-history",
+      "status": "PASS",
+      "source": "studio-2"
+    },
+    {
+      "name": "layout-1440",
+      "status": "PASS",
+      "source": "studio-1"
+    },
+    {
+      "name": "layout-390",
+      "status": "PASS",
+      "source": "studio-1"
+    }
+  ]
+}

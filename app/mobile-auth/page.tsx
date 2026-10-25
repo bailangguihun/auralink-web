@@ -1,5 +1,6 @@
 "use client";
 
+import { PendingIndicator } from "@/components/loading";
 import { useEffect, useState } from "react";
 
 const TOKEN_KEY = "artlive.session.token.v1";
@@ -43,10 +44,10 @@ export default function MobileAuthPage() {
 
   return (
     <main className="page-shell availability-page">
-      <section className="state-panel glass-panel state-loading">
-        <span className="state-symbol">墨</span>
+      <section className="read-pending glass-panel">
+        {!error ? <PendingIndicator /> : null}
         <div>
-          <h1>{error ? "无法同步登录状态" : "正在同步小程序登录状态"}</h1>
+          <h1 role={error ? "alert" : "status"}>{error ? "无法同步登录状态" : "正在同步小程序登录状态"}</h1>
           <p>{error ?? "即将进入 ArtLIVE 功能页面，无需再次输入账号密码。"}</p>
         </div>
       </section>

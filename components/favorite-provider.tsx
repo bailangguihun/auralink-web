@@ -27,6 +27,11 @@ const FavoriteContext = createContext<FavoriteContextValue | null>(null);
  * generation; an old response is never allowed to affect a newer session.
  */
 export function FavoriteProvider({ children }: { children: React.ReactNode }) {
+  const { sessionIdentity } = useSession();
+  return <FavoriteScope key={sessionIdentity.generation}>{children}</FavoriteScope>;
+}
+
+function FavoriteScope({ children }: { children: React.ReactNode }) {
   const { token, status, sessionIdentity, isCurrentSession } = useSession();
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<Set<string>>(new Set());

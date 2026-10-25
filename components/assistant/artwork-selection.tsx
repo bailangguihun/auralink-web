@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { LoadingStatus } from '@/components/loading';
 import Link from 'next/link';
 import { isAbortError } from '@/lib/api';
 import { assistantRequest } from '@/lib/assistant-api';
@@ -64,7 +65,7 @@ export function ArtworkSelection({ selected, onChange, disabled }: { selected: A
       <p className={styles.meta}>关键词按作品名、作者、题材匹配；其他筛选项按平台已有值精确匹配。留空可浏览当前公开作品。同名作品请结合作者、作品 ID 与详情区分。</p>
       <div className={styles.inline}><button type="button" className="button" disabled={disabled || loading} onClick={() => void search(query)}>{loading ? '正在查找…' : '查找作品'}</button><button type="button" className="button" disabled={disabled || loading} onClick={() => setQuery(emptyArtworkQuery())}>清空筛选条件</button></div>
       {error ? <p role="alert" className={styles.error}>{error}{page ? ' 下方仍是上次成功查询的结果。' : ''}</p> : null}
-      {loading ? <p role="status">正在读取平台公开资料…</p> : null}
+      {loading ? <LoadingStatus label={page ? "正在读取新查询，以下仍是上次成功查询的结果" : "正在读取平台公开资料"} /> : null}
       {page ? <>
         <p role="status" data-testid="artwork-result-count">匹配 {page.totalElements} 幅 · 本页 {page.items.length} 幅 · 已选 {selected.length}/{ARTWORK_SELECTION_LIMIT} 幅</p>
         {!page.items.length ? <p>本页没有匹配的公开作品。可以调整筛选条件；未选作品时发送的是普通对话，不宣称已查询平台资料。</p> : null}

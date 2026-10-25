@@ -136,3 +136,7 @@
 .page[data-compact-viewport="true"] .composerStatus { max-height:40px; }
 .page[data-compact-viewport="true"] .composer textarea { max-height:60px !important; }
 .page[data-compact-viewport="true"] .panel:not(.modelMenu) { top:76px; bottom:6px; max-height:calc(var(--assistant-height,100dvh) - 82px); }
+
+.loadingMessages { max-width:680px; display:grid; gap:32px; padding:20px 0; }
+.loadingMessages > :first-child { width:55%; justify-self:end; }
+.attachmentPlaceholder { width:300px; max-width:100%; max-height:300px; min-height:50px; border-radius:8px; overflow:hidden; }

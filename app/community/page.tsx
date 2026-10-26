@@ -1,4 +1,11 @@
 import type { Metadata } from "next";
-import { AvailabilityPage } from "@/components/availability-page";
+import { CommunityScreen } from "@/components/community/community-screen";
+import { CommunityLoading } from "@/components/community/community-loading";
+import { ProtectedRoute } from "@/components/protected-route";
 export const metadata: Metadata = { title: "社区" };
-export default function CommunityPage() { return <AvailabilityPage title="社区" description="作品分享、发帖与互动需要完整的社区后端。" />; }
+export default async function CommunityPage({ searchParams }: { searchParams: Promise<{ paintingId?: string }> }) {
+  const query = await searchParams;
+  return <main className="page-shell community-page"><ProtectedRoute fallback={<CommunityLoading />}>
+    <CommunityScreen initialPaintingId={typeof query.paintingId === "string" ? query.paintingId : null} />
+  </ProtectedRoute></main>;
+}

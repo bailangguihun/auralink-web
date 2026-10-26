@@ -101,6 +101,7 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
         <div className="detail-media glass-panel"><MediaImage image={painting.image} alt={painting.title || "无题画作"} /></div>
         <div className="detail-actions">
           <Link className="button" href="/gallery"><ArrowIcon direction="left" /> 返回画廊</Link>
+          <Link className="button" href={"/community?paintingId=" + encodeURIComponent(painting.paintingId)}>引用作品发帖</Link>
           <button className={`button${favorited ? " button-primary" : ""}`} type="button" disabled={isFavoriteBusy(painting.paintingId)} onClick={toggleFavorite}><HeartIcon filled={favorited} /> {favorited ? "已收藏" : "收藏"}</button>
         </div>
         {error ? <p className="inline-error" role="alert">{error}</p> : null}

@@ -1,4 +1,5 @@
-import { communityOrigin, communityPath } from "@/lib/community-proxy";
+import { communityPath } from "@/lib/community-proxy";
+import { configuredCommunityOrigin } from "@/lib/community-host-origin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const headers = { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store" };
@@ -7,16 +8,18 @@ function failure(status: number, code: string, message: string) {
 }
 async function proxy(request: Request, context: { params: Promise<{ path: string[] }> }) {
   let destination: string;
+  let origin: string | null;
+  try { origin = await configuredCommunityOrigin(); }
+  catch { return failure(503, "COMMUNITY_CONFIGURATION_INVALID", "社区配置暂不可用，请稍后再来。"); }
+  if (!origin) return failure(503, "COMMUNITY_NOT_CONFIGURED", "社区暂未开放，请稍后再来。");
   try {
-    const origin = communityOrigin(process.env.COMMUNITY_INTERNAL_ORIGIN);
-    if (!origin) return failure(503, "COMMUNITY_NOT_CONFIGURED", "社区暂未开放，请稍后再来。");
     destination = origin + communityPath((await context.params).path) + new URL(request.url).search;
   } catch { return failure(404, "NOT_FOUND", "接口不存在。"); }
   const authorization = request.headers.get("authorization");
   if (!authorization || !/^Bearer [^\s,]{1,8192}$/.test(authorization)) return failure(401, "UNAUTHORIZED", "请先登录。");
   const forwarded: Record<string, string> = { authorization, accept: "application/json" };
-  const origin = request.headers.get("origin");
-  if (origin) forwarded.origin = origin;
+  const browserOrigin = request.headers.get("origin");
+  if (browserOrigin) forwarded.origin = browserOrigin;
   let payload: Uint8Array | undefined;
   if (!["GET", "HEAD"].includes(request.method)) {
     if (!request.headers.get("content-type")?.startsWith("application/json")) return failure(415, "JSON_REQUIRED", "请提交 JSON。");

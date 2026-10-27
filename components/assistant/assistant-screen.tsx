@@ -7,7 +7,7 @@ import { AssistantLoading, ConversationLoading } from './assistant-loading';
 import { StatePanel } from '@/components/state-panel';
 import { ApiError, isAbortError } from '@/lib/api';
 import { assistantPage, assistantRequest, exportAssistant, OperationLedger } from '@/lib/assistant-api';
-import { terminal, stateLabel, retrievalLabel, stageLabels, mergeItems, ragflowAvailable, assistantRetrievalRequest, assistantGenerationAvailable, assistantGenerationNotice, type AssistantStatus, type AssistantSession, type Branch, type Message, type Run, type Registry, type Citation, type Choice, type Summary, type Timeline, type Page, type ArtworkReference, assistantDate, platformCitationFields } from '@/lib/assistant-contracts';
+import { terminal, stateLabel, stageLabels, mergeItems, ragflowAvailable, assistantRetrievalRequest, assistantGenerationAvailable, assistantGenerationNotice, type AssistantStatus, type AssistantSession, type Branch, type Message, type Run, type Registry, type Citation, type Choice, type Summary, type Timeline, type Page, type ArtworkReference, assistantDate, platformCitationFields } from '@/lib/assistant-contracts';
 import { subscribeAssistant } from '@/lib/assistant-stream';
 import { useAssistantAccess } from './use-assistant-access';
 import { useAssistantAttachments } from './use-assistant-attachments';
@@ -18,7 +18,7 @@ import { ArtworkSelection } from './artwork-selection';
 import { selectedArtworkReferences, reconcileRejectedArtworkSubmission, artworkRunFailureNotice } from '@/lib/assistant-artworks';
 import { AssistantPanel, AssistantModelPicker } from './assistant-panels';
 import { AssistantMarkdown } from './assistant-markdown';
-import { assertAssistantSources } from '@/lib/assistant-presentation';
+import { assistantMarkdownLink, assertAssistantSources } from '@/lib/assistant-presentation';
 import styles from './assistant.module.css';
 const enc = encodeURIComponent;
 const empty = <T,>(): Page<T> => ({ items: [], nextCursor: null, hasMore: false });
@@ -283,6 +283,13 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const summary = async () => act(async () => { requireGeneration(); const payload = { branchId }; const scope = `SUMMARY_EXECUTION:${id}`; const key = await ledger.key(scope, payload); const run = await request((token, signal) => assistantRequest<Run>(`/sessions/${enc(id)}/summaries`, token, signal, 'POST', { ...payload, requestKey: key })); ledger.resolved(scope); setLive(run); setSummaryOpen(true); reload(); });
   const classify = async (row: Timeline, label: string) => act(async () => { const payload = { expectedVersion: row.classificationVersion, label }; const scope = `CLASSIFY_MESSAGE:${id}:${row.messageId}`; const key = await ledger.key(scope, payload); await request((token, signal) => assistantRequest(`/sessions/${enc(id)}/messages/${enc(row.messageId)}/classification`, token, signal, 'POST', { ...payload, requestKey: key })); ledger.resolved(scope); reload(); });
   const currentLive = live && live.branchId === branchId ? live : null;
+  const sourceRows = messages.items.flatMap((message, index) => {
+    if (message.role !== 'ASSISTANT' || !message.runId) return [];
+    const question = messages.items.slice(0, index).reverse().find(item => item.role === 'USER')?.body || '助手回复';
+    const turn = messages.items.slice(0, index + 1).filter(item => item.role === 'USER').length;
+    return [{ message, question, turn }];
+  }).reverse();
+  const knowledgeSearchAvailable = ragflowAvailable(registry);
   useLayoutEffect(() => {
     const area = textareaRef.current; if (!area) return;
     area.style.height = 'auto'; area.style.height = `${Math.min(area.scrollHeight, 124)}px`;
@@ -347,6 +354,8 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
         <AssistantModelPicker registry={registry} value={model} onChange={setModel} disabled={busy || !generationReady} />
         <div className={styles.inputTools}>
           <button type="button" className={styles.small} onClick={() => setPanel('artworks')} aria-haspopup="dialog">平台作品</button>
+          <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-pressed="false" disabled title="联网搜索接口尚未配置">联网搜索</button>
+          <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-pressed={ragflow} disabled={!knowledgeSearchAvailable || busy || !!pendingChat} title={knowledgeSearchAvailable ? '为下一条消息启用知识库检索' : '知识库接口已预留，RAGFlow 尚未配置'} onClick={() => setRagflow(value => !value)}>{ragflow ? '✓ ' : ''}知识库检索</button>
           <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png" disabled={busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
           {speech.supported ? <button type="button" className={styles.small} onClick={speech.listen}>{speech.listening ? '停止语音' : '语音输入'}</button> : null}
           {speech.speaking ? <button type="button" className={styles.small} onClick={speech.stop}>停止朗读</button> : null}
@@ -364,15 +373,14 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       {messages.items.filter(message => message.role === 'USER').map(message => <article key={message.id} className={styles.historyCard} data-message-id={message.id}><time>{assistantDate(message.createdAt).toLocaleString('zh-CN')}</time><p className={styles.body}>{message.body || '图片输入'}</p>{message.attachmentIds.map(image => <PrivateAttachment key={image} id={image} />)}<button className={styles.small} onClick={() => { setPanel(null); requestAnimationFrame(() => { const node = document.querySelector(`[data-testid="assistant-message"][data-message-id="${message.id}"]`) as HTMLElement | null; if (node) { node.tabIndex = -1; node.focus({ preventScroll: true }); node.scrollIntoView({ block: 'center' }); } }); }}>定位原消息</button></article>)}
     </AssistantPanel> : null}
     {panel === 'sources' ? <AssistantPanel title="资料来源" eyebrow="SOURCES & REFERENCES" close={() => setPanel(null)}>
-      <p className={styles.meta}>按当前分支的回复与执行记录关联。这里只展示服务器保存的来源，正文编号不代表已核验引用。</p>
+      <p className={styles.meta}>按对话轮次查看已保存的平台作品、知识库、文献与联网检索结果。</p>
       {messages.loading ? <p role="status">正在读取回复记录…</p> : null}<LoadMore page={messages} label="加载更早回复与来源" />
       {!messages.loading && !messages.error && !messages.items.some(message => message.role === 'ASSISTANT' && message.runId) ? <p>已载入的记录中暂无可关联的回复执行。</p> : null}
-      {messages.items.filter(message => message.role === 'ASSISTANT' && message.runId).map(message => <SourceRecord key={message.id} message={message} access={access} expanded={sourceRun === message.runId} onToggle={open => setSourceRun(open ? message.runId : null)} available={status.executionAvailable} />)}
+      {sourceRows.map(row => <SourceRecord key={row.message.id} {...row} access={access} expanded={sourceRun === row.message.runId} onToggle={open => setSourceRun(open ? row.message.runId : null)} available={status.executionAvailable} />)}
     </AssistantPanel> : null}
     {panel === 'artworks' ? <AssistantPanel title="平台作品参考" eyebrow="ARTWORKS" close={() => setPanel(null)}><ArtworkSelection selected={selectedArtworks} onChange={setSelectedArtworks} disabled={busy || !!pendingChat} /></AssistantPanel> : null}
     {panel === 'tools' ? <AssistantPanel title="工具与恢复" eyebrow="TOOLS & STORAGE" close={() => setPanel(null)}>
       <p>Enter 发送，Shift + Enter 换行。语音转写先进入输入框，由你编辑确认；浏览器可能使用在线语音服务。{!speech.supported ? '当前浏览器不支持语音输入。' : ''}图片仅支持 JPEG／PNG，最多 4 张。离开页面不会取消已受理的生成。</p>
-      {ragflowAvailable(registry) ? <label className={styles.inline}><input type="checkbox" checked={ragflow} onChange={event => setRagflow(event.target.checked)} />RAG 文档检索</label> : null}
       <AssistantStorage access={access} revision={revision + draft.storageRevision} />
             <details className={`glass-panel ${styles.tools}`} open={timelineOpen} onToggle={event => setTimelineOpen(event.currentTarget.open)}><summary>创作记录</summary><p>仅记录助手中的交流；阶段分类不代表平台工作坊或现实创作行为。</p>{timeline.loading ? <p role="status">正在读取创作记录…</p> : null}<LoadMore page={timeline} label="加载更早记录" />{timeline.items.map(row => <article key={row.messageId}><span className={styles.meta}>{assistantDate(row.createdAt).toLocaleString('zh-CN')} · {row.role === 'USER' ? '我' : '助手'} · {stateLabel(row.state)}</span><p className={styles.body}>{row.body}</p><label>阶段分类<select aria-label={`阶段分类 ${row.messageId}`} value={row.classification || ''} disabled={busy} onChange={event => void classify(row, event.target.value)}><option value="" disabled>未分类</option>{stageLabels.map(label => <option key={label}>{label}</option>)}</select></label><small>来源：{row.classificationSource === 'USER' ? '用户分类' : '规则分类'} · 版本 {row.classificationVersion}</small></article>)}{!timeline.error && !timeline.loading && !timeline.items.length ? <p>当前分支暂无创作记录。</p> : null}</details>
       <details className={`glass-panel ${styles.tools}`}><summary>执行状态与恢复</summary><p>刷新与重连只读取同一任务。结果不确定时不会自动重新执行；明确重试使用该执行的原模型与配置，是新的尝试；上一次仍可能产生费用。</p>{runs.items.map(run => <article key={run.id}><p>{run.kind} · {stateLabel(run.status)} · 尝试 {run.attempt} · {run.modelKey}</p>{run.errorCode ? <p>{run.errorCode}</p> : null}{['FAILED', 'CANCELLED', 'INTERRUPTED'].includes(run.status) ? <button className="button" disabled={busy || !!running || !generationAvailable} onClick={() => void retry(run)}>明确重试</button> : null}</article>)}<LoadMore page={runs} label="更多执行记录" /></details>
@@ -382,9 +390,9 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   </div>;
 }
 
-function SourceRecord({ message, access, expanded, onToggle, available }: { message: Message; access: Access; expanded: boolean; onToggle: (value: boolean) => void; available: boolean }) {
+function SourceRecord({ message, question, turn, access, expanded, onToggle, available }: { message: Message; question: string; turn: number; access: Access; expanded: boolean; onToggle: (value: boolean) => void; available: boolean }) {
   return <section className={styles.sourceCard} data-source-run={message.runId}>
-    <button className={styles.sourceHeading} aria-expanded={expanded} onClick={() => onToggle(!expanded)}><span><strong>{message.body.slice(0, 72) || '助手回复'}</strong><small>{assistantDate(message.createdAt).toLocaleString('zh-CN')}</small></span><span aria-hidden>{expanded ? '−' : '＋'}</span></button>
+    <button className={styles.sourceHeading} aria-expanded={expanded} onClick={() => onToggle(!expanded)}><span><small>第 {turn} 轮 · {assistantDate(message.createdAt).toLocaleString('zh-CN')}</small><strong>{question.slice(0, 72)}</strong></span><span className={styles.sourceCount} aria-label={expanded ? '收起来源' : '展开来源'}>{expanded ? '−' : '＋'}</span></button>
     {expanded ? available ? <SourceDetails key={message.runId} message={message} access={access} /> : <p>当前为历史模式，来源读取接口暂不可用，不能据此判断没有来源。</p> : null}
   </section>;
 }
@@ -403,10 +411,23 @@ function SourceDetails({ message, access }: { message: Message; access: Access }
   }, [message.runId, message.sessionId, request, revision]);
   if (error) return <p role="alert">{error}<button className={styles.small} onClick={() => setRevision(value => value + 1)}>重新读取本条来源</button></p>;
   if (!data) return <LoadingSection label="正在读取本条回复的来源" onRetry={() => setRevision(value => value + 1)}><SkeletonRows lines={5} /></LoadingSection>;
-  return <div className={styles.sourceBody}><p className={styles.meta}>回复 {message.id}<br />执行 {data.run.id} · {data.run.modelKey}</p>
-    {Object.entries(data.run.retrieval || {}).map(([source, result]) => <p className={styles.meta} key={source}>{source === 'artworks' ? '平台作品' : source === 'ragflow' ? 'RAG 文档' : source}：{retrievalLabel(result && typeof result === 'object' && 'state' in result ? result.state : result)}</p>)}
-    {data.citations.length ? data.citations.map(citation => <CitationView key={citation.id} citation={citation} />) : <p>本次执行没有保存可追溯来源。模型的回答与编号不能替代来源证据。</p>}
+  const artworks = data.citations.filter(citation => citation.sourceType === 'PLATFORM_ARTWORK');
+  const knowledge = data.citations.filter(citation => citation.sourceType === 'RAGFLOW_DOCUMENT');
+  return <div className={styles.sourceBody}>
+    {artworks.length ? <SourceGroup title="平台作品" subtitle="来自 ArtLIVE 公开作品库" citations={artworks} empty="本次未使用平台作品" /> : null}
+    <SourceGroup title="知识库结果" subtitle="来自项目知识库" citations={knowledge} empty="本次检索暂无知识库结果" />
+    <SourceGroup title="文献结果" subtitle="来自文献库" citations={[]} empty="本次检索暂无文献结果" />
+    <SourceGroup title="网络结果" subtitle="联网检索结果" citations={[]} empty="本次检索暂无网络结果" />
   </div>;
+}
+
+function SourceGroup({ title, subtitle, citations, empty }: { title: string; subtitle: string; citations: Citation[]; empty: string }) {
+  const [page, setPage] = useState(0); const pageSize = 4; const pageCount = Math.max(1, Math.ceil(citations.length / pageSize)); const current = Math.min(page, pageCount - 1);
+  const visible = citations.slice(current * pageSize, (current + 1) * pageSize);
+  return <section className={styles.sourceGroup} data-testid={`source-group-${title}`}><header><span><h3>{title}</h3><small>{subtitle}</small></span><b>共 {citations.length} 项结果</b></header>
+    <div className={styles.sourceResults}>{visible.length ? visible.map(citation => <CitationView key={citation.id} citation={citation} />) : <p className={styles.sourceEmpty}>{empty}</p>}</div>
+    <footer><button type="button" className={styles.small} disabled={current === 0} onClick={() => setPage(value => Math.max(0, value - 1))}>上一页</button><span>{current + 1} / {pageCount}</span><button type="button" className={styles.small} disabled={current + 1 >= pageCount} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}>下一页</button></footer>
+  </section>;
 }
 
 function RunDetails({ id, known, access, choose, retry, disabled }: { id: string; known?: Run; access: Access; choose: (run: Run, card: string, option: string) => Promise<void>; retry: (run: Run) => Promise<void>; disabled: boolean }) {
@@ -417,7 +438,6 @@ function RunDetails({ id, known, access, choose, retry, disabled }: { id: string
   return <>
     <p className={styles.meta}>模型 {data.run.modelKey} · 尝试 {data.run.attempt}</p>
     {artworkRunFailureNotice(data.run.errorCode) ? <p className={styles.notice} role="alert">{artworkRunFailureNotice(data.run.errorCode)}</p> : null}
-    {Object.entries(data.run.retrieval || {}).map(([source, result]) => <p className={styles.meta} key={source}>{source === 'artworks' ? '平台作品' : source === 'ragflow' ? 'RAG 文档' : source}：{retrievalLabel(result && typeof result === 'object' && 'state' in result ? result.state : result)}</p>)}
     {data.choices.map(card => <section key={card.id} className={styles.choices} data-testid="choice-card"><h4>{card.title}</h4><p className={styles.meta}>选择卡使用当前模型继续对话，不附加输入框中的图片或重新检索。</p><div className={styles.inline}>{card.options.map(option => <button key={option.id} className="button" disabled={disabled} onClick={() => void choose(data.run, card.id, option.id)}>{option.label}</button>)}</div></section>)}
     {['FAILED', 'INTERRUPTED', 'CANCELLED'].includes(data.run.status) ? <div className={styles.notice}><p>{stateLabel(data.run.status)}。已保存的部分回复仍保留；明确重试使用原模型，可能产生新的费用。</p><button className="button" disabled={disabled} onClick={() => void retry(data.run)}>明确重试</button></div> : null}
   </>;
@@ -427,11 +447,11 @@ function CitationView({ citation }: { citation: Citation }) {
   const deliveryObserved = citation.provenance.deliveryEvidence === 'MODEL_STREAM_OBSERVED';
   const safeArtwork = citation.sourceType === 'PLATFORM_ARTWORK' && typeof artworkId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(artworkId);
   const fields = citation.sourceType === 'PLATFORM_ARTWORK' ? platformCitationFields(citation.excerpt) : null;
-  return <article className={styles.citation}><strong>{citation.sourceType === 'PLATFORM_ARTWORK' ? (deliveryObserved ? '平台作品 · 本次回答的文字快照' : '平台作品 · 已保存来源快照') : 'RAG 文档'} [{citation.ordinal}]</strong>
+  const title = typeof citation.provenance.title === 'string' ? citation.provenance.title : fields?.find(field => field.label === '作品名')?.value;
+  const url = typeof citation.provenance.url === 'string' ? assistantMarkdownLink(citation.provenance.url) : null;
+  return <article className={styles.citation}><header><strong>{title || (citation.sourceType === 'PLATFORM_ARTWORK' ? '平台作品' : '知识库资料')}</strong>{url ? <a href={url} target="_blank" rel="noopener noreferrer nofollow">在线阅读 ↗</a> : null}</header>
     {fields?.length ? fields.map((field, index) => <p key={index}>{field.label}：{field.value} <small>（{field.uncertainty || '未独立核验'}）{field.raw ? `原始文本：${field.raw}` : ''}</small></p>) : <p className={styles.body}>{citation.excerpt}</p>}
-    {citation.sourceType === 'PLATFORM_ARTWORK' ? <p className={styles.meta}>{deliveryObserved ? '已向模型提供以下公开文字并观察到响应；这不证明模型采用了每个字段，也不代表模型查看了原画。' : '这是已保存的来源记录；历史记录未核验是否实际提供给模型。'}当前详情可能已更新或不再可访问。记录事实与模型解释应分别理解。</p> : null}
-    {citation.provenance.contextTruncated === true ? <p className={styles.meta}>为控制上下文长度，仅提供了所记录字段的有界摘录；未提供的细节不应视为已核实。</p> : null}
     {safeArtwork ? <Link href={`/gallery/${artworkId}`}>查看当前受控作品详情</Link> : null}
-    <details><summary>引用与版本</summary><small>引用 {citation.id}<br />来源 {citation.sourceId}<br />版本 {citation.sourceVersion || '上游未提供版本'}<br />公开投影 {citation.projectionVersion || '不适用'}<br />摘录 SHA-256 {citation.excerptSha256}</small><small>{deliveryObserved ? '投递证据：已观察到模型流响应。' : citation.provenance.deliveryEvidence === 'LOOKUP_ONLY' ? '本次仅查询，未提交模型。' : '历史投递状态未核验。'}正文中的其他编号或链接不自动视为可信来源。</small></details>
+    {deliveryObserved ? <small>已用于本轮回复</small> : null}
   </article>;
 }

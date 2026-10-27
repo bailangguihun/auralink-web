@@ -1,19 +1,21 @@
 import { assistantImageFingerprint } from '../lib/assistant-api.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parsePage, validateAssistantResponse, mergeItems, artworkDisplay, assistantDate, platformCitationFields, ragflowAvailable, assistantRetrievalRequest, assistantGenerationAvailable, assistantGenerationNotice, type Registry } from '../lib/assistant-contracts.ts';
+import { parsePage, validateAssistantResponse, mergeItems, artworkDisplay, assistantDate, platformCitationFields, ragflowAvailable, webSearchAvailable, assistantRetrievalRequest, assistantGenerationAvailable, assistantGenerationNotice, type Registry } from '../lib/assistant-contracts.ts';
 import { resolveMediaUrl } from '../lib/media.ts';
 const id = '3b77654a-8c16-42f4-aaec-b1029f7559c3';
 test('RAG is an explicit available-registry opt-in independent of platform artworks', () => {
-  const registry = (state: string): Registry => ({ models: [], retrieval: { state }, configSha256: 'test-only' });
-  for (const candidate of [null, ...['DISABLED', 'NOT_CONFIGURED', 'UNAVAILABLE', 'FORBIDDEN', 'TIMEOUT', 'UNKNOWN'].map(registry)]) {
+  const registry = (state: string, webState: string = 'NOT_CONFIGURED'): Registry => ({ models: [], retrieval: { state }, webSearch: { state: webState }, configSha256: 'test-only' });
+  for (const candidate of [null, ...['DISABLED', 'NOT_CONFIGURED', 'UNAVAILABLE', 'FORBIDDEN', 'TIMEOUT', 'UNKNOWN'].map(state => registry(state))]) {
     assert.equal(ragflowAvailable(candidate), false);
-    assert.deepEqual(assistantRetrievalRequest(candidate, true, true), { artworks: true, ragflow: false });
-    assert.deepEqual(assistantRetrievalRequest(candidate, false, true), { artworks: false, ragflow: false });
+    assert.deepEqual(assistantRetrievalRequest(candidate, true, true), { artworks: true, ragflow: false, web: false });
+    assert.deepEqual(assistantRetrievalRequest(candidate, false, true), { artworks: false, ragflow: false, web: false });
   }
   assert.equal(ragflowAvailable(registry('AVAILABLE')), true);
-  assert.deepEqual(assistantRetrievalRequest(registry('AVAILABLE'), true, false), { artworks: true, ragflow: false });
-  assert.deepEqual(assistantRetrievalRequest(registry('AVAILABLE'), false, true), { artworks: false, ragflow: true });
+  assert.deepEqual(assistantRetrievalRequest(registry('AVAILABLE'), true, false), { artworks: true, ragflow: false, web: false });
+  assert.deepEqual(assistantRetrievalRequest(registry('AVAILABLE'), false, true), { artworks: false, ragflow: true, web: false });
+  assert.equal(webSearchAvailable(registry('NOT_CONFIGURED', 'AVAILABLE')), true);
+  assert.deepEqual(assistantRetrievalRequest(registry('NOT_CONFIGURED', 'AVAILABLE'), false, false, true), { artworks: false, ragflow: false, web: true });
 });
 test('Assistant attachment bearer allowlist accepts only fixed UUID content route', () => {
   assert.ok(resolveMediaUrl(`/api/v1/assistant/attachments/${id}/content`));

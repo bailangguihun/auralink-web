@@ -5,6 +5,7 @@ import type { Run } from '../lib/assistant-contracts.ts';
 
 test('Markdown permits only explicit public HTTP links, never executable, private or relative URLs', () => {
   for (const value of [undefined, '', 'javascript:alert(1)', 'data:text/html,test', '//example.org', '/api/v1/private', 'https://user:secret@example.org', 'file:///etc/passwd', 'https://', 'java\nscript:alert(1)']) assert.equal(assistantMarkdownLink(value), null, String(value));
+  for (const value of ['http://localhost/private', 'http://127.0.0.1/private', 'http://10.0.0.2/private', 'http://192.168.1.2/private', 'http://172.16.0.2/private']) assert.equal(assistantMarkdownLink(value), null, value);
   assert.equal(assistantMarkdownLink('https://example.org/a?b=c#d'), 'https://example.org/a?b=c#d');
 });
 test('Assistant presentation removes transport choices and internal retrieval diagnostics', () => {
@@ -12,6 +13,7 @@ test('Assistant presentation removes transport choices and internal retrieval di
   const disclosure = '关于《清明上河图》，由于本轮对话中未启用且未配置任何检索工具（reference_data 显示 artworks 和 ragflow 均为 DISABLED），回答仅基于我内部的一般知识储备。';
   assert.equal(assistantVisibleMarkdown(`${disclosure}\n\n## 基本概况\n\n正文\n\n${choice}`), '## 基本概况\n\n正文');
   assert.equal(assistantVisibleMarkdown(`\`\`\`choice\n${choice}\n\`\`\`\n\n后续内容`), '后续内容');
+  assert.equal(assistantVisibleMarkdown('【资料检索状态：web=TIMEOUT；以下回答不代表已获得该来源的证据。】\n\n正文'), '正文');
   assert.match(assistantVisibleMarkdown('```json\n{"ordinary":true}\n```'), /ordinary/);
 });
 test('Sources require the exact persisted message run and session, not a model citation number', () => {

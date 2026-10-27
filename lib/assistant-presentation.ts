@@ -1,5 +1,30 @@
 import type { Citation, Message, Run } from './assistant-contracts.ts';
 
+const retrievalDisclosure = /(?:reference_data|artworks\s*(?:和|and)\s*ragflow|\b(?:artworks|ragflow)\b[^\n]{0,80}\bDISABLED\b|未启用且未配置任何检索工具|回答仅基于[^\n]{0,80}一般知识储备|并非来自[^\n]{0,80}(?:数据库记录|权威文献引用))/i;
+
+function structuredChoice(value: unknown): boolean {
+  const cards = Array.isArray(value) ? value : [value];
+  return cards.length > 0 && cards.every(card => card && typeof card === 'object'
+    && typeof (card as { id?: unknown }).id === 'string'
+    && typeof (card as { title?: unknown }).title === 'string'
+    && Array.isArray((card as { options?: unknown }).options));
+}
+
+function choiceJson(value: string): boolean {
+  try { return structuredChoice(JSON.parse(value)); } catch { return false; }
+}
+
+/** Hide transport-only choice payloads and internal retrieval diagnostics from readers. */
+export function assistantVisibleMarkdown(value: string): string {
+  const withoutChoiceFences = value.replace(/```(?:choice|json)?\s*\n([\s\S]*?)```/gi, (block, body: string) => choiceJson(body.trim()) ? '' : block);
+  return withoutChoiceFences.split(/\n\s*\n/).filter(block => {
+    const text = block.trim();
+    if (!text) return false;
+    if (retrievalDisclosure.test(text)) return false;
+    return !((text.startsWith('[') || text.startsWith('{')) && choiceJson(text));
+  }).join('\n\n').trim();
+}
+
 /** Text links require a deliberate click; no model-authored URL is used as media. */
 export function assistantMarkdownLink(value: string | undefined): string | null {
   if (!value || !/^https?:\/\//i.test(value)) return null;

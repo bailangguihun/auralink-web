@@ -14,7 +14,7 @@ export function newState(options={}) {
  const attachment={id:id(80),sessionId:id(1),filename:'隔离山水草稿.png',mimeType:'image/png',byteSize:png.length,sha256:'0'.repeat(64),width:1,height:1,status:'READY',contentUrl:`/api/v1/assistant/attachments/${id(80)}/content`,draftExpiresAt:'2026-12-01T00:00:00Z'};
  const state={session,branches:[branch,{...branch,id:id(3),parentBranchId:id(2),headMessageId:id(21)}],messages:{[id(2)]:first,[id(3)]:[message(20,'USER','历史分支中的梅花问题'),message(21,'ASSISTANT','这是保留的历史分支回复。',id(120))]},runs:[run(110),run(112),run(120,id(3))],attachments:[],attachment,requests:[],writes:[],unknown:[],summaryReads:0,sourceReads:[],...options};
  if(options.long)state.messages[id(2)]=Array.from({length:60},(_,i)=>message(200+i,i%2?'ASSISTANT':'USER',i%2?prose:`长对话第 ${i/2+1} 个问题`));
- if(options.security)state.messages[id(2)].push(message(40,'ASSISTANT','<script>window.markdownExecuted=true</script>\n\n![不可信图片](https://never-fetch.invalid/secret.png)\n\n[危险链接](javascript:alert(1))\n\n[外链](https://example.invalid/)\n\n### 安全标题\n\n正文引用 [999] 尚未核验。'));
+ if(options.security)state.messages[id(2)].push(message(40,'ASSISTANT','<script>window.markdownExecuted=true</script>\n\n![不可信图片](https://never-fetch.invalid/secret.png)\n\n[危险链接](javascript:alert(1))\n\n[外链](https://example.invalid/)\n\n由于本轮对话中未启用且未配置任何检索工具（reference_data 显示 artworks 和 ragflow 均为 DISABLED），回答仅基于我内部的一般知识储备。\n\n### 安全标题\n\n正文引用 [999] 尚未核验。\n\n[{"id":"versions","title":"想了解哪个版本？","options":[{"id":"song","label":"北宋"}]}]'));
  if(options.draft)state.attachments=[attachment];
  if(options.active){const active=run(150,id(2),'EXECUTING');state.runs.push(active);}
  return state;

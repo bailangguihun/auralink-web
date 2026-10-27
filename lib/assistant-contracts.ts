@@ -15,11 +15,12 @@ export type Message = { id: string; sessionId: string; parentMessageId: string |
 export type Run = { id: string; sessionId: string; branchId: string; kind: string; status: string; inputMessageId: string; modelKey: string; sequence: number; checkpoint: string; retryOf: string | null; attempt: number; executionUncertain: boolean; retrieval: Record<string, unknown>; usage: Record<string, unknown>; errorCode: string | null; createdAt: AssistantTimestamp; updatedAt: AssistantTimestamp };
 export type Attachment = { id: string; sessionId: string; filename: string; mimeType: string; byteSize: number; sha256: string; width: number; height: number; status: string; contentUrl: string; draftExpiresAt?: AssistantTimestamp | null };
 export type Model = { id: string; label: string; providerId: string; modelId: string; configured: boolean; enabled: boolean; capabilities: { images: boolean; streaming: boolean; imageMimeTypes: string[] }; evidence: string };
-export type Registry = { models: Model[]; retrieval: { state: string }; configSha256: string };
+export type Registry = { models: Model[]; retrieval: { state: string }; webSearch?: { state: string }; configSha256: string };
 /** Core's registry is authoritative; an old checkbox value cannot enable an unavailable adapter. */
 export const ragflowAvailable = (registry: Registry | null) => registry?.retrieval?.state === 'AVAILABLE';
-export const assistantRetrievalRequest = (registry: Registry | null, artworks: boolean, ragflow: boolean) => ({ artworks, ragflow: ragflowAvailable(registry) && ragflow });
-export type Citation = { id: string; ordinal: number; sourceType: 'PLATFORM_ARTWORK' | 'RAGFLOW_DOCUMENT'; sourceId: string; sourceVersion: string; projectionVersion: string; provenance: Record<string, unknown>; excerpt: string; excerptSha256: string };
+export const webSearchAvailable = (registry: Registry | null) => registry?.webSearch?.state === 'AVAILABLE';
+export const assistantRetrievalRequest = (registry: Registry | null, artworks: boolean, ragflow: boolean, web: boolean = false) => ({ artworks, ragflow: ragflowAvailable(registry) && ragflow, web: webSearchAvailable(registry) && web });
+export type Citation = { id: string; ordinal: number; sourceType: 'PLATFORM_ARTWORK' | 'RAGFLOW_DOCUMENT' | 'WEB_RESULT'; sourceId: string; sourceVersion: string; projectionVersion: string; provenance: Record<string, unknown>; excerpt: string; excerptSha256: string };
 export type Choice = { runId: string; sourceMessageId: string; id: string; title: string; options: { id: string; label: string; text: string }[] };
 export type Summary = { id: string; branch_id: string; current_run_id: string; body: string; status: string; model_id: string; stale: boolean; usage: Record<string, unknown> };
 export type Timeline = { messageId: string; role: string; state: string; body: string; classification: string; classificationSource: string; classificationVersion: number; classifierVersion: string; runs: Run[]; createdAt: AssistantTimestamp };

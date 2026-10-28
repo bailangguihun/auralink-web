@@ -11,7 +11,14 @@ function structuredChoice(value: unknown): boolean {
 }
 
 function choiceJson(value: string): boolean {
-  try { return structuredChoice(JSON.parse(value)); } catch { return false; }
+  const candidates = [value];
+  if (/[“”‘’：，]/.test(value)) candidates.push(value
+    .replace(/[“”‘’]/g, '"')
+    .replace(/：/g, ':')
+    .replace(/，/g, ','));
+  return candidates.some(candidate => {
+    try { return structuredChoice(JSON.parse(candidate)); } catch { return false; }
+  });
 }
 
 /** Hide transport-only choice payloads and internal retrieval diagnostics from readers. */

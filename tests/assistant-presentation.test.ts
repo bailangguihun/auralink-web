@@ -13,6 +13,8 @@ test('Assistant presentation removes transport choices and internal retrieval di
   const disclosure = '关于《清明上河图》，由于本轮对话中未启用且未配置任何检索工具（reference_data 显示 artworks 和 ragflow 均为 DISABLED），回答仅基于我内部的一般知识储备。';
   assert.equal(assistantVisibleMarkdown(`${disclosure}\n\n## 基本概况\n\n正文\n\n${choice}`), '## 基本概况\n\n正文');
   assert.equal(assistantVisibleMarkdown(`\`\`\`choice\n${choice}\n\`\`\`\n\n后续内容`), '后续内容');
+  const typographicChoice = '[{“id”： “interpretation”，“title”： “您更倾向哪种解读？”，“options”： [{“id”： “social_history”，“label”： “社会历史实证”},{“id”： “political_allegory”，“label”： “政治寓意”}]}]';
+  assert.equal(assistantVisibleMarkdown(`正文\n\n    ${typographicChoice}`), '正文');
   assert.equal(assistantVisibleMarkdown('【资料检索状态：web=TIMEOUT；以下回答不代表已获得该来源的证据。】\n\n正文'), '正文');
   assert.match(assistantVisibleMarkdown('```json\n{"ordinary":true}\n```'), /ordinary/);
 });

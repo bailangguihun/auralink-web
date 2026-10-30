@@ -45,7 +45,7 @@ try {
   assert(mobile ? await page.getByRole('button',{name:'打开导航'}).isVisible() : await page.getByRole('navigation',{name:'主导航'}).isVisible());
   if(route==='studio')assert(await page.getByRole('button',{name:'执行全流程',exact:true}).isDisabled());
   if(route==='assistant')assert(await page.getByRole('button',{name:'发送',exact:true}).isDisabled());
-  const selectors={gallery:'.painting-grid .painting-card h3',knowledge:'.knowledge-count strong',studio:'.creation-card h3',assistant:'[data-testid="assistant-message"]',me:'.profile-facts dd'};
+  const selectors={gallery:'[aria-label="画作目录"] .painting-card h3',knowledge:'.knowledge-count strong',studio:'.creation-card h3',assistant:'[data-testid="assistant-message"]',me:'.profile-facts dd'};
   await page.locator(selectors[route]).first().waitFor();await sleep(2300);await noOverflow();await shot('ready');
   record.readyGeometry=await page.evaluate(()=>Object.fromEntries(['.page-header','.gallery-filters','.daily-media','.knowledge-tabs'].flatMap(selector=>{const el=[...document.querySelectorAll(selector)].find(node=>node.getBoundingClientRect().height>0);if(!el)return [];const b=el.getBoundingClientRect();return [[selector,{x:b.x,y:b.y,width:b.width,height:b.height}]];})));
   if(route==='gallery')assert(Math.abs(record.loadingGeometry['.daily-media'].height-record.readyGeometry['.daily-media'].height)<=1,'Image container remains stable');
@@ -59,7 +59,7 @@ try {
   state.delay=u=>u.searchParams.get('keyword')==='旧查询'?1600:u.searchParams.get('keyword')==='新查询'?500:0;
   const input=page.getByRole('searchbox',{name:'关键词',exact:true});await input.fill('旧查询');await page.getByRole('button',{name:'检索画作'}).click();await input.fill('新查询');await page.getByRole('button',{name:'检索画作'}).click();
   assert.equal(await page.locator('.painting-card h3').count(),0,'Old query hidden immediately');await page.getByRole('heading',{name:'新查询 1',exact:true}).waitFor();await sleep(1800);assert.equal(await page.getByRole('heading',{name:/旧查询/}).count(),0);assert.equal(await input.inputValue(),'新查询');
-  state.delays['/api/v1/paintings']=900;state.delay=null;await page.getByRole('button',{name:'下一页',exact:true}).click();assert(await page.getByRole('navigation',{name:'画作分页'}).isVisible());await page.getByRole('heading',{name:'新查询 13',exact:true}).waitFor();await noOverflow();await shot('pagination');
+  state.delays['/api/v1/paintings']=900;state.delay=null;await page.getByRole('button',{name:'加载更多画作',exact:true}).click();assert(await page.getByRole('region',{name:'画作加载'}).isVisible());await page.getByRole('heading',{name:'新查询 13',exact:true}).waitFor();await page.getByRole('heading',{name:'新查询 1',exact:true}).waitFor();await noOverflow();await shot('append');
  },{ignoreAbort:true});
  await scenario('profile-independent-failure-retry-account',async({page,state,go,shot})=>{
   state.fail['/api/v1/me/favorites/paintings']=503;await go('/me');await page.getByText('A@example.invalid',{exact:true}).waitFor();await page.getByRole('heading',{name:'收藏读取失败'}).waitFor();assert.equal(await page.getByText('还没有收藏作品',{exact:true}).count(),0);await shot('partial-error');

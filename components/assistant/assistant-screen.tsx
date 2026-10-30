@@ -321,7 +321,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     </nav>
     {error ? <div role="alert" className={`${styles.notice} ${styles.error}`}>{error}<button className={styles.small} onClick={() => { setError(''); reload(); }}>重新读取</button></div> : null}
     {notice ? <p role="status" className={styles.notice}>{notice}<button className={styles.small} onClick={() => setNotice('')} aria-label="收起提示">×</button></p> : null}
-    <section ref={messageScroll} tabIndex={0} aria-label="对话历史" className={styles.messages} onScroll={event => { const area = event.currentTarget; followBottom.current = area.scrollHeight - area.scrollTop - area.clientHeight < 80; priorScroll.current = { ...priorScroll.current, height: area.scrollHeight, top: area.scrollTop }; }}>
+    <section ref={messageScroll} data-page-scroll tabIndex={0} aria-label="对话历史" className={styles.messages} onScroll={event => { const area = event.currentTarget; followBottom.current = area.scrollHeight - area.scrollTop - area.clientHeight < 80; priorScroll.current = { ...priorScroll.current, height: area.scrollHeight, top: area.scrollTop }; }}>
       <div className={styles.messageColumn}>
       <LoadMore page={messages} label="加载更早消息" />
       {messages.error ? <StatePanel compact kind="error" title="历史暂未读取成功" description="这不表示会话为空，已保存的消息和图片尚未核对。" actionLabel="重新读取历史" onAction={messages.retry} /> : messages.loading && !messages.items.length ? <LoadingSection label="正在读取历史" onRetry={messages.retry}><SkeletonRows lines={5} /></LoadingSection> : !messages.items.length ? <EmptyConversation /> : null}

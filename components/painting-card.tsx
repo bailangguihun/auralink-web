@@ -10,18 +10,20 @@ type PaintingCardProps = {
   authenticated: boolean;
   favoriteBusy?: boolean;
   onFavorite?: (painting: PaintingSummary) => void;
+  masonry?: boolean;
+  priority?: boolean;
 };
 
-export function PaintingCard({ painting, authenticated, favoriteBusy, onFavorite }: PaintingCardProps) {
+export function PaintingCard({ painting, authenticated, favoriteBusy, onFavorite, masonry = false, priority = false }: PaintingCardProps) {
   const detailPath = `/gallery/${painting.paintingId}`;
   return (
-    <article className="painting-card glass-panel">
+    <article className={`painting-card glass-panel${masonry ? " gallery-painting-card" : ""}`}>
       <Link className="painting-media" href={detailPath} aria-label={`查看${painting.title || "无题"}详情`}>
-        <MediaImage image={painting.image} alt={painting.title || "无题画作"} />
+        <MediaImage image={painting.image} alt={painting.title || "无题画作"} layout={masonry ? "artwork" : "fixed"} loading={masonry ? priority ? "eager" : "lazy" : undefined} />
       </Link>
       <div className="painting-copy">
         <div>
-          <Link href={detailPath}><h3>{painting.title || "无题"}</h3></Link>
+          <Link href={detailPath}><h3 title={painting.title || "无题"}>{painting.title || "无题"}</h3></Link>
           <p>{painting.authorName || "佚名"} · {painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"}</p>
         </div>
         {authenticated && onFavorite ? (

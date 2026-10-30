@@ -1,2 +1,3 @@
 import { CommunityLoading } from "@/components/community/community-loading";
-export default function Loading() { return <main className="page-shell community-page"><CommunityLoading /></main>; }
+import { ModuleHeader } from "@/components/module-header";
+export default function Loading() { return <main className="page-shell module-page community-page"><ModuleHeader module="community" /><CommunityLoading /></main>; }

@@ -30,10 +30,20 @@ export function LoadingSection({ label, children, onRetry, className = "" }: { l
 }
 
 export function DailyPaintingSkeleton() {
-  return <div className="daily-card skeleton-daily"><div className="daily-media"><Skeleton className="skeleton-image" /></div><div className="daily-copy"><Skeleton className="skeleton-title" /><SkeletonRows /><Skeleton className="skeleton-short" /></div></div>;
+  return <div className="daily-card skeleton-daily">
+    <div className="daily-media"><Skeleton className="skeleton-image" /></div>
+    <div className="daily-copy">
+      <div className="daily-heading"><span className="daily-heading-label">每日一画</span><span aria-hidden="true">·</span><Skeleton className="skeleton-daily-date" /></div>
+      <Skeleton className="skeleton-title" />
+      <Skeleton className="skeleton-daily-meta" />
+      <div className="skeleton-daily-description"><Skeleton /><Skeleton className="skeleton-short" /></div>
+      <Skeleton className="skeleton-daily-action" />
+    </div>
+  </div>;
 }
 
-export function PaintingGridSkeleton({ count = 6, personal = false }: { count?: number; personal?: boolean }) {
+export function PaintingGridSkeleton({ count = 6, personal = false, rows = false }: { count?: number; personal?: boolean; rows?: boolean }) {
+  if (rows) return <div className="gallery-row-skeleton" aria-hidden="true">{Array.from({ length: count }, (_, i) => <div key={i} className="painting-card glass-panel gallery-painting-card"><div className="painting-media"><Skeleton className="skeleton-image" /></div><div className="painting-copy"><SkeletonRows lines={2} /></div><div className="painting-meta"><Skeleton className="skeleton-short" /></div></div>)}</div>;
   return <div className={`painting-grid${personal ? " me-painting-grid" : ""}`} aria-hidden="true">{Array.from({ length: count }, (_, i) => <div key={i} className="painting-card glass-panel"><div className="painting-media"><Skeleton className="skeleton-image" /></div><div className="painting-copy"><SkeletonRows /></div><div className="painting-meta"><Skeleton className="skeleton-short" /></div></div>)}</div>;
 }
 

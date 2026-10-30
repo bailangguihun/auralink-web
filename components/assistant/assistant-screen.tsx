@@ -7,7 +7,7 @@ import { AssistantLoading, ConversationLoading } from './assistant-loading';
 import { StatePanel } from '@/components/state-panel';
 import { ApiError, isAbortError } from '@/lib/api';
 import { assistantPage, assistantRequest, exportAssistant, OperationLedger } from '@/lib/assistant-api';
-import { terminal, stateLabel, stageLabels, mergeItems, ragflowAvailable, assistantRetrievalRequest, assistantGenerationAvailable, assistantGenerationNotice, type AssistantStatus, type AssistantSession, type Branch, type Message, type Run, type Registry, type Citation, type Choice, type Summary, type Timeline, type Page, type ArtworkReference, assistantDate, platformCitationFields } from '@/lib/assistant-contracts';
+import { terminal, stateLabel, stageLabels, mergeItems, ragflowAvailable, webSearchAvailable, assistantRetrievalRequest, assistantGenerationAvailable, assistantGenerationNotice, type AssistantStatus, type AssistantSession, type Branch, type Message, type Run, type Registry, type Citation, type Choice, type Summary, type Timeline, type Page, type ArtworkReference, assistantDate, platformCitationFields } from '@/lib/assistant-contracts';
 import { subscribeAssistant } from '@/lib/assistant-stream';
 import { useAssistantAccess } from './use-assistant-access';
 import { useAssistantAttachments } from './use-assistant-attachments';
@@ -186,7 +186,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const messageScroll = useRef<HTMLElement>(null);
   const followBottom = useRef(true);
   const priorScroll = useRef({ first: '', last: '', height: 0, top: 0 });
-  const [branch, setBranch] = useState<Branch | null>(null); const [text, setText] = useState(''); const [model, setModel] = useState(''); const [ragflow, setRagflow] = useState(false); const [busy, setBusy] = useState(false); const busyRef = useRef(false); const composing = useRef(false); const [connection, setConnection] = useState('');
+  const [branch, setBranch] = useState<Branch | null>(null); const [text, setText] = useState(''); const [model, setModel] = useState(''); const [ragflow, setRagflow] = useState(false); const [webSearch, setWebSearch] = useState(false); const [busy, setBusy] = useState(false); const busyRef = useRef(false); const composing = useRef(false); const [connection, setConnection] = useState('');
   const [live, setLive] = useState<Run | null>(null); const [editing, setEditing] = useState<Message | null>(null); const [editText, setEditText] = useState(''); const [notice, setNotice] = useState(''); const [timelineOpen, setTimelineOpen] = useState(false); const [summaryOpen, setSummaryOpen] = useState(false);
   const draft = useAssistantAttachments(id, revision, ledger, access); const attachments = draft.attachments;
   const messages = usePage<Message>(`/sessions/${enc(id)}/messages/page?branchId=${enc(branchId)}`, access, row => row.id, revision, true);
@@ -256,7 +256,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     return () => controller.abort();
   }, [runningId, token, sessionIdentity, isCurrentSession, signOutIfCurrent, reload]);
   const act = async (action: () => Promise<void>) => { if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(''); try { await action(); } catch (error) { report(error); } finally { busyRef.current = false; setBusy(false); } };
-  const command = (value: string, ids: string[]) => ({ branchId, expectedVersion: branch?.version, text: value, attachmentIds: ids, modelKey: model, retrieval: assistantRetrievalRequest(registry, selectedArtworks.length > 0, ragflow), artworkRefs: selectedArtworkReferences(selectedArtworks) });
+  const command = (value: string, ids: string[]) => ({ branchId, expectedVersion: branch?.version, text: value, attachmentIds: ids, modelKey: model, retrieval: assistantRetrievalRequest(registry, selectedArtworks.length > 0, ragflow, webSearch), artworkRefs: selectedArtworkReferences(selectedArtworks) });
   const submitCommand = async (path: string, payload: ReturnType<typeof command>, scope: string, operation: string) => {
     const requestKey = await ledger.key(scope, payload);
     try {
@@ -290,6 +290,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     return [{ message, question, turn }];
   }).reverse();
   const knowledgeSearchAvailable = ragflowAvailable(registry);
+  const onlineSearchAvailable = webSearchAvailable(registry);
   useLayoutEffect(() => {
     const area = textareaRef.current; if (!area) return;
     area.style.height = 'auto'; area.style.height = `${Math.min(area.scrollHeight, 124)}px`;
@@ -320,7 +321,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     </nav>
     {error ? <div role="alert" className={`${styles.notice} ${styles.error}`}>{error}<button className={styles.small} onClick={() => { setError(''); reload(); }}>重新读取</button></div> : null}
     {notice ? <p role="status" className={styles.notice}>{notice}<button className={styles.small} onClick={() => setNotice('')} aria-label="收起提示">×</button></p> : null}
-    <section ref={messageScroll} tabIndex={0} aria-label="对话历史" className={styles.messages} onScroll={event => { const area = event.currentTarget; followBottom.current = area.scrollHeight - area.scrollTop - area.clientHeight < 80; priorScroll.current = { ...priorScroll.current, height: area.scrollHeight, top: area.scrollTop }; }}>
+    <section ref={messageScroll} data-page-scroll tabIndex={0} aria-label="对话历史" className={styles.messages} onScroll={event => { const area = event.currentTarget; followBottom.current = area.scrollHeight - area.scrollTop - area.clientHeight < 80; priorScroll.current = { ...priorScroll.current, height: area.scrollHeight, top: area.scrollTop }; }}>
       <div className={styles.messageColumn}>
       <LoadMore page={messages} label="加载更早消息" />
       {messages.error ? <StatePanel compact kind="error" title="历史暂未读取成功" description="这不表示会话为空，已保存的消息和图片尚未核对。" actionLabel="重新读取历史" onAction={messages.retry} /> : messages.loading && !messages.items.length ? <LoadingSection label="正在读取历史" onRetry={messages.retry}><SkeletonRows lines={5} /></LoadingSection> : !messages.items.length ? <EmptyConversation /> : null}
@@ -354,8 +355,8 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
         <AssistantModelPicker registry={registry} value={model} onChange={setModel} disabled={busy || !generationReady} />
         <div className={styles.inputTools}>
           <button type="button" className={styles.small} onClick={() => setPanel('artworks')} aria-haspopup="dialog">平台作品</button>
-          <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-pressed="false" disabled title="联网搜索接口尚未配置">联网搜索</button>
-          <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-pressed={ragflow} disabled={!knowledgeSearchAvailable || busy || !!pendingChat} title={knowledgeSearchAvailable ? '为下一条消息启用知识库检索' : '知识库接口已预留，RAGFlow 尚未配置'} onClick={() => setRagflow(value => !value)}>{ragflow ? '✓ ' : ''}知识库检索</button>
+          <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="联网搜索" aria-pressed={webSearch} disabled={!onlineSearchAvailable || busy || !!pendingChat} title={onlineSearchAvailable ? '为下一条消息启用联网搜索' : '联网搜索尚未配置'} onClick={() => setWebSearch(value => !value)}>{webSearch ? '✓ ' : ''}联网搜索</button>
+          <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="知识库检索" aria-pressed={ragflow} disabled={!knowledgeSearchAvailable || busy || !!pendingChat} title={knowledgeSearchAvailable ? '为下一条消息启用知识库检索' : '知识库接口已预留，RAGFlow 尚未配置'} onClick={() => setRagflow(value => !value)}>{ragflow ? '✓ ' : ''}知识库检索</button>
           <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png" disabled={busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
           {speech.supported ? <button type="button" className={styles.small} onClick={speech.listen}>{speech.listening ? '停止语音' : '语音输入'}</button> : null}
           {speech.speaking ? <button type="button" className={styles.small} onClick={speech.stop}>停止朗读</button> : null}
@@ -413,11 +414,12 @@ function SourceDetails({ message, access }: { message: Message; access: Access }
   if (!data) return <LoadingSection label="正在读取本条回复的来源" onRetry={() => setRevision(value => value + 1)}><SkeletonRows lines={5} /></LoadingSection>;
   const artworks = data.citations.filter(citation => citation.sourceType === 'PLATFORM_ARTWORK');
   const knowledge = data.citations.filter(citation => citation.sourceType === 'RAGFLOW_DOCUMENT');
+  const web = data.citations.filter(citation => citation.sourceType === 'WEB_RESULT');
   return <div className={styles.sourceBody}>
     {artworks.length ? <SourceGroup title="平台作品" subtitle="来自 ArtLIVE 公开作品库" citations={artworks} empty="本次未使用平台作品" /> : null}
     <SourceGroup title="知识库结果" subtitle="来自项目知识库" citations={knowledge} empty="本次检索暂无知识库结果" />
     <SourceGroup title="文献结果" subtitle="来自文献库" citations={[]} empty="本次检索暂无文献结果" />
-    <SourceGroup title="网络结果" subtitle="联网检索结果" citations={[]} empty="本次检索暂无网络结果" />
+    <SourceGroup title="网络结果" subtitle="联网检索结果" citations={web} empty="本次检索暂无网络结果" />
   </div>;
 }
 
@@ -449,7 +451,7 @@ function CitationView({ citation }: { citation: Citation }) {
   const fields = citation.sourceType === 'PLATFORM_ARTWORK' ? platformCitationFields(citation.excerpt) : null;
   const title = typeof citation.provenance.title === 'string' ? citation.provenance.title : fields?.find(field => field.label === '作品名')?.value;
   const url = typeof citation.provenance.url === 'string' ? assistantMarkdownLink(citation.provenance.url) : null;
-  return <article className={styles.citation}><header><strong>{title || (citation.sourceType === 'PLATFORM_ARTWORK' ? '平台作品' : '知识库资料')}</strong>{url ? <a href={url} target="_blank" rel="noopener noreferrer nofollow">在线阅读 ↗</a> : null}</header>
+  return <article className={styles.citation}><header><strong>{title || (citation.sourceType === 'PLATFORM_ARTWORK' ? '平台作品' : citation.sourceType === 'WEB_RESULT' ? '网络资料' : '知识库资料')}</strong>{url ? <a href={url} target="_blank" rel="noopener noreferrer nofollow">在线阅读 ↗</a> : null}</header>
     {fields?.length ? fields.map((field, index) => <p key={index}>{field.label}：{field.value} <small>（{field.uncertainty || '未独立核验'}）{field.raw ? `原始文本：${field.raw}` : ''}</small></p>) : <p className={styles.body}>{citation.excerpt}</p>}
     {safeArtwork ? <Link href={`/gallery/${artworkId}`}>查看当前受控作品详情</Link> : null}
     {deliveryObserved ? <small>已用于本轮回复</small> : null}

@@ -30,8 +30,8 @@ export function HeartIcon({ filled = false, ...props }: IconProps & { filled?: b
   return <svg {...base} {...props} fill={filled ? "currentColor" : "none"}><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z" /></svg>;
 }
 
-export function ArrowIcon({ direction = "right", ...props }: IconProps & { direction?: "left" | "right" | "down" }) {
-  const transform = direction === "left" ? "rotate(180 12 12)" : direction === "down" ? "rotate(90 12 12)" : undefined;
+export function ArrowIcon({ direction = "right", ...props }: IconProps & { direction?: "left" | "right" | "down" | "up" }) {
+  const transform = direction === "left" ? "rotate(180 12 12)" : direction === "down" ? "rotate(90 12 12)" : direction === "up" ? "rotate(-90 12 12)" : undefined;
   return <svg {...base} {...props}><g transform={transform}><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></g></svg>;
 }
 

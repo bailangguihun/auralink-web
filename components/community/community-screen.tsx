@@ -8,6 +8,7 @@ import { useReadResource } from "@/components/use-read-resource";
 import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
 import { api, ApiError, errorMessage } from "@/lib/api";
+import { readCache } from "@/lib/read-cache";
 import { communityApi, definiteWriteFailure, operationStorageKey, readOperation,
   type CommunityPost, type GalleryReference, type OperationHandle, type OperationResult } from "@/lib/community";
 import { CommunityLoading } from "./community-loading";
@@ -114,21 +115,22 @@ export function CommunityScreen({ postId, initialPaintingId = null }: { postId?:
   const capability = useReadResource("community-capabilities", capabilityLoader, Boolean(token));
   const enabled = capability.data?.posts === true && capability.data.actor.id === actorId && !capability.loading && !capability.error;
   const listLoader = useCallback((signal: AbortSignal) => { void revision; return communityApi.posts(token!, page, view, signal); }, [token, page, view, revision]);
-  const list = useReadResource("community-posts:" + view + ":" + page, listLoader, enabled && !postId);
+  const list = useReadResource("community-posts:" + view + ":" + page, listLoader, enabled && !postId, 30_000);
   const detailLoader = useCallback((signal: AbortSignal) => { void revision; return communityApi.post(token!, postId!, signal); }, [token, postId, revision]);
-  const detail = useReadResource("community-post:" + postId, detailLoader, enabled && Boolean(postId));
+  const detail = useReadResource("community-post:" + postId, detailLoader, enabled && Boolean(postId), 30_000);
   const referenceLoader = useCallback((signal: AbortSignal) => communityApi.reference(token!, sourceId!, signal), [token, sourceId]);
   const reference = useReadResource("community-reference:" + sourceId, referenceLoader, enabled && Boolean(sourceId) && !postId);
   const busy = !enabled || !storageReady || Boolean(pending) || sending;
   const committed = useCallback((handle: OperationHandle, result: OperationResult) => {
     if (activeOperation.current?.requestId !== handle.requestId) return;
     if (result.kind !== handle.kind) throw new Error("操作返回身份不一致，请保留记录并继续核对。");
+    readCache.invalidate(sessionIdentity.generation, "community-post");
     sessionStorage.removeItem(storageKey);
     activeOperation.current = null; setLastResult(result);
     lock.current = false; setPending(null); setSending(false);
     setRevision(value => value + 1); setMessage("操作已保存。");
     if (handle.kind === "post") { setDraft(""); setSourceId(null); router.push("/community/posts/" + result.postId); }
-  }, [router, storageKey]);
+  }, [router, sessionIdentity.generation, storageKey]);
   const check = useCallback(async () => {
     if (!pending || !token || sending) return;
     const identity = sessionIdentity;
@@ -153,6 +155,8 @@ export function CommunityScreen({ postId, initialPaintingId = null }: { postId?:
     try { sessionStorage.setItem(storageKey, JSON.stringify(handle)); }
     catch { lock.current = false; setMessage("浏览器无法保存本次操作标识，请检查存储权限后再提交。"); return null; }
     activeOperation.current = handle; setPending(handle); setSending(true); setMessage("");
+    // A pending or ambiguous write must not leave reusable pre-write snapshots.
+    readCache.invalidate(identity.generation, "community-post");
     try {
       const outcome = await communityApi.write(token, path, method, { ...payload, requestId: handle.requestId });
       if (!mounted.current || !isCurrentSession(identity) || activeOperation.current?.requestId !== handle.requestId) return null;
@@ -166,10 +170,13 @@ export function CommunityScreen({ postId, initialPaintingId = null }: { postId?:
         if (error instanceof ApiError && error.status === 401) signOutIfCurrent(identity);
       }
       setMessage(errorMessage(error)); return null;
+    } finally {
+      // A newer visit may have cached a read while this old page's write settled.
+      if (!mounted.current && isCurrentSession(identity)) readCache.invalidate(identity.generation, "community-post");
     }
   };
   return <>
-    <header className="community-heading"><span className="knowledge-eyebrow">ARTLIVE · COMMUNITY</span><h1>画里相逢</h1><p>分享一幅画，也分享你看见的世界。</p></header>
+    {postId ? <header className="community-heading"><span className="knowledge-eyebrow">ARTLIVE · COMMUNITY</span><h1>画里相逢</h1><p>分享一幅画，也分享你看见的世界。</p></header> : null}
     {message ? <p role="status" className="community-notice">{message}</p> : null}
     {pending ? <div className="community-notice">{sending ? <span><PendingIndicator />正在提交，请稍候。</span> :
       <><span>有一项操作需要核对结果。</span><button className="text-button" type="button" onClick={() => void check()}>核对操作结果</button></>}</div> : null}

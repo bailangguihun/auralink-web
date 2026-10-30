@@ -10,7 +10,8 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-transform-types --test tests/*.test.ts",
-    "test:assistant-ui": "node tests/assistant-ui.browser.mjs"
+    "test:assistant-ui": "node tests/assistant-ui.browser.mjs",
+    "test:gallery-ui": "node tests/gallery-masonry.browser.mjs"
   },
   "dependencies": {
     "echarts": "6.1.0",

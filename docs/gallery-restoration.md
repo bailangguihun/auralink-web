@@ -2,7 +2,9 @@
 
 The Gallery defaults to `sort=daily`. Core supplies `orderDate` using its configured
 painting daily timezone; the browser does not choose a date or shuffle individual
-pages. Pagination sends the last returned date and uses the returned page number.
+pages. Load-more requests send the last returned date and use the returned page number.
+The Web app accumulates unique results, closes each batch on complete rows, and
+retains the current browse in memory for detail-page returns; see gallery-masonry.md.
 When a day changes, Core returns page zero with the new date. Explicit source,
 title, author and dynasty sorting retain their meaning. Daily recommendation is a
 separate endpoint and retains its algorithm.

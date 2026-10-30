@@ -1,18 +1,21 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useCallback, useState } from "react";
 
-import { DailyPaintingSkeleton, LoadingSection, LoadingStatus, PaintingGridSkeleton, PendingIndicator } from "@/components/loading";
+import { DailyPainting } from "@/components/daily-painting";
+import { ModuleHeader } from "@/components/module-header";
+import { LoadingSection, LoadingStatus, PaintingGridSkeleton, PendingIndicator } from "@/components/loading";
 import { useReadResource } from "@/components/use-read-resource";
-import { ArrowIcon, SearchIcon } from "@/components/icons";
-import { MediaImage } from "@/components/media-image";
+import { SearchIcon } from "@/components/icons";
 import { PaintingCard } from "@/components/painting-card";
+import { GalleryRows, resetGalleryViewport } from "@/components/gallery-rows";
+import { getGalleryFeedSnapshot, useGalleryFeed } from "@/components/use-gallery-feed";
 import { useFavorites } from "@/components/favorite-provider";
 import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
 import { api, ApiError, errorMessage } from "@/lib/api";
-import { INITIAL_GALLERY_QUERY, requireGalleryOrder, turnGalleryPage } from "@/lib/gallery-order";
+import { INITIAL_GALLERY_QUERY } from "@/lib/gallery-order";
+import { galleryFeedKey } from "@/lib/gallery-feed";
 import type { PaintingQuery, PaintingSummary } from "@/lib/types";
 
 export function GalleryScreen() {
@@ -24,25 +27,29 @@ function GalleryContent() {
   const { token, status, sessionIdentity, signOutIfCurrent, isCurrentSession } = useSession();
   const { isFavorited, isFavoriteBusy, toggleFavorite: toggleSessionFavorite } = useFavorites();
   const authenticated = status === "authenticated" && Boolean(token);
-  const [query, setQuery] = useState<PaintingQuery>(INITIAL_GALLERY_QUERY);
+  const [query, setQuery] = useState<PaintingQuery>(() => getGalleryFeedSnapshot(sessionIdentity.generation)?.query || INITIAL_GALLERY_QUERY);
   const [actionError, setError] = useState<string | null>(null);
-  const loadPage = useCallback(async (signal: AbortSignal) => {
-    const result = await api.paintings(query, token, signal);
-    requireGalleryOrder(query, result);
-    return result;
-  }, [query, token]);
   const loadDaily = useCallback((signal: AbortSignal) => api.dailyPainting(token, signal), [token]);
   const ready = status !== "loading";
-  const catalog = useReadResource(JSON.stringify(query), loadPage, ready);
-  const recommendation = useReadResource("daily", loadDaily, ready);
-  const { data: page, error: readError } = catalog;
+  const catalog = useGalleryFeed(query, token, ready, sessionIdentity.generation);
+  const recommendation = useReadResource("daily", loadDaily, ready, 60_000);
+  const { page, error: readError } = catalog;
   const loading = !ready || catalog.loading;
   const { data: daily, error: dailyError } = recommendation;
   const dailyLoading = !ready || recommendation.loading;
   const error = readError;
+  const queryKey = galleryFeedKey(query);
+  const viewKey = `${sessionIdentity.generation}:${queryKey}:${page?.orderDate || ""}`;
+  const [presentation, setPresentation] = useState({ key: "", count: 0 });
+  const onPrepared = useCallback((count: number) => setPresentation({ key: viewKey, count }), [viewKey]);
+  const fetchedCount = catalog.batches.reduce((sum, batch) => sum + batch.length, 0);
+  const displayedCount = presentation.key === viewKey ? Math.min(presentation.count, fetchedCount) : 0;
+  const preparing = displayedCount < fetchedCount;
+  const busy = loading || catalog.loadingMore || preparing;
 
   const applyFilters = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    resetGalleryViewport();
     const form = new FormData(event.currentTarget);
     setQuery({
       keyword: String(form.get("keyword") || "").trim(),
@@ -58,8 +65,9 @@ function GalleryContent() {
   };
 
   const clearFilters = (form: HTMLFormElement) => {
+    resetGalleryViewport();
     form.reset();
-    setQuery(INITIAL_GALLERY_QUERY);
+    setQuery({ ...INITIAL_GALLERY_QUERY });
   };
 
   const toggleFavorite = async (painting: PaintingSummary) => {
@@ -78,36 +86,14 @@ function GalleryContent() {
   };
 
   return (
-    <main className="page-shell gallery-page">
-      <header className="page-header glass-panel gallery-header">
-        <div><h1>笔墨之间，自有天地</h1><p>从真实官方目录中检索作品、作者与画意</p></div>
+    <main className="page-shell module-page gallery-page">
+      <ModuleHeader module="gallery">
         <span className="catalog-status">{page ? `${page.totalElements} 幅可浏览画作` : error ? "目录读取失败" : "正在读取目录"}</span>
-      </header>
+      </ModuleHeader>
 
-      <section className="daily-panel glass-panel" aria-labelledby="daily-title">
-        <div className="daily-heading">
-          <h2 id="daily-title">每日一画</h2><span aria-hidden="true">·</span>
-          <time suppressHydrationWarning>{new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date())}</time>
-        </div>
-        {dailyLoading ? daily ? <LoadingStatus label="正在更新每日推荐，暂保留本次已读取的画作" /> : <LoadingSection label="正在选择今日画作" onRetry={recommendation.retry}><DailyPaintingSkeleton /></LoadingSection> : null}
-        {!dailyLoading && dailyError ? <StatePanel compact kind="error" title="每日推荐暂不可用" description={`${dailyError}${daily ? " 当前保留上次成功读取的推荐。" : ""}`} actionLabel="重新读取推荐" onAction={recommendation.retry} /> : null}
-        {daily ? (
-          <Link className="daily-card content-reveal" href={`/gallery/${daily.paintingId}`}>
-            <div className="daily-media"><MediaImage image={daily.image} alt={daily.title || "每日推荐画作"} /></div>
-            <div className="daily-copy">
-              <h3>{daily.title || "无题"}</h3>
-              <p className="daily-meta">
-                <span className="daily-author">{daily.authorName || "佚名"}</span><span aria-hidden="true">·</span>
-                <span className="daily-dynasty">{daily.creationDynastyNormalized || daily.creationDynastyRaw || "年代未详"}</span>
-              </p>
-              {daily.artisticConception ? <p className="daily-description">{daily.artisticConception}</p> : null}
-              <b>查看作品 <ArrowIcon /></b>
-            </div>
-          </Link>
-        ) : null}
-      </section>
+      <DailyPainting painting={daily} loading={dailyLoading} error={dailyError} onRetry={recommendation.retry} />
 
-      <form className="gallery-filters glass-panel" onSubmit={applyFilters}>
+      <form key={queryKey} className="gallery-filters glass-panel" onSubmit={applyFilters}>
         <label className="filter-search"><span className="sr-only">关键词</span><SearchIcon /><input name="keyword" type="search" maxLength={200} placeholder="搜索作品、作者、风格或意境" defaultValue={query.keyword} /></label>
         <details>
           <summary>更多筛选</summary>
@@ -124,25 +110,24 @@ function GalleryContent() {
       </form>
 
       {actionError ? <p className="inline-error" role="alert">收藏操作未完成：{actionError} <button className="text-button" onClick={() => setError(null)}>关闭提示</button></p> : null}
-      {loading ? page ? <LoadingStatus label="正在更新当前目录，暂保留已读取的结果" /> : <LoadingSection label="正在读取画作目录" onRetry={catalog.retry}><PaintingGridSkeleton count={12} /></LoadingSection> : null}
+      {loading ? page ? <LoadingStatus label="正在更新当前目录，暂保留已读取的结果" /> : <LoadingSection label="正在读取画作目录" onRetry={catalog.retry}><PaintingGridSkeleton count={6} rows /></LoadingSection> : null}
       {!loading && error ? <StatePanel kind="error" title="画作目录加载失败" description={`${error}${page ? " 当前保留同一查询上次成功读取的结果。" : ""}`} actionLabel="重新加载" onAction={() => { setError(null); catalog.retry(); }} /> : null}
-      {!loading && !error && page?.items.length === 0 ? <StatePanel kind="empty" title="暂未找到匹配的作品" description="请尝试减少筛选条件或使用其他关键词。" /> : null}
-      {page?.items.length ? (
-        <>
-          <section className="painting-grid content-reveal" aria-label="画作目录">
-            {page.items.map((painting) => {
+      {!loading && !error && page && fetchedCount === 0 ? <StatePanel kind="empty" title="暂未找到匹配的作品" description="请尝试减少筛选条件或使用其他关键词。" /> : null}
+      {catalog.notice ? <p className="gallery-notice" role="status">{catalog.notice}</p> : null}
+      {fetchedCount ? (
+          <GalleryRows key={viewKey} batches={catalog.batches} viewKey={viewKey} restoreReady={!dailyLoading} onPrepared={onPrepared}
+            renderPainting={(painting, priority) => {
               const renderedPainting = { ...painting, favorited: isFavorited(painting.paintingId, painting.favorited) };
-              return <PaintingCard key={painting.paintingId} painting={renderedPainting} authenticated={authenticated} favoriteBusy={isFavoriteBusy(painting.paintingId)} onFavorite={toggleFavorite} />;
-            })}
-          </section>
-
-        </>
+              return <PaintingCard painting={renderedPainting} authenticated={authenticated} favoriteBusy={isFavoriteBusy(painting.paintingId)} onFavorite={toggleFavorite} masonry priority={priority} />;
+            }} />
       ) : null}
-      <nav className="pagination" aria-label="画作分页">
-        <button className="button" type="button" disabled={loading || !page || page.first} onClick={() => page && setQuery(current => turnGalleryPage(current, page, -1))}><ArrowIcon direction="left" /> 上一页</button>
-        <span>{page ? `第 ${page.page + 1} / ${Math.max(page.totalPages, 1)} 页` : `第 ${(query.page || 0) + 1} 页${loading ? " · 读取中" : " · 暂不可用"}`}</span>
-        <button className="button" type="button" disabled={loading || !page || page.last} onClick={() => page && setQuery(current => turnGalleryPage(current, page, 1))}>下一页 <ArrowIcon /></button>
-      </nav>
+      {page && fetchedCount > 0 ? <section className="gallery-load-more" aria-label="画作加载" aria-busy={busy}>
+        <p className="gallery-progress" role="status">已展示 {displayedCount} / {page.totalElements} 幅</p>
+        {catalog.moreError ? <p className="inline-error" role="alert">{catalog.moreError} 已展示的画作仍保留。</p> : null}
+        {page.hasNext ? <button className="button button-primary" type="button" disabled={busy} onClick={catalog.loadMore}>
+          {busy ? <><PendingIndicator />正在加载…</> : catalog.moreError ? "重试加载" : <>加载更多画作 <span aria-hidden="true">↓</span></>}
+        </button> : !busy ? <p className="gallery-end">已展示全部画作</p> : null}
+      </section> : null}
     </main>
   );
 }

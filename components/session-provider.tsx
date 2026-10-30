@@ -12,6 +12,8 @@ import {
 
 import { api, ApiError } from "@/lib/api";
 import { SessionIdentityTracker, type SessionIdentity } from "@/lib/session-identity";
+import { readCache } from "@/lib/read-cache";
+import { clearGalleryFeedSnapshot } from "@/lib/gallery-feed";
 import type { AuthResponse, UserProfile } from "@/lib/types";
 
 const TOKEN_KEY = "artlive.session.token.v1";
@@ -53,15 +55,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const identities = useRef(new SessionIdentityTracker());
   const [sessionIdentity, setSessionIdentity] = useState(identities.current.capture());
 
+  const replaceSession = useCallback((nextToken: string | null) => {
+    const previous = identities.current.capture();
+    const next = identities.current.replace(nextToken);
+    // Clear synchronously, before any new account can render or issue reads.
+    readCache.reset(next.generation);
+    clearGalleryFeedSnapshot(previous.generation);
+    setSessionIdentity(next);
+    return next;
+  }, []);
+
   const signOut = useCallback(() => {
     restoreController.current?.abort();
-    setSessionIdentity(identities.current.replace(null));
+    replaceSession(null);
     window.localStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setUser(null);
     setProfileVerified(false);
     setStatus("anonymous");
-  }, []);
+  }, [replaceSession]);
 
   const isCurrentSession = useCallback(
     (identity: SessionIdentity) => identities.current.matches(identity),
@@ -80,7 +92,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const storedToken = window.localStorage.getItem(TOKEN_KEY);
     if (!storedToken) {
       restoreController.current?.abort();
-      setSessionIdentity(identities.current.replace(null));
+      replaceSession(null);
       setToken(null);
       setUser(null);
       setProfileVerified(false);
@@ -88,8 +100,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const requestIdentity = identities.current.replace(storedToken);
-    setSessionIdentity(requestIdentity);
+    const requestIdentity = replaceSession(storedToken);
     setToken(storedToken);
     setStatus("loading");
     setUser(null);
@@ -110,17 +121,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setProfileVerified(false);
       setStatus("error");
     }
-  }, [signOutIfCurrent]);
+  }, [replaceSession, signOutIfCurrent]);
 
   const establish = useCallback((auth: AuthResponse) => {
     restoreController.current?.abort();
-    setSessionIdentity(identities.current.replace(auth.token));
+    replaceSession(auth.token);
     window.localStorage.setItem(TOKEN_KEY, auth.token);
     setToken(auth.token);
     setUser(profileFromAuth(auth));
     setProfileVerified(false);
     setStatus("authenticated");
-  }, []);
+  }, [replaceSession]);
 
   useEffect(() => {
     void restore();

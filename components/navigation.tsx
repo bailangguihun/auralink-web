@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { BrandIcon, CloseIcon, MenuIcon, UserIcon } from "@/components/icons";
 import { PendingIndicator } from "@/components/loading";
 import { useSession } from "@/components/session-provider";
+import { useNavigationPrefetch } from "@/components/use-navigation-prefetch";
 
 const links = [
   ["/", "首页"],
@@ -23,6 +24,7 @@ export function Navigation() {
   const router = useRouter();
   const { status, user, signOut } = useSession();
   const [open, setOpen] = useState(false);
+  const prefetch = useNavigationPrefetch(pathname);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -52,7 +54,10 @@ export function Navigation() {
       <nav id="primary-navigation" className={`primary-nav${open ? " nav-open" : ""}`} aria-label="主导航">
         {links.map(([href, label]) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-          return <Link key={href} href={href} aria-current={active ? "page" : undefined}>{label}</Link>;
+          return <Link key={href} href={href} aria-current={active ? "page" : undefined}
+            onPointerEnter={event => { if (event.pointerType === "mouse") prefetch.prepare(href); }}
+            onPointerLeave={() => prefetch.cancel(href)}
+            onFocus={() => prefetch.prepare(href)} onBlur={() => prefetch.cancel(href)}>{label}</Link>;
         })}
       </nav>
 

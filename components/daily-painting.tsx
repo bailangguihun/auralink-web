@@ -29,7 +29,7 @@ export function DailyPainting({ painting, loading, error, onRetry }: DailyPainti
 
   return <section className="daily-panel glass-panel" aria-label="每日一画">
     {painting ? (
-      <Link className="daily-card content-reveal" href={`/gallery/${painting.paintingId}`} aria-label={`查看${title}详情`}>
+      <Link className="daily-card content-reveal" href={`/gallery/${painting.paintingId}`} prefetch={false} aria-label={`查看${title}详情`}>
         <div className="daily-media"><MediaImage image={painting.image} alt={title} loading="eager" /></div>
         <div className="daily-copy">
           <DailyHeading />

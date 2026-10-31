@@ -20,7 +20,7 @@ function Reference({ value }: { value: GalleryReference }) {
     <span>引用的画廊作品</span><p>{value.state === "UNAVAILABLE" ? "原作已不可查看，引用关系保留。" : "暂时无法核实原作，请稍后重新读取。"}</p>
   </div>;
   return <div className="community-reference"><span>画廊原作</span>
-    <Link href={"/gallery/" + value.paintingId}>{value.title || "无题"}</Link>
+    <Link href={"/gallery/" + value.paintingId} prefetch={false}>{value.title || "无题"}</Link>
     <p>{[value.authorName, value.period].filter(Boolean).join(" · ") || "作者资料暂缺"}</p>
   </div>;
 }
@@ -36,7 +36,7 @@ function PostCard({ post, detail, busy, write }: { post: CommunityPost; detail?:
         onClick={() => void write("/posts/" + post.id + "/like", "PUT", { enabled: !post.liked }, "like")}>{post.liked ? "已赞" : "赞"} · {post.likeCount}</button>
       <button className="text-button" type="button" aria-pressed={post.favorited} disabled={busy}
         onClick={() => void write("/posts/" + post.id + "/favorite", "PUT", { enabled: !post.favorited }, "favorite")}>{post.favorited ? "已收藏" : "收藏帖子"}</button>
-      {detail ? <span>{post.commentCount} 条评论</span> : <Link className="text-button" href={"/community/posts/" + post.id}>评论 · {post.commentCount}</Link>}
+      {detail ? <span>{post.commentCount} 条评论</span> : <Link className="text-button" href={"/community/posts/" + post.id} prefetch={false}>评论 · {post.commentCount}</Link>}
     </footer>
   </article>;
 }
@@ -182,7 +182,7 @@ export function CommunityScreen({ postId, initialPaintingId = null }: { postId?:
       <><span>有一项操作需要核对结果。</span><button className="text-button" type="button" onClick={() => void check()}>核对操作结果</button></>}</div> : null}
     {capability.loading ? <CommunityLoading /> : capability.error ? <StatePanel kind="unavailable" title="社区暂时不可用" description={capability.error} actionLabel="重新连接社区" onAction={capability.retry} /> : !enabled ?
       <StatePanel kind="unavailable" title="社区暂未开放" description="暂时无法确认当前账号的社区访问能力。" /> : postId ?
-      <div className="community-detail"><Link className="text-button" href="/community">← 返回社区</Link>
+      <div className="community-detail"><Link className="text-button" href="/community" prefetch={false}>← 返回社区</Link>
         {detail.error ? <StatePanel kind="error" title="帖子读取失败" description={detail.error} actionLabel="重新读取帖子" onAction={detail.retry} /> : null}
         {detail.loading && !detail.data ? <CommunityLoading /> : detail.data ? <><PostCard post={detail.data} detail busy={busy} write={write} />
           <Comments key={postId} postId={postId} token={token!} revision={revision}

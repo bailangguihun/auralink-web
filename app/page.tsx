@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { ArrowIcon } from "@/components/icons";
 import { HomeHero } from "@/components/home-hero";
+import { HomeScreens } from "@/components/home-screens";
+import { SiteFooter } from "@/components/site-footer";
 
 export const metadata: Metadata = { title: "首页" };
 
@@ -17,25 +19,31 @@ const features = [
 
 export default function HomePage() {
   return (
-    <main className="home-page">
+    <HomeScreens>
       <HomeHero />
-      <section className="home-features page-shell" id="home-features" aria-labelledby="feature-title">
-        <div className="section-heading">
-          <h2 id="feature-title">从一幅画，进入文化世界</h2>
-          <p>浏览作品、探索知识，从更多角度感受中国画。</p>
-        </div>
-        <div className="feature-grid">
-          {features.map((feature) => (
-            <Link className="feature-card glass-panel" href={feature.href} key={feature.href}>
-              <div>
-                <h3>{feature.title}</h3>
-                <p>{feature.description}</p>
-              </div>
-              <ArrowIcon />
-            </Link>
-          ))}
+      <section className="home-features" id="home-features" aria-labelledby="feature-title">
+        <div className="home-features-scroll" tabIndex={0} role="region" aria-label="首页功能与项目介绍">
+          <div className="home-features-content">
+            <div className="section-heading">
+              <h2 id="feature-title">从一幅画，进入文化世界</h2>
+              <p>浏览作品、探索知识，从更多角度感受中国画。</p>
+            </div>
+            <div className="feature-grid">
+              {features.map((feature) => (
+                <Link className="feature-card glass-panel" href={feature.href} key={feature.href} prefetch={false}>
+                  <div>
+                    <h3>{feature.title}</h3>
+                    <p>{feature.description}</p>
+                  </div>
+                  <ArrowIcon />
+                </Link>
+              ))}
+            </div>
+            <a className="home-return" href="#home-welcome"><ArrowIcon direction="up" width={18} height={18} />返回开屏</a>
+          </div>
+          <SiteFooter />
         </div>
       </section>
-    </main>
+    </HomeScreens>
   );
 }

@@ -24,7 +24,7 @@ export function HomeHero() {
   }, []);
 
   return (
-    <section className="home-hero" aria-label="ArtLIVE 画智体欢迎页">
+    <section className="home-hero" id="home-welcome" aria-label="ArtLIVE 画智体欢迎页">
       <div className="hero-slides" aria-hidden="true">
         {slides.map((source, index) => (
           <div

@@ -7,5 +7,5 @@ export function ConversationLoading() {
 }
 export function AssistantLoading({ embedded = false }: { embedded?: boolean }) {
   const workspace = <div className={styles.layout}><aside className={styles.sidebar} aria-label="正在恢复会话列表"><div className={styles.sidebarHeading}><span className={styles.eyebrow}>ARTLIVE ASSISTANT</span><h2>国画助手</h2></div><button className={styles.newSession} disabled>＋ 新建对话</button><SkeletonRows lines={7} /></aside><main className={styles.main}><div className={styles.mobileSessions}><button className={styles.small} disabled>☰ 我的对话</button><span>国画助手</span></div><ConversationLoading /></main></div>;
-  return embedded ? workspace : <div className={styles.page}>{workspace}</div>;
+  return embedded ? workspace : <div className={styles.page} data-navigation-page="">{workspace}</div>;
 }

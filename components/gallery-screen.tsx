@@ -16,6 +16,7 @@ import { StatePanel } from "@/components/state-panel";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { INITIAL_GALLERY_QUERY } from "@/lib/gallery-order";
 import { galleryFeedKey } from "@/lib/gallery-feed";
+import { DAILY_PAINTING_KEY, DAILY_PAINTING_TTL_MS } from "@/lib/navigation-data";
 import type { PaintingQuery, PaintingSummary } from "@/lib/types";
 
 export function GalleryScreen() {
@@ -32,7 +33,7 @@ function GalleryContent() {
   const loadDaily = useCallback((signal: AbortSignal) => api.dailyPainting(token, signal), [token]);
   const ready = status !== "loading";
   const catalog = useGalleryFeed(query, token, ready, sessionIdentity.generation);
-  const recommendation = useReadResource("daily", loadDaily, ready, 60_000);
+  const recommendation = useReadResource(DAILY_PAINTING_KEY, loadDaily, ready, DAILY_PAINTING_TTL_MS);
   const { page, error: readError } = catalog;
   const loading = !ready || catalog.loading;
   const { data: daily, error: dailyError } = recommendation;

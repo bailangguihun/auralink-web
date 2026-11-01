@@ -8,6 +8,7 @@ import { getGalleryFeedSnapshot } from "@/lib/gallery-feed";
 import { INITIAL_GALLERY_QUERY } from "@/lib/gallery-order";
 import { DAILY_PAINTING_KEY, DAILY_PAINTING_TTL_MS, galleryFirstKey, KNOWLEDGE_GRAPH_KEY, KNOWLEDGE_STATISTICS_KEY, KNOWLEDGE_TTL_MS, readGalleryFirstPage } from "@/lib/navigation-data";
 import { NAVIGATION_ROUTES, preloadNavigationModule } from "@/lib/navigation-preload";
+import { requiresAuthentication } from "@/lib/navigation";
 import { readCache } from "@/lib/read-cache";
 
 type Connection = EventTarget & { saveData?: boolean; effectiveType?: string };
@@ -85,7 +86,10 @@ export function useNavigationPrefetch(pathname: string) {
       }
       return tasks;
     };
-    const routes = [...NAVIGATION_ROUTES, ...(status === "authenticated" ? ["/me", "/account"] : ["/login", "/register"])];
+    const routes = [
+      ...NAVIGATION_ROUTES.filter(href => status === "authenticated" || !requiresAuthentication(href)),
+      ...(status === "authenticated" ? ["/me", "/account"] : ["/login", "/register"]),
+    ];
     let queue = routes.flatMap(tasksFor).filter(task => !done.has(task.key));
 
     const cancelSchedule = () => {
@@ -142,6 +146,7 @@ export function useNavigationPrefetch(pathname: string) {
     };
     wake.current = schedule;
     prioritize.current = href => {
+      if (status === "anonymous" && requiresAuthentication(href)) href = "/login";
       if (!routes.includes(href) || href === pathname) return;
       const wanted = tasksFor(href).filter(task => active.current?.task.key !== task.key
         && (task.kind === "data" || !done.has(task.key)));

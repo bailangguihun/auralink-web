@@ -244,8 +244,9 @@ try {
     await firstCard.locator('button:not([disabled])').waitFor();
     assert.equal(state.calls.filter(call => ['PUT', 'DELETE'].includes(call.method)).length, 2);
     assertStable(first, await geometry(page, 12));
-    const links = firstCard.locator('a'); await links.first().focus();
-    await page.keyboard.press('Tab'); assert(await links.nth(1).evaluate(element => element === document.activeElement));
+    const links = firstCard.locator('a');
+    assert.equal(await links.count(), 1, 'One detail link covers the whole card');
+    await links.first().focus();
     await page.keyboard.press('Tab'); assert(await firstCard.locator('button').evaluate(element => element === document.activeElement));
     await page.keyboard.press('Tab'); assert(await cards(page).nth(1).locator('a').first().evaluate(element => element === document.activeElement));
     await shot('first-batch');

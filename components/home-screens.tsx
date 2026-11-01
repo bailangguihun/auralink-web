@@ -5,7 +5,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 const SCREEN_IDS = ["home-welcome", "home-features"] as const;
 const WHEEL_THRESHOLD = 40;
 const GESTURE_GAP_MS = 180;
-const TRANSITION_MS = 480;
+const TRANSITION_MS = 640;
+const REVEAL_PROGRESS = 0.38;
 
 /** Two homepage stops, with normal scrolling inside an overflowing second screen. */
 export function HomeScreens({ children }: { children: ReactNode }) {
@@ -23,20 +24,31 @@ export function HomeScreens({ children }: { children: ReactNode }) {
     let target: number | null = null;
     let animation = 0;
     let resizeFrame = 0;
+    let fade: Animation | null = null;
     let wheelTime = 0;
     let wheelDirection = 0;
     let wheelTotal = 0;
     let wheelConsumed = false;
     let innerGesture = false;
-    let touch: { x: number; y: number; fromTop: boolean; switched: boolean } | null = null;
+    let touch: { x: number; y: number; fromWelcome: boolean; fromTop: boolean; switched: boolean } | null = null;
     const originalSnap = area.style.scrollSnapType;
     const originalBehavior = area.style.scrollBehavior;
 
     const topFor = (index: number) => panels[index]!.getBoundingClientRect().top
       - area.getBoundingClientRect().top + area.scrollTop;
     const publish = (index: number) => {
+      if (active === index) return;
       active = index;
       setScreen(index === 0 ? "welcome" : "features");
+    };
+    const syncMotion = () => {
+      const distance = topFor(1);
+      const progress = distance > 0 ? Math.max(0, Math.min(1, area.scrollTop / distance)) : 0;
+      // Keep transient animation values out of React renders and leave the
+      // panels themselves untransformed, so snap/focus geometry stays stable.
+      area.style.setProperty("--home-progress", progress.toFixed(4));
+      area.dataset.homeReveal = target !== 0 && progress >= REVEAL_PROGRESS ? "visible" : "hidden";
+      publish(progress >= 0.5 ? 1 : 0);
     };
     const restoreSnap = () => {
       area.style.scrollSnapType = originalSnap;
@@ -52,28 +64,46 @@ export function HomeScreens({ children }: { children: ReactNode }) {
     const goTo = (index: number, immediate = false, explicitHash = false) => {
       index = Math.max(0, Math.min(1, index));
       cancelAnimationFrame(animation);
+      fade?.cancel();
+      fade = null;
       const destination = topFor(index);
       const start = area.scrollTop;
+      const instant = immediate || reducedMotion.matches || Math.abs(destination - start) < 1;
       target = index;
+      area.dataset.homeMotion = instant ? "instant" : "smooth";
+      area.dataset.homeTransition = index === 0 ? "welcome" : "features";
       replaceHash(index, explicitHash);
       area.style.scrollSnapType = "none";
       area.style.scrollBehavior = "auto";
+      syncMotion();
       const finish = () => {
         area.scrollTo({ top: destination, behavior: "instant" });
         target = null;
         animation = 0;
+        syncMotion();
         publish(index);
+        delete area.dataset.homeTransition;
         restoreSnap();
+        if (instant) {
+          // Commit deep links, focus jumps and resize endpoints without
+          // replaying the entry sequence when transitions are re-enabled.
+          area.getBoundingClientRect();
+          area.dataset.homeMotion = "smooth";
+        }
       };
-      if (immediate || reducedMotion.matches || Math.abs(destination - start) < 1) {
+      if (instant) {
         finish();
+        if (reducedMotion.matches && !immediate && Math.abs(destination - start) >= 1) {
+          fade = panels[index]!.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: 140, easing: "ease-out" });
+        }
         return;
       }
       const began = performance.now();
       const step = (time: number) => {
         const progress = Math.min(1, (time - began) / TRANSITION_MS);
-        const eased = 1 - (1 - progress) ** 3;
+        const eased = (1 - Math.cos(Math.PI * progress)) / 2;
         area.scrollTo({ top: start + (destination - start) * eased, behavior: "instant" });
+        syncMotion();
         if (progress < 1) animation = requestAnimationFrame(step);
         else finish();
       };
@@ -84,8 +114,9 @@ export function HomeScreens({ children }: { children: ReactNode }) {
       ? contents.scrollTop > 1
       : contents.scrollTop + contents.clientHeight < contents.scrollHeight - 1));
     const onScroll = () => {
-      const secondTop = topFor(1);
-      publish(area.scrollTop >= secondTop / 2 ? 1 : 0);
+      // The RAF loop already synchronizes scripted movement. Native scrolling
+      // (including touch and browser restoration) follows the same visuals.
+      if (target === null) syncMotion();
     };
     const onWheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY) || !event.deltaY) return;
@@ -163,6 +194,7 @@ export function HomeScreens({ children }: { children: ReactNode }) {
       if (event.touches.length !== 1) { touch = null; return; }
       const point = event.touches[0];
       touch = { x: point.clientX, y: point.clientY,
+        fromWelcome: active === 0,
         fromTop: active === 1 && insideContents(event.target) && Boolean(contents && contents.scrollTop <= 1), switched: false };
     };
     const onTouchMove = (event: TouchEvent) => {
@@ -173,10 +205,18 @@ export function HomeScreens({ children }: { children: ReactNode }) {
       }
       const dx = event.touches[0].clientX - touch.x;
       const dy = event.touches[0].clientY - touch.y;
-      if (touch.fromTop && dy > 50 && dy > Math.abs(dx) * 1.25) {
-        if (event.cancelable) event.preventDefault();
+      const vertical = Math.abs(dy) > Math.abs(dx) * 1.25;
+      // Claim a screen-changing gesture before the browser starts native
+      // scrolling. Upward gestures within the feature list stay native.
+      if (vertical && event.cancelable && (touch.fromWelcome || (touch.fromTop && dy > 0))) {
+        event.preventDefault();
+      }
+      const forward = touch.fromWelcome && dy < -50 && vertical;
+      const backward = touch.fromTop && dy > 50 && vertical;
+      if ((forward || backward) && event.cancelable) {
+        event.preventDefault();
         touch.switched = true;
-        goTo(0);
+        goTo(forward ? 1 : 0);
       }
     };
     const onTouchEnd = () => { touch = null; };
@@ -212,13 +252,21 @@ export function HomeScreens({ children }: { children: ReactNode }) {
     reducedMotion.addEventListener("change", onMotionChange);
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(onResize);
     observer?.observe(area);
+    area.dataset.homeMotion = "instant";
     onHash();
-    onScroll();
+    syncMotion();
+    area.getBoundingClientRect();
+    area.dataset.homeMotion = "smooth";
     return () => {
       cancelAnimationFrame(animation);
       cancelAnimationFrame(resizeFrame);
+      fade?.cancel();
       observer?.disconnect();
       restoreSnap();
+      area.style.removeProperty("--home-progress");
+      delete area.dataset.homeMotion;
+      delete area.dataset.homeReveal;
+      delete area.dataset.homeTransition;
       area.removeEventListener("wheel", onWheel);
       area.removeEventListener("scroll", onScroll);
       document.removeEventListener("click", onClick, true);

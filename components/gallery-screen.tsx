@@ -87,7 +87,7 @@ function GalleryContent() {
   };
 
   return (
-    <main className="page-shell module-page gallery-page">
+    <main className="page-shell module-page gallery-page" data-gallery-ready={!loading && !dailyLoading && !preparing}>
       <ModuleHeader module="gallery">
         <span className="catalog-status">{page ? `${page.totalElements} 幅可浏览画作` : error ? "目录读取失败" : "正在读取目录"}</span>
       </ModuleHeader>

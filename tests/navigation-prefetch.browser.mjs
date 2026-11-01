@@ -145,7 +145,8 @@ try {
       // This case performs no navigation/hover/focus. Its RSC requests are the
       // automatic prefetch, including Next FULL requests without a prefetch header.
       const prefetched = new Set(state.rsc.map(r => r.path));
-      for (const route of ['/gallery', '/knowledge', '/studio', '/community', '/assistant', '/about']) assert(prefetched.has(route), `Route code prefetched: ${route}`);
+      for (const route of ['/gallery', '/about', '/login', '/register']) assert(prefetched.has(route), `Public/auth route code prefetched: ${route}`);
+      for (const route of ['/knowledge', '/studio', '/community', '/assistant', '/me', '/account']) assert(!prefetched.has(route), `Anonymous visitor does not prefetch protected route: ${route}`);
       record.prefetchedRoutes = [...prefetched];
     }
     await page.screenshot({ path: `${output}/anonymous-home.png` });

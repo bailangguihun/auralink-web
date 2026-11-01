@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { SessionLink as Link } from "@/components/session-link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -8,6 +8,8 @@ import { BrandIcon, CloseIcon, MenuIcon, UserIcon } from "@/components/icons";
 import { PendingIndicator } from "@/components/loading";
 import { useSession } from "@/components/session-provider";
 import { useNavigationPrefetch } from "@/components/use-navigation-prefetch";
+import { NavigationIndicator } from "@/components/navigation-indicator";
+import navigationMotion from "@/components/navigation-indicator.module.css";
 
 const links = [
   ["/", "首页"],
@@ -51,7 +53,7 @@ export function Navigation() {
         {open ? <CloseIcon /> : <MenuIcon />}
       </button>
 
-      <nav id="primary-navigation" className={`primary-nav${open ? " nav-open" : ""}`} aria-label="主导航">
+      <nav id="primary-navigation" className={`primary-nav ${navigationMotion.navigation}${open ? " nav-open" : ""}`} aria-label="主导航">
         {links.map(([href, label]) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return <Link key={href} href={href === "/" && pathname === "/" ? "/#home-welcome" : href} prefetch={false} aria-current={active ? "page" : undefined}
@@ -59,6 +61,7 @@ export function Navigation() {
             onPointerEnter={event => { if (event.pointerType === "mouse") prefetch.prepare(href); }}
             onFocus={() => prefetch.prepare(href)}>{label}</Link>;
         })}
+        <NavigationIndicator pathname={pathname} menuOpen={open} />
       </nav>
 
       <div className="session-actions">

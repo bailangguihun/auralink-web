@@ -97,7 +97,7 @@ try {
   await go(`/assistant?session=${id(1)}`);await page.getByRole('button',{name:'更多工具与恢复'}).click();const storage=page.getByTestId('assistant-storage');await storage.getByText(/已占配额/).waitFor();state.fail['/api/v1/assistant/storage']=403;await storage.getByRole('button',{name:'刷新用量'}).click();await storage.getByText('图片用量访问未获确认，已清除旧用量。请重新读取。',{exact:true}).waitFor();assert.equal(await storage.getByText(/已占配额/).count(),0);await shot('forbidden-usage');
  });
  await scenario('auth-slow-retry-expiry-motion',async({page,state,go,shot})=>{
-  state.delays['/api/user/profile']=11000;await go('/me');await page.getByRole('status').filter({hasText:'正在确认个人资料'}).waitFor();assert.equal(state.requests.filter(r=>r.path.includes('/favorites')).length,0);await sleep(10100);await shot('slow-auth');
+  state.delays['/api/user/profile']=11000;await go('/me');await page.getByRole('status').filter({hasText:'正在确认登录状态'}).waitFor();assert.equal(state.requests.filter(r=>r.path.includes('/favorites')).length,0);await sleep(10100);await shot('slow-auth');
   await page.getByText('A@example.invalid',{exact:true}).waitFor();state.fail['/api/v1/me/favorites/paintings']=401;await page.getByRole('button',{name:'下一页',exact:true}).click();await page.waitForURL('**/login?**');assert.equal(await page.getByText('A@example.invalid',{exact:true}).count(),0);assert.equal(await page.evaluate(()=>localStorage.getItem('artlive.session.token.v1')),null);
  },{motion:true});
  await scenario('detail-and-image-loading',async({page,state,go,shot,noOverflow})=>{

@@ -97,12 +97,18 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
 
   return (
     <div className="detail-layout">
-      <section className="detail-artwork">
-        <div className="detail-media glass-panel"><MediaImage image={painting.image} alt={painting.title || "无题画作"} /></div>
+      <section className="detail-artwork" aria-label="作品观赏与操作">
+        <header className="detail-viewer-heading">
+          <h2 title={painting.title || "无题"}>{painting.title || "无题"}</h2>
+          <p title={[painting.authorName || "佚名", painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"].join(" · ")}>
+            {painting.authorName || "佚名"}<span aria-hidden="true"> · </span>{painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"}
+          </p>
+        </header>
+        <div className="detail-media" data-artwork-target={paintingId}><MediaImage image={painting.image} alt={painting.title || "无题画作"} /></div>
         <div className="detail-actions">
-          <Link className="button" href="/gallery"><ArrowIcon direction="left" /> 返回画廊</Link>
-          <Link className="button" href={"/community?paintingId=" + encodeURIComponent(painting.paintingId)}>引用作品发帖</Link>
-          <button className={`button${favorited ? " button-primary" : ""}`} type="button" disabled={isFavoriteBusy(painting.paintingId)} onClick={toggleFavorite}><HeartIcon filled={favorited} /> {favorited ? "已收藏" : "收藏"}</button>
+          <Link className="button detail-back" data-artwork-return={paintingId} href="/gallery"><ArrowIcon direction="left" /> 返回画廊</Link>
+          <Link className="button" aria-label="引用作品发帖" href={"/community?paintingId=" + encodeURIComponent(painting.paintingId)}><span aria-hidden="true" className="detail-quote-mark">“</span>引用发帖</Link>
+          <button className={`button detail-favorite${favorited ? " button-primary" : ""}`} type="button" aria-pressed={favorited} disabled={isFavoriteBusy(painting.paintingId)} onClick={toggleFavorite}><HeartIcon filled={favorited} /> {favorited ? "已收藏" : "收藏"}</button>
         </div>
         {error ? <p className="inline-error" role="alert">{error}</p> : null}
       </section>

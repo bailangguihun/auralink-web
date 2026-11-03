@@ -30,3 +30,8 @@
   transition: none;
   will-change: clip-path;
 }
+
+/* The same presentation component as the real viewer, with no image URL,
+   requests, event handlers or business components. Measured only during click. */
+.measure { position: fixed; inset: 0 auto auto 0; visibility: hidden; pointer-events: none; z-index: -1; }
+.measure[hidden] { display: none; }

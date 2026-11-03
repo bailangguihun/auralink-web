@@ -102,13 +102,15 @@ export function RouteMotion() {
         disconnect();
         animate(card, "auth", 0, 200);
       } else if (pathname.startsWith("/gallery/")) {
-        const artwork = document.querySelector<HTMLElement>(".detail-artwork");
+        const artwork = document.querySelector<HTMLElement>(".detail-page:not([data-artwork-measure]) .detail-artwork");
         const info = document.querySelector<HTMLElement>(".detail-info");
         if (!visible(artwork) || !visible(info)) return;
         pending.consumed = true;
         disconnect();
-        if (!hasArtworkTransition(pathname, sessionIdentity.generation)) animate(artwork, "artwork", distance);
-        animate(info, "info", distance, 300, 50);
+        if (!hasArtworkTransition(pathname, sessionIdentity.generation)) {
+          animate(artwork, "artwork", distance);
+          animate(info, "info", distance, 300, 50);
+        }
       } else {
         const page = document.querySelector<HTMLElement>("[data-navigation-page]") || document.querySelector<HTMLElement>("main");
         if (!visible(page) || page.querySelector(".route-skeleton")) return;

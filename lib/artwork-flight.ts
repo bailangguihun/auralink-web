@@ -18,8 +18,9 @@ export function getArtworkPreview(paintingId: string, generation: number): Artwo
     && Date.now() - preview.savedAt < 20 * 60_000 ? preview : null;
 }
 
-/** Only the first image flight defers detail reads. Slow routing/landing cannot
- * extend this gate. Finishing, cancelling or replacing a flight releases it.
+/** The local image and background transition defers detail reads and text.
+ * The controller finishes this gate after both visual animations, independently
+ * of route/API readiness. Cancelling or replacing a transition also releases it.
  */
 export function beginArtworkFlight(path: string, generation: number): () => void {
   flight?.finish();
@@ -31,6 +32,10 @@ export function beginArtworkFlight(path: string, generation: number): () => void
   };
   flight = entry;
   return entry.finish;
+}
+
+export function isArtworkFlightActive(path: string, generation: number): boolean {
+  return flight?.path === path && flight.generation === generation;
 }
 
 export function waitForArtworkFlight(path: string, generation: number, signal?: AbortSignal): Promise<void> {

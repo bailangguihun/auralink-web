@@ -12,7 +12,7 @@ import { PaintingInsights } from "@/components/painting-insights";
 import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
 import { api, ApiError, errorMessage } from "@/lib/api";
-import { getArtworkPreview, waitForArtworkFlight, type ArtworkPreview } from "@/lib/artwork-flight";
+import { getArtworkPreview, isArtworkFlightActive, waitForArtworkFlight, type ArtworkPreview } from "@/lib/artwork-flight";
 import { resolveMediaUrl } from "@/lib/media";
 import type { PaintingDetail, PaintingImage } from "@/lib/types";
 
@@ -49,6 +49,7 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
   const [attempt, setAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [textReady, setTextReady] = useState(() => !isArtworkFlightActive(`/gallery/${encodeURIComponent(paintingId)}`, sessionIdentity.generation));
 
   const handleAuthError = useCallback((caught: unknown) => {
     if (caught instanceof ApiError && caught.kind === "unauthorized") signOutIfCurrent(sessionIdentity);
@@ -63,6 +64,7 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
     void (async () => {
       await waitForArtworkFlight(`/gallery/${encodeURIComponent(paintingId)}`, sessionIdentity.generation, request.signal);
       if (!active || request.signal.aborted || !isCurrentSession(sessionIdentity)) return;
+      setTextReady(true);
       const result = await api.painting(paintingId, token, request.signal);
       if (active && !request.signal.aborted && isCurrentSession(sessionIdentity)) setPainting(result);
     })().catch((caught) => {
@@ -92,7 +94,7 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
     }
   };
 
-  if (loading && !preview) return <><Link className="text-button" href="/gallery">返回画廊</Link><LoadingSection label="正在展开作品详情" onRetry={() => setAttempt(value => value + 1)}><DetailSkeleton /></LoadingSection></>;
+  if (loading && !preview) return <div data-artwork-text-ready={String(textReady)} style={textReady ? undefined : { visibility: "hidden" }} aria-hidden={!textReady || undefined}><Link className="text-button" href="/gallery">返回画廊</Link><LoadingSection label="正在展开作品详情" onRetry={() => setAttempt(value => value + 1)}><DetailSkeleton /></LoadingSection></div>;
   if (!loading && error && !painting) return <><Link className="text-button" href="/gallery">返回画廊</Link><StatePanel kind="error" title="作品详情加载失败" description={error} actionLabel="重新读取作品" onAction={() => setAttempt(value => value + 1)} /></>;
   if (!painting && (!loading || !preview)) return <StatePanel kind="empty" title="作品不存在或当前不可用" actionLabel="返回画廊" actionHref="/gallery" />;
 
@@ -126,8 +128,8 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
   ] : [];
 
   return (
-    <div className="detail-layout" data-artwork-preview={!painting ? "true" : undefined}>
-      <ArtworkViewer title={title} author={author} period={period} paintingId={paintingId}
+    <div className="detail-layout" data-artwork-preview={!painting ? "true" : undefined} data-artwork-text-ready={String(textReady)}>
+      <ArtworkViewer title={title} author={author} period={period} paintingId={paintingId} concealText={!textReady}
         image={<MediaImage image={painting ? painting.image : preview!.image} alt={title} />}
         error={painting ? error : null}
         actions={<>
@@ -143,7 +145,7 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
         {painting.generatedText ? <div className="detail-section"><h2>作品资料</h2><p>{painting.generatedText}</p></div> : null}
         <dl className="fact-grid">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || "未详"}</dd></div>)}</dl>
         <PaintingInsights paintingId={painting.paintingId} imageAvailable={painting.imageAvailable && Boolean(painting.image)} />
-        </> : <LoadingSection label="正在读取作品资料" onRetry={() => setAttempt(value => value + 1)}><Skeleton className="skeleton-title" /><SkeletonRows lines={8} /></LoadingSection>}
+        </> : <div style={textReady ? undefined : { visibility: "hidden" }} aria-hidden={!textReady || undefined}><LoadingSection label="正在读取作品资料" onRetry={() => setAttempt(value => value + 1)}><Skeleton className="skeleton-title" /><SkeletonRows lines={8} /></LoadingSection></div>}
       </section>
     </div>
   );

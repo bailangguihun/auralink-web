@@ -7,6 +7,12 @@ import { useSession } from "@/components/session-provider";
 import { artworkMotionPlan, fitArtworkRect, intersectArtworkRects, type ArtworkRect } from "@/lib/artwork-transition-geometry";
 import styles from "./artwork-transition.module.css";
 
+// A cold public navigation includes route code, detail/daily reads, image decode
+// and gallery scroll restoration. Give that work a bounded readiness window;
+// it must not share the short visual animation duration below. Ready targets
+// still fly immediately, and errors or user interaction clean up earlier.
+const ARTWORK_READY_TIMEOUT_MS = 5_000;
+
 type GalleryOrigin = {
   paintingId: string; generation: number; kind: "card" | "daily"; savedAt: number;
 };
@@ -219,7 +225,7 @@ export function ArtworkTransition() {
         from: location.pathname, to: destination.pathname, paintingId, generation: latest.current.generation,
         direction: returning ? "return" : "open", galleryKind: returning ? entry?.kind : undefined,
         source: image.src, bitmap, frame, overlay, image, decoded: false, phase: "waiting", arrived: false, stableFrames: 0,
-        observer, timer: setTimeout(() => fade(transfer), 650), raf: 0, animations: [],
+        observer, timer: setTimeout(() => fade(transfer), ARTWORK_READY_TIMEOUT_MS), raf: 0, animations: [],
       };
       current.current = transfer;
       document.body.append(overlay);

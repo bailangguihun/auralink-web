@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { SessionLink as Link } from "@/components/session-link";
 
 import { PendingIndicator } from "@/components/loading";
 import { HeartIcon } from "@/components/icons";
@@ -17,13 +17,13 @@ type PaintingCardProps = {
 export function PaintingCard({ painting, authenticated, favoriteBusy, onFavorite, masonry = false, priority = false }: PaintingCardProps) {
   const detailPath = `/gallery/${painting.paintingId}`;
   return (
-    <article className={`painting-card glass-panel${masonry ? " gallery-painting-card" : ""}`}>
-      <Link className="painting-media" href={detailPath} aria-label={`查看${painting.title || "无题"}详情`}>
+    <article className={`painting-card glass-panel${masonry ? " gallery-painting-card" : ""}`} data-artwork-source={painting.paintingId}>
+      <div className="painting-media">
         <MediaImage image={painting.image} alt={painting.title || "无题画作"} layout={masonry ? "artwork" : "fixed"} loading={masonry ? priority ? "eager" : "lazy" : undefined} />
-      </Link>
+      </div>
       <div className="painting-copy">
         <div>
-          <Link href={detailPath}><h3 title={painting.title || "无题"}>{painting.title || "无题"}</h3></Link>
+          <Link className="painting-card-link" data-artwork-link={painting.paintingId} href={detailPath} prefetch={false} title={painting.title || "无题"} aria-label={`查看${painting.title || "无题"}详情`}><h3>{painting.title || "无题"}</h3></Link>
           <p>{painting.authorName || "佚名"} · {painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"}</p>
         </div>
         {authenticated && onFavorite ? (
@@ -39,7 +39,7 @@ export function PaintingCard({ painting, authenticated, favoriteBusy, onFavorite
             {favoriteBusy ? <PendingIndicator /> : <HeartIcon filled={painting.favorited} />}
           </button>
         ) : (
-          <Link className="favorite-button" href={`/login?next=${encodeURIComponent(detailPath)}`} aria-label="登录后收藏"><HeartIcon /></Link>
+          <Link className="favorite-button" href={`/login?next=${encodeURIComponent(detailPath)}`} prefetch={false} aria-label="登录后收藏"><HeartIcon /></Link>
         )}
       </div>
       <div className="painting-meta">

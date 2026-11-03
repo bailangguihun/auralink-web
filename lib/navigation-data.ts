@@ -8,6 +8,8 @@ export const KNOWLEDGE_STATISTICS_KEY = "knowledge:paintings";
 export const KNOWLEDGE_GRAPH_KEY = "knowledge:poetry";
 export const KNOWLEDGE_TTL_MS = 5 * 60_000;
 export const GALLERY_FIRST_TTL_MS = 30_000;
+export const DAILY_PAINTING_KEY = "daily";
+export const DAILY_PAINTING_TTL_MS = 60_000;
 
 export const galleryFirstKey = (query: PaintingQuery) => `gallery:first:${galleryFeedKey(query)}`;
 

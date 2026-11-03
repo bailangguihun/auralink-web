@@ -1,0 +1,39 @@
+.navigation > a {
+  transition: color 200ms ease, background-color 200ms ease;
+}
+
+.indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent-strong);
+  pointer-events: none;
+  transition: background-color 200ms ease;
+}
+
+.indicator[hidden] { display: none; }
+
+:global(.topbar-home) .indicator { background: #fffaf1; }
+:global(body:has(.home-page[data-home-screen="features"]) .topbar-home) .indicator { background: var(--accent-strong); }
+
+@media (min-width: 901px) {
+  .navigation { position: relative; }
+  .navigation[data-navigation-indicator="ready"] > a[aria-current="page"]::after { display: none; }
+}
+
+@media (max-width: 900px) {
+  .indicator { display: none; }
+  .navigation > a[aria-current="page"]::after { animation: underline-in 180ms ease-out; }
+}
+
+@keyframes underline-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navigation > a, .indicator { transition: none; }
+  .navigation > a[aria-current="page"]::after { animation: none; }
+}

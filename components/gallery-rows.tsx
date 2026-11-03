@@ -137,15 +137,20 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
       savedViewport = { key: viewKey, paintingId: item.dataset.paintingId, offset: item.getBoundingClientRect().top, scrollY: window.scrollY, savedAt: Date.now() };
     };
     const beforeNavigate = (event: MouseEvent) => {
-      if ((event.target as Element).closest("a[href]")) save();
+      if (event.target instanceof Element && event.target.closest("a[href]")) save();
     };
-    node.addEventListener("click", beforeNavigate, true);
+    // Daily recommendations sit outside the rows but need the same scroll snapshot.
+    const gallery = node.closest<HTMLElement>(".gallery-page") || node;
+    gallery.addEventListener("click", beforeNavigate, true);
     window.addEventListener("pagehide", save);
-    return () => { save(); node.removeEventListener("click", beforeNavigate, true); window.removeEventListener("pagehide", save); };
+    return () => { save(); gallery.removeEventListener("click", beforeNavigate, true); window.removeEventListener("pagehide", save); };
   }, [viewKey]);
 
   useEffect(() => {
-    const cancel = () => { restoring.current = undefined; };
+    const cancel = () => {
+      restoring.current = undefined;
+      if (container.current) container.current.dataset.galleryRestoring = "false";
+    };
     window.addEventListener("wheel", cancel, { passive: true });
     window.addEventListener("touchstart", cancel, { passive: true });
     window.addEventListener("keydown", cancel);
@@ -165,12 +170,14 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
           .find(item => item.dataset.paintingId === snapshot.paintingId);
         window.scrollTo({ top: anchor ? window.scrollY + anchor.getBoundingClientRect().top - snapshot.offset : snapshot.scrollY, behavior: "instant" });
         restoring.current = undefined;
+        // Shared-image returns must wait for this scroll, not just mounted cards.
+        if (container.current) container.current.dataset.galleryRestoring = "false";
       }); });
     });
     return () => { disposed = true; cancelAnimationFrame(frame); };
   }, [pending, width, restoreReady, count]);
 
-  return <div ref={container} className="gallery-rows" role="region" aria-label="画作目录" aria-busy={pending} style={{ "--gallery-gap": `${gap}px` } as CSSProperties}>
+  return <div ref={container} className="gallery-rows" data-gallery-restoring={Boolean(restoring.current)} role="region" aria-label="画作目录" aria-busy={pending} style={{ "--gallery-gap": `${gap}px` } as CSSProperties}>
     {rows.map((row, rowIndex) => <div className="gallery-row" key={row.paintings[0].paintingId} style={{ marginLeft: row.left, "--gallery-row-image-height": `${row.height}px` } as CSSProperties}>
       {row.paintings.map((painting, index) => <div className="gallery-row-item" data-painting-id={painting.paintingId} key={painting.paintingId} style={{ width: row.widths[index] }}>
         {renderPainting(painting, rowIndex === 0)}

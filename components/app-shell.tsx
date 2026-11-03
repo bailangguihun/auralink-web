@@ -1,21 +1,29 @@
+"use client";
+
 import Script from "next/script";
+import { usePathname } from "next/navigation";
 
 import { MiniAppBackButton } from "@/components/miniapp-back-button";
 import { Navigation } from "@/components/navigation";
 import { BackToTop } from "@/components/back-to-top";
+import { SiteFooter } from "@/components/site-footer";
+import { ProtectedRoute } from "@/components/protected-route";
+import { requiresAuthentication } from "@/lib/navigation";
+import { RouteMotion } from "@/components/route-motion";
+import { ArtworkTransition } from "@/components/artwork-transition";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const home = pathname === "/";
+  const content = <>{children}{!home ? <><SiteFooter /><BackToTop /></> : null}</>;
   return (
     <>
       <Script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js" strategy="afterInteractive" />
       <Navigation />
       <MiniAppBackButton />
-      {children}
-      <footer className="site-footer">
-        <span>ArtLIVE 画智体</span>
-        <span>让中国画在数字空间中被看见、理解与延续</span>
-      </footer>
-      <BackToTop />
+      <RouteMotion />
+      <ArtworkTransition />
+      {requiresAuthentication(pathname) ? <ProtectedRoute>{content}</ProtectedRoute> : content}
     </>
   );
 }

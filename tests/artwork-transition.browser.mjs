@@ -25,6 +25,11 @@ const caseNames = [
   'clipped-image-title-entry', 'undecoded-image-navigation', 'programmatic-scroll-keeps-flight',
   'user-wheel-cancels-flight', 'browser-back-keeps-navigation',
   'viewport-change-return',
+  'background-and-image-first-frame', 'background-longer-than-image',
+  'tablet-landscape-round-trip', 'resize-clears-background',
+  'background-click-blocks-old-card', 'background-click-blocks-old-favorite',
+  'held-touch-survives-route-handoff',
+  'right-button-clears-background', 'middle-button-clears-background',
 ];
 if (selected) for (const name of selected) assert(caseNames.includes(name), `Unknown ARTWORK_CASES entry: ${name}`);
 const paintingId = id(90);
@@ -44,9 +49,11 @@ const observed = async gate => {
 };
 const report = {
   boundary: 'Local production app; synthetic auth/profile/catalog/media. No real account, API, model, or application write. Injected latency is not a measurement of production.',
+  browserAvailability: 'Browser plugin not available; existing Playwright is used without installing dependencies.',
   web, api, startedAt: new Date().toISOString(), cases: [],
 };
 const browser = await chromium.launch({ headless: true });
+report.browser = { engine: 'Chromium', version: browser.version() };
 let artworkImage;
 if (process.env.ARTWORK_IMAGE_FILE) {
   const filename = process.env.ARTWORK_IMAGE_FILE;
@@ -79,10 +86,12 @@ async function scenario(name, options, run) {
   const fixture = newState();
   const gates = new Map();
   const context = await browser.newContext({
-    viewport: { width: options.mobile ? 390 : 1440, height: options.mobile ? 844 : 1000 },
+    viewport: options.viewport || { width: options.mobile ? 390 : 1440, height: options.mobile ? 844 : 1000 },
+    hasTouch: Boolean(options.touch),
+    isMobile: Boolean(options.isMobile),
     reducedMotion: options.reducedMotion ? 'reduce' : 'no-preference', serviceWorkers: 'block',
   });
-  await context.addInitScript(() => {
+  await context.addInitScript(({ backgroundDurationMs }) => {
     localStorage.setItem('artlive.session.token.v1', 'ISOLATED_ARTWORK_TRANSITION_FIXTURE');
     const now = Date.now.bind(Date);
     window.__artworkClockAdvance = 0;
@@ -95,9 +104,36 @@ async function scenario(name, options, run) {
     window.__artworkLiveAnimations = [];
     window.__artworkRequests = [];
     window.__artworkClicks = [];
+    window.__artworkSources = [];
+    window.__artworkFirstPaints = [];
+    window.__artworkTextDuringVisuals = [];
+    window.__artworkInputEvents = [];
+    for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel', 'contextmenu', 'auxclick', 'click']) {
+      document.addEventListener(type, event => {
+        const target = event.target instanceof Element ? event.target : null;
+        const entry = { type, at: performance.now(), target: target?.tagName,
+          pointerType: event.pointerType || null, button: event.button ?? null, href: target?.closest('a')?.getAttribute('href') || null,
+          favorite: Boolean(target?.closest('.favorite-button')),
+          scene: Boolean(target?.closest('[data-artwork-transition-scene]')) };
+        window.__artworkInputEvents.push(entry);
+        queueMicrotask(() => { entry.defaultPreventedAfter = event.defaultPrevented; });
+      }, { capture: true, passive: true });
+    }
+    const drawnCanvases = new WeakSet();
+    const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+      const result = drawImage.apply(this, args);
+      drawnCanvases.add(this.canvas);
+      return result;
+    };
     document.addEventListener('click', event => {
       const link = event.target instanceof Element ? event.target.closest('a[data-artwork-link],a[data-artwork-return]') : null;
-      if (link) window.__artworkClicks.push({ at: performance.now(), direction: link.hasAttribute('data-artwork-return') ? 'return' : 'open', href: link.getAttribute('href') });
+      if (link) {
+        const direction = link.hasAttribute('data-artwork-return') ? 'return' : 'open';
+        window.__artworkClicks.push({ at: performance.now(), direction, href: link.getAttribute('href') });
+        const owner = direction === 'return' ? link.closest('.detail-artwork') : link.closest('[data-artwork-source]');
+        window.__artworkSources.push({ direction, image: owner?.querySelector('img') });
+      }
     }, true);
     const nativeFetch = window.fetch;
     window.fetch = function (input, init) {
@@ -105,12 +141,18 @@ async function scenario(name, options, run) {
       window.__artworkRequests.push({
         path: url.pathname, origin: url.origin, at: performance.now(),
         activeFrames: window.__artworkLiveAnimations.filter(animation => animation.id === 'artlive-artwork-frame' && animation.playState === 'running').length,
+        activeBackgrounds: window.__artworkLiveAnimations.filter(animation => animation.id === 'artlive-artwork-background' && animation.playState === 'running').length,
       });
       return nativeFetch.call(this, input, init);
     };
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (...args) {
-      const overlay = this.closest?.('[data-artwork-transition-overlay]');
+      const overlay = this.closest?.('[data-artwork-transition-overlay], [data-artwork-transition-scene]');
+      // Deliberately make the background slower than the image in one case so
+      // a gate that only waits for the image cannot accidentally pass.
+      if (backgroundDurationMs && this.closest?.('[data-artwork-transition-scene]')) {
+        args[1] = { ...(typeof args[1] === 'object' ? args[1] : {}), duration: backgroundDurationMs };
+      }
       const animation = animate.apply(this, args);
       if (overlay) {
         const result = {
@@ -119,13 +161,55 @@ async function scenario(name, options, run) {
         };
         window.__artworkAnimations.push(result);
         window.__artworkLiveAnimations.push(animation);
-        queueMicrotask(() => { result.id = animation.id; });
+        queueMicrotask(() => {
+          result.id = animation.id;
+          if (animation.id !== 'artlive-artwork-frame') return;
+          requestAnimationFrame(() => {
+            const scene = document.querySelector('[data-artwork-transition-scene]');
+            const moving = document.querySelector('[data-artwork-transition-overlay]');
+            const source = window.__artworkSources.findLast(value => value.direction === result.direction)?.image;
+            const rect = scene?.getBoundingClientRect();
+            const css = scene && getComputedStyle(scene);
+            window.__artworkFirstPaints.push({
+              direction: result.direction, at: performance.now(),
+              cancelledBeforePaint: animation.playState === 'idle' && !result.finished,
+              movingBitmap: moving ? { imageCount: moving.querySelectorAll('img').length,
+                canvases: Array.from(moving.querySelectorAll('canvas')).map(canvas => ({ width: canvas.width,
+                  height: canvas.height, drawn: drawnCanvases.has(canvas), visibility: getComputedStyle(canvas).visibility })) } : null,
+              scene: scene ? { direction: scene.dataset.artworkTransitionDirection,
+                rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+                visibility: css.visibility, display: css.display, opacity: css.opacity,
+                background: css.backgroundColor, pointerEvents: css.pointerEvents,
+                hiddenFromAccessibility: scene.getAttribute('aria-hidden') === 'true',
+                inertScenery: Boolean(scene.querySelector('[inert]')),
+                imageCount: scene.querySelectorAll('img').length,
+                canvases: Array.from(scene.querySelectorAll('canvas')).map(canvas => ({ width: canvas.width,
+                  height: canvas.height, visibility: getComputedStyle(canvas).visibility,
+                  drawn: drawnCanvases.has(canvas) })) } : null,
+              sourceHidden: Boolean(source && (!source.isConnected || getComputedStyle(source).visibility === 'hidden')),
+              viewport: { width: innerWidth, height: innerHeight },
+              topbarBottom: document.querySelector('.topbar')?.getBoundingClientRect().bottom || 0,
+            });
+          });
+          const inspectText = () => {
+            const active = window.__artworkLiveAnimations.some(value =>
+              ['artlive-artwork-frame', 'artlive-artwork-background'].includes(value.id) && value.playState === 'running');
+            if (!active || result.direction !== 'open') return;
+            const text = Array.from(document.querySelectorAll('.detail-page .detail-viewer-heading, .detail-page .detail-info'))
+              .filter(node => !node.closest('[data-artwork-transition-scene], [data-artwork-measure]')
+                && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden')
+              .map(node => node.innerText.trim()).filter(Boolean);
+            if (text.length) window.__artworkTextDuringVisuals.push({ at: performance.now(), text });
+            requestAnimationFrame(inspectText);
+          };
+          requestAnimationFrame(inspectText);
+        });
         animation.addEventListener('finish', () => { result.finished = true; result.finishedAt = performance.now(); }, { once: true });
         animation.addEventListener('cancel', () => { if (!result.finished) result.cancelled = true; }, { once: true });
       }
       return animation;
     };
-  });
+  }, { backgroundDurationMs: options.backgroundDurationMs || 0 });
   const page = await context.newPage();
   page.setDefaultTimeout(12000);
   page.on('pageerror', error => record.errors.push(error.message));
@@ -194,7 +278,7 @@ async function scenario(name, options, run) {
   const animations = () => page.evaluate(() => window.__artworkAnimations);
   const resetAnimations = () => page.evaluate(() => { window.__artworkAnimations = []; });
   const cleared = async () => {
-    await page.waitForFunction(() => !document.querySelector('[data-artwork-transition-overlay]'));
+    await page.waitForFunction(() => !document.querySelector('[data-artwork-transition-overlay], [data-artwork-transition-scene]'));
     assert.equal(await page.locator('[data-artwork-target] img, [data-artwork-source] img').evaluateAll(images => images.filter(image => image.style.visibility === 'hidden').length), 0, 'No hidden target leaks after transition');
   };
   const startedFlight = async direction => {
@@ -223,17 +307,61 @@ async function scenario(name, options, run) {
     assert(!values.some(animation => animation.id === 'artlive-artwork-fallback' && animation.startedAt < frame.finishedAt), `${direction} never falls back before completing the main flight`);
     return frame;
   };
+  const firstPaint = async direction => {
+    await page.waitForFunction(direction => window.__artworkFirstPaints.some(value => value.direction === direction), direction);
+    const value = await page.evaluate(direction => window.__artworkFirstPaints.find(value => value.direction === direction), direction);
+    assert(value.movingBitmap && value.movingBitmap.imageCount === 0 && value.movingBitmap.canvases.length === 1
+      && value.movingBitmap.canvases.every(canvas => canvas.drawn && canvas.width > 0 && canvas.height > 0 && canvas.visibility === 'visible'),
+      `${direction} first image-animation frame contains the synchronously drawn source bitmap, without a new asynchronous image`);
+    assert(value.scene, `${direction} has a destination background in the first image-animation frame`);
+    assert.equal(value.scene.direction, direction, `${direction} background belongs to the same transition`);
+    assert.notEqual(value.scene.display, 'none');
+    assert.equal(value.scene.visibility, 'visible');
+    assert(value.scene.rect.left <= 1 && value.scene.rect.right >= value.viewport.width - 1, 'Destination background covers the content width');
+    assert(value.scene.rect.top <= value.topbarBottom + 1 && value.scene.rect.bottom >= value.viewport.height - 1, 'Destination background covers the content below the top bar');
+    assert(value.scene.hiddenFromAccessibility && value.scene.pointerEvents === 'auto' && value.scene.inertScenery,
+      'Background shields old controls while its scenery remains decorative and inert');
+    if (direction === 'return') {
+      assert.equal(value.scene.imageCount, 0, 'The gallery snapshot does not create new image elements or repeat image reads');
+      const visibleCanvases = value.scene.canvases.filter(canvas => canvas.visibility === 'visible');
+      assert(visibleCanvases.length > 0 && visibleCanvases.every(canvas => canvas.width > 0 && canvas.height > 0 && canvas.drawn),
+        'The returned gallery uses the already decoded visible bitmaps, drawn successfully to bounded canvases');
+      assert(value.scene.canvases.filter(canvas => !canvas.drawn).every(canvas => canvas.visibility === 'hidden' && canvas.width === 1 && canvas.height === 1),
+        'Only hidden one-pixel placeholders are left undrawn, including the moving artwork slot');
+    }
+    assert(value.sourceHidden, `${direction} source image is hidden while its moving copy is displayed`);
+    const values = await animations();
+    const image = values.find(value => value.direction === direction && value.id === 'artlive-artwork-frame');
+    const background = values.find(value => value.direction === direction && value.id === 'artlive-artwork-background');
+    assert(background, `${direction} background transition starts with the image`);
+    assert(Math.abs(background.startedAt - image.startedAt) < 32, `${direction} image and background start within one frame`);
+    record.firstPaints ??= [];
+    record.firstPaints.push(value);
+    return value;
+  };
+  const completedBackground = async direction => {
+    await page.waitForFunction(direction => window.__artworkAnimations.some(animation =>
+      animation.direction === direction && animation.id === 'artlive-artwork-background' && animation.finished), direction, { timeout: 2500 });
+    const background = (await animations()).find(animation => animation.direction === direction && animation.id === 'artlive-artwork-background');
+    assert(background.finished && !background.cancelled, `${direction} background transition completes`);
+    return background;
+  };
   const deferredReads = async () => {
     const data = await page.evaluate(() => ({ animations: window.__artworkAnimations, requests: window.__artworkRequests }));
     const frame = data.animations.find(animation => animation.direction === 'open' && animation.id === 'artlive-artwork-frame');
+    const background = data.animations.find(animation => animation.direction === 'open' && animation.id === 'artlive-artwork-background');
     assert(frame?.finished, 'The main opening flight completed');
+    assert(background?.finished, 'The opening background transition completed');
     const reads = data.requests.filter(request => request.origin === api && (request.path === detailApi
       || request.path.startsWith(detailApi + '/') || request.path === '/api/v1/critic/capability'));
     assert(reads.some(request => request.path === detailApi), 'The detail GET was actually issued');
     for (const request of reads) {
       assert.equal(request.activeFrames, 0, `${request.path} does not start during the main flight`);
-      assert(request.at >= frame.startedAt + Number(frame.duration) - 25, `${request.path} waits until the opening animation finishes`);
+      assert.equal(request.activeBackgrounds, 0, `${request.path} does not start during the background transition`);
+      assert(request.at >= frame.finishedAt, `${request.path} waits until the actual opening finish event`);
+      assert(request.at >= background.finishedAt, `${request.path} waits until the actual background finish event`);
     }
+    assert.deepEqual(await page.evaluate(() => window.__artworkTextDuringVisuals), [], 'Preview heading and detail text stay concealed until both visuals complete');
     record.deferredReads = reads;
   };
   const previewVisible = async () => {
@@ -253,6 +381,11 @@ async function scenario(name, options, run) {
     // link proves authentication without depending on a desktop-only control.
     await page.locator(`.gallery-row-item a[data-artwork-link="${paintingId}"][href="${detailPath}"]`).waitFor({ state: 'attached' });
     await page.locator('.gallery-page[data-gallery-ready="true"]').waitFor();
+    record.pageIdentity = { url: page.url(), title: await page.title(), viewport: page.viewportSize() };
+    assert.equal(new URL(record.pageIdentity.url).pathname, '/gallery', 'The intended entry route is open');
+    assert(record.pageIdentity.title.includes('画廊'), 'The intended gallery title is rendered');
+    assert((await page.locator('main.gallery-page[data-gallery-ready="true"]').innerText()).trim(), 'The app has meaningful rendered page content');
+    assert.equal(await page.locator('nextjs-portal [role="dialog"], #webpack-dev-server-client-overlay, vite-error-overlay').count(), 0, 'No framework error overlay');
     const source = page.locator(`.gallery-row-item [data-artwork-source="${paintingId}"]`);
     await source.scrollIntoViewIfNeeded();
     if (decoded) await page.waitForFunction(paintingId => {
@@ -263,14 +396,17 @@ async function scenario(name, options, run) {
   };
   const captureMoving = async direction => {
     if (process.env.ARTWORK_CAPTURE_FRAMES !== '1'
-      || !['fast-round-trip', 'slow-detail-read', 'slow-return-daily-read', 'mobile-slow-round-trip', 'clipped-image-title-entry'].includes(name)) return;
+      || !['fast-round-trip', 'slow-detail-read', 'slow-return-daily-read', 'mobile-slow-round-trip', 'clipped-image-title-entry',
+        'background-and-image-first-frame', 'background-longer-than-image', 'tablet-landscape-round-trip'].includes(name)) return;
     await startedFlight(direction);
     await page.screenshot({ path: `${output}/${name}-${direction}-moving.png` });
   };
   const openPainting = async () => {
     // The native Link receives a normal left click. Its covering pseudo-element
     // makes the artwork visible without asking Playwright to click the bitmap.
-    await page.locator(`.gallery-row-item a[data-artwork-link="${paintingId}"]`).click({ noWaitAfter: true });
+    const link = page.locator(`.gallery-row-item a[data-artwork-link="${paintingId}"]`);
+    if (options.touch) await link.tap();
+    else await link.click({ noWaitAfter: true });
     await captureMoving('open');
   };
   const detailVisible = async () => {
@@ -282,17 +418,26 @@ async function scenario(name, options, run) {
     if (process.env.ARTWORK_CAPTURE_FRAMES === '1') await page.screenshot({ path: `${output}/${name}-detail-loaded.png` });
   };
   const returnToGallery = async () => {
-    await page.locator(`.detail-page a[data-artwork-return="${paintingId}"]`).click({ noWaitAfter: true });
+    const link = page.locator(`.detail-page a[data-artwork-return="${paintingId}"]`);
+    if (options.touch) await link.tap();
+    else await link.click({ noWaitAfter: true });
     await captureMoving('return');
   };
   try {
     await run({ page, record, gate, release, openGallery, openPainting, detailVisible, returnToGallery,
-      startedFlight, completedFlight, cleared, animations, resetAnimations, deferredReads, previewVisible });
+      startedFlight, completedFlight, completedBackground, firstPaint, cleared, animations, resetAnimations, deferredReads, previewVisible });
     const main = (await animations()).filter(animation => animation.id === 'artlive-artwork-frame');
     for (const direction of ['open', 'return']) assert(main.filter(animation => animation.direction === direction).length <= 1, 'Data handoff never starts a second main flight');
     for (const settle of (await animations()).filter(animation => animation.id?.startsWith('artlive-artwork-settle-'))) {
       assert(Number(settle.duration) <= 120, 'Landing geometry correction is short');
     }
+    const paints = await page.evaluate(() => window.__artworkFirstPaints);
+    // An explicit interruption can remove the transfer before the first RAF;
+    // that cancelled transfer has no visible animation frame to inspect.
+    for (const value of paints.filter(value => !value.cancelledBeforePaint)) assert(value.movingBitmap && value.movingBitmap.imageCount === 0
+      && value.movingBitmap.canvases.length === 1 && value.movingBitmap.canvases.every(canvas => canvas.drawn
+        && canvas.width > 0 && canvas.height > 0 && canvas.visibility === 'visible'),
+    `${value.direction} never starts a visible animation with an empty or asynchronously loaded bitmap`);
     assert.deepEqual(record.forbidden, [], 'No external or application write requests');
     assert.deepEqual(record.errors, [], 'No JavaScript exception');
     record.unexpectedConsole = record.console.filter(entry => {
@@ -310,7 +455,9 @@ async function scenario(name, options, run) {
     await page.screenshot({ path: `${output}/${name}-failure.png`, fullPage: true }).catch(() => {});
   } finally {
     record.animations = await animations().catch(() => []);
-    record.browserTimeline = await page.evaluate(() => ({ requests: window.__artworkRequests, clicks: window.__artworkClicks })).catch(() => ({}));
+    record.browserTimeline = await page.evaluate(() => ({ requests: window.__artworkRequests, clicks: window.__artworkClicks,
+      firstPaints: window.__artworkFirstPaints, textDuringVisuals: window.__artworkTextDuringVisuals,
+      inputEvents: window.__artworkInputEvents })).catch(() => ({}));
     record.finalUrl = page.url();
     for (const value of gates.values()) value.resolve();
     await context.close();
@@ -438,6 +585,123 @@ try {
     assert(frames.length <= 1, 'Viewport-change fallback has at most one main flight');
     assert(frames.every(animation => animation.finished), 'Any safe fallback flight completes');
   });
+  await scenario('background-and-image-first-frame', { routeDelayMs: 2500 }, async ({ page, record, openGallery, openPainting, firstPaint, completedFlight, completedBackground, detailVisible, deferredReads, gate, release, cleared }) => {
+    await openGallery();
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('main.gallery-page[data-gallery-ready="true"] img'))
+      .filter(image => { const rect = image.getBoundingClientRect(); return rect.bottom > 0 && rect.top < innerHeight; })
+      .every(image => image.complete));
+    const beforeClick = record.calls.length;
+    const sourcePath = painting(90).image.contentUrl;
+    const sourceRead = gate(sourcePath);
+    await openPainting(); await firstPaint('open');
+    await completedFlight('open'); await completedBackground('open');
+    assert(record.routes.some(route => route.path === detailPath && route.injectedDelayMs === 2500), 'The real route read was delayed by 2.5 seconds');
+    assert(!record.calls.some(call => call.path === detailApi), 'Detail data has not bypassed the cold route');
+    const scene = page.locator('[data-artwork-transition-scene]');
+    assert(await scene.isVisible(), 'Complete destination background remains while the route is delayed');
+    assert(await scene.locator('.detail-artwork').count(), 'The early background includes the real viewer frame layout');
+    const decorativeImageReads = record.calls.slice(beforeClick).filter(call => call.path.startsWith('/api/v1/assets/'));
+    assert.deepEqual(decorativeImageReads, [], 'The entire decorative capture, background and moving bitmap start without any new media GET, even while a source reread would be blocked');
+    record.decorativeImageReads = decorativeImageReads;
+    await page.screenshot({ path: `${output}/cold-route-destination-background.png` });
+    release(sourcePath, sourceRead);
+    await detailVisible(); await cleared(); await deferredReads();
+  });
+  await scenario('background-longer-than-image', { backgroundDurationMs: 1200 }, async ({ page, record, openGallery, openPainting, firstPaint, completedFlight, completedBackground, detailVisible, gate, release, previewVisible, deferredReads, cleared }) => {
+    await openGallery(); const detail = gate(detailApi); await openPainting(); await firstPaint('open');
+    await completedFlight('open');
+    await page.locator('main.detail-page [data-artwork-preview="true"]').waitFor({ state: 'attached' });
+    assert(await page.evaluate(() => window.__artworkLiveAnimations.some(animation => animation.id === 'artlive-artwork-background' && animation.playState === 'running')), 'The mounted detail preview is observed while the independently delayed background is still moving');
+    assert(!record.calls.some(call => call.path === detailApi), 'Finishing the image alone does not release the detail GET');
+    assert.deepEqual(await page.evaluate(() => window.__artworkTextDuringVisuals), [], 'Neither preview heading nor detail loading text appears during the remaining background transition');
+    await page.screenshot({ path: `${output}/background-pending-after-image.png` });
+    await completedBackground('open'); await observed(detail); await previewVisible(); await deferredReads();
+    release(detailApi, detail); await detailVisible(); await cleared();
+  });
+  await scenario('tablet-landscape-round-trip', { viewport: { width: 1180, height: 820 }, touch: true }, async ({ page, openGallery, openPainting, firstPaint, completedFlight, completedBackground, detailVisible, returnToGallery, gate, release, previewVisible, deferredReads, cleared }) => {
+    await openGallery(); const detail = gate(detailApi); await openPainting(); await firstPaint('open');
+    await completedFlight('open'); await completedBackground('open'); await observed(detail); await previewVisible(); await deferredReads();
+    await page.screenshot({ path: `${output}/tablet-background-and-image-ready.png` });
+    release(detailApi, detail); await detailVisible(); await cleared();
+    await page.evaluate(() => { window.__artworkClockAdvance += 61000; });
+    const daily = gate(dailyApi); await returnToGallery(); await firstPaint('return');
+    await completedFlight('return'); await completedBackground('return'); await observed(daily);
+    assert(!daily.released, 'The return visual completes before the slow daily read');
+    assert(await page.locator('[data-artwork-transition-scene]').isVisible(), 'The gallery visual background stays present while gallery readiness is delayed');
+    await page.screenshot({ path: `${output}/tablet-return-background-pending.png` });
+    release(dailyApi, daily); await cleared();
+  });
+  await scenario('resize-clears-background', {}, async ({ page, openGallery, openPainting, firstPaint, startedFlight, gate, release, detailVisible, cleared }) => {
+    await openGallery(); const route = gate('route:' + detailPath); await openPainting(); await startedFlight('open'); await firstPaint('open');
+    await page.setViewportSize({ width: 1180, height: 820 }); await cleared();
+    release('route:' + detailPath, route); await detailVisible(); await cleared();
+    assert.equal(await page.locator('[data-artwork-transition-scene]').count(), 0, 'Resize cannot leave an old-size background covering the destination');
+  });
+  for (const control of ['card', 'favorite']) {
+    await scenario(`background-click-blocks-old-${control}`, { touch: control === 'favorite', isMobile: control === 'favorite' }, async ({ page, record, openGallery, openPainting, startedFlight, firstPaint, gate, release, detailVisible, cleared }) => {
+      await openGallery();
+      const secondCard = page.locator(`main.gallery-page[data-gallery-ready="true"] .gallery-row-item [data-artwork-source="${id(91)}"]`);
+      const oldControl = secondCard.locator(control === 'card' ? 'a[data-artwork-link]' : 'button.favorite-button');
+      const rect = await oldControl.boundingBox();
+      assert(rect && rect.width > 0 && rect.height > 0, 'The old gallery control has a real clickable position');
+      const point = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      assert(point.x > 0 && point.x < 1440 && point.y > 72 && point.y < 1000, 'The old control lies in the visible content viewport');
+      const route = gate('route:' + detailPath); await openPainting(); await startedFlight('open'); await firstPaint('open');
+      assert(await page.evaluate(point => Boolean(document.elementFromPoint(point.x, point.y)?.closest('[data-artwork-transition-scene]')), point), 'The destination background shields the old control coordinate');
+      if (control === 'favorite') await page.touchscreen.tap(point.x, point.y);
+      else await page.mouse.click(point.x, point.y);
+      await cleared();
+      assert(!record.routes.some(route => route.path === `/gallery/${id(91)}`), 'Cancelling the background never navigates to the old second card');
+      assert.deepEqual(record.forbidden, [], 'Cancelling the background never submits an old favorite action');
+      release('route:' + detailPath, route); await detailVisible(); await cleared();
+      assert.equal(new URL(page.url()).pathname, detailPath, 'The originally chosen detail is the only destination');
+      record.backgroundClick = { control, pointer: control === 'favorite' ? 'touch' : 'mouse', point, destination: page.url(), oldControlActivated: false };
+    });
+  }
+  await scenario('held-touch-survives-route-handoff', { touch: true, isMobile: true }, async ({ page, record, openGallery, openPainting, firstPaint, completedFlight, completedBackground, gate, release, detailVisible, cleared }) => {
+    await openGallery();
+    const oldFavorite = page.locator(`main.gallery-page[data-gallery-ready="true"] .gallery-row-item [data-artwork-source="${id(91)}"] button.favorite-button`);
+    const rect = await oldFavorite.boundingBox();
+    assert(rect, 'The old gallery favorite has a real position');
+    const point = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    const route = gate('route:' + detailPath); await openPainting(); await firstPaint('open');
+    assert(await page.evaluate(point => Boolean(document.elementFromPoint(point.x, point.y)?.closest('[data-artwork-transition-scene]')), point));
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...point, id: 1, force: 1 }] });
+    record.heldTouch = { point, startedAt: await page.evaluate(() => performance.now()) };
+    await completedFlight('open'); await completedBackground('open');
+    release('route:' + detailPath, route);
+    await page.locator('main.detail-page .detail-layout[data-artwork-text-ready="true"]:not([data-artwork-preview])').waitFor({ state: 'attached' });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert(await page.locator('[data-artwork-transition-scene]').isVisible(), 'Natural route/image handoff cannot remove the background during an active touch gesture');
+    assert.deepEqual(record.forbidden, [], 'Holding the background never activates old controls');
+    record.heldTouch.destinationArrivedWhileHeld = true;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cleared(); await detailVisible();
+    record.heldTouch.endedAt = await page.evaluate(() => performance.now());
+    assert.equal(new URL(page.url()).pathname, detailPath, 'Releasing the touch preserves the chosen detail route');
+    assert.deepEqual(record.forbidden, [], 'The gesture completion never submits the old favorite action');
+    await cdp.detach();
+  });
+  for (const button of ['right', 'middle']) {
+    await scenario(`${button}-button-clears-background`, {}, async ({ page, record, openGallery, openPainting, firstPaint, gate, release, detailVisible, cleared }) => {
+      await openGallery(); const route = gate('route:' + detailPath); await openPainting(); await firstPaint('open');
+      const point = { x: 1420, y: 970 };
+      assert(await page.evaluate(point => Boolean(document.elementFromPoint(point.x, point.y)?.closest('[data-artwork-transition-scene]')), point));
+      await page.mouse.click(point.x, point.y, { button });
+      await page.waitForFunction(() => !document.querySelector('[data-artwork-transition-overlay], [data-artwork-transition-scene]'), undefined, { timeout: 1500 });
+      await cleared(); release('route:' + detailPath, route); await detailVisible(); await cleared();
+      assert.equal(page.context().pages().length, 1, 'A decorative background cannot open another tab');
+      assert.equal(new URL(page.url()).pathname, detailPath, 'Non-primary input preserves the intended route');
+      const events = await page.evaluate(() => window.__artworkInputEvents);
+      assert(events.some(event => event.type === 'pointerdown' && event.button === (button === 'right' ? 2 : 1) && event.scene),
+        'The actual non-primary button was pressed on the background');
+      // Removing a non-primary target on pointerdown is a valid safe cleanup;
+      // Chromium need not emit auxclick after pointerup reaches a different node.
+      const completionEventObserved = events.some(event => event.type === (button === 'right' ? 'contextmenu' : 'auxclick'));
+      record.nonPrimaryInput = { button, point, completionEventObserved, clearedWithoutTimeoutFallback: true };
+    });
+  }
 } finally {
   await browser.close();
   report.finishedAt = new Date().toISOString();

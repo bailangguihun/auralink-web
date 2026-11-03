@@ -3,18 +3,22 @@
 import { usePathname } from "next/navigation";
 import { useLayoutEffect, useRef } from "react";
 
+import { ArtworkViewer } from "@/components/artwork-viewer";
+import { beginArtworkFlight, clearArtworkPreview, saveArtworkPreview } from "@/lib/artwork-flight";
+import { getGalleryFeedSnapshot, galleryFeedKey } from "@/lib/gallery-feed";
+
 import { useSession } from "@/components/session-provider";
 import { artworkMotionPlan, fitArtworkRect, intersectArtworkRects, type ArtworkRect } from "@/lib/artwork-transition-geometry";
 import styles from "./artwork-transition.module.css";
 
-// A cold public navigation includes route code, detail/daily reads, image decode
-// and gallery scroll restoration. Give that work a bounded readiness window;
-// it must not share the short visual animation duration below. Ready targets
-// still fly immediately, and errors or user interaction clean up earlier.
+// Only the final handoff waits for route/data readiness. The main flight starts
+// in click capture, using the already decoded image and a presentation-only
+// viewer shell. A slow route can no longer consume the animation itself.
 const ARTWORK_READY_TIMEOUT_MS = 5_000;
 
 type GalleryOrigin = {
   paintingId: string; generation: number; kind: "card" | "daily"; savedAt: number;
+  bitmap: ArtworkRect; frame: ArtworkRect; viewport: string; feedKey: string;
 };
 
 type Transfer = {
@@ -22,7 +26,8 @@ type Transfer = {
   direction: "open" | "return"; galleryKind?: GalleryOrigin["kind"];
   source: string; bitmap: ArtworkRect; frame: ArtworkRect;
   overlay: HTMLDivElement; image: HTMLImageElement; decoded: boolean;
-  phase: "waiting" | "moving" | "fading"; arrived: boolean;
+  phase: "waiting" | "moving" | "settling" | "fading"; arrived: boolean;
+  flown: boolean; finishFlight: () => void;
   target?: { image: HTMLImageElement; visibility: string; priority: string; decoded: boolean };
   lastTarget?: ArtworkRect; lastFrame?: ArtworkRect; stableFrames: number;
   observer: MutationObserver; timer: ReturnType<typeof setTimeout>; raf: number;
@@ -67,6 +72,7 @@ export function ArtworkTransition() {
   const latest = useRef({ pathname, status, generation: sessionIdentity.generation });
   latest.current = { pathname, status, generation: sessionIdentity.generation };
   const current = useRef<Transfer | null>(null);
+  const measurement = useRef<HTMLDivElement>(null);
   // Only the last gallery entry, in memory; no route, query or auth persistence.
   const origin = useRef<GalleryOrigin | null>(null);
   const cancel = useRef<() => void>(() => {});
@@ -91,10 +97,12 @@ export function ArtworkTransition() {
         else image.style.removeProperty("visibility");
       }
       transfer.overlay.remove();
+      transfer.finishFlight();
     };
     const fade = (transfer: Transfer) => {
       if (current.current !== transfer || transfer.phase !== "waiting") return;
       transfer.phase = "fading";
+      transfer.overlay.dataset.artworkTransitionPhase = "fading";
       transfer.observer.disconnect();
       const animation = transfer.overlay.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 110, fill: "forwards" });
       animation.id = "artlive-artwork-fallback";
@@ -103,11 +111,46 @@ export function ArtworkTransition() {
     };
     const queue = () => {
       const transfer = current.current;
-      if (!transfer || transfer.phase !== "waiting" || transfer.raf) return;
+      if (!transfer || transfer.phase === "fading" || transfer.phase === "settling" || transfer.raf) return;
       transfer.raf = requestAnimationFrame(() => { transfer.raf = 0; measure(transfer); });
     };
+    const fly = (transfer: Transfer, destination: ArtworkRect, destinationFrame: ArtworkRect, primary: boolean) => {
+      const plan = artworkMotionPlan(transfer.bitmap, transfer.frame, destination, destinationFrame);
+      if (!plan) return false;
+      transfer.phase = primary ? "moving" : "settling";
+      transfer.overlay.dataset.artworkTransitionPhase = transfer.phase;
+      Object.assign(transfer.overlay.style, { width: `${plan.width}px`, height: `${plan.height}px`, transform: plan.from.transform });
+      transfer.image.style.clipPath = plan.from.clipPath;
+      const mobile = matchMedia("(max-width: 680px)").matches;
+      const timing = { duration: primary ? (transfer.direction === "return" ? 320 : 360) - (mobile ? 40 : 0) : 120,
+        easing: "cubic-bezier(.2, .7, .25, 1)", fill: "both" as const };
+      const outer = transfer.overlay.animate([{ transform: plan.from.transform }, { transform: plan.to.transform }], timing);
+      outer.id = primary ? "artlive-artwork-frame" : "artlive-artwork-settle-frame";
+      const inner = transfer.image.animate([{ clipPath: plan.from.clipPath }, { clipPath: plan.to.clipPath }], timing);
+      inner.id = primary ? "artlive-artwork-image" : "artlive-artwork-settle-image";
+      transfer.animations.push(outer, inner);
+      outer.onfinish = () => {
+        if (current.current !== transfer) return;
+        if (!primary) { cleanup(transfer); return; }
+        // Commit the final pose before removing fill animations. The picture can
+        // stay here while a cold route arrives, without replaying the main flight.
+        transfer.overlay.style.transform = plan.to.transform;
+        transfer.image.style.clipPath = plan.to.clipPath;
+        for (const animation of transfer.animations) { animation.onfinish = null; animation.cancel(); }
+        transfer.animations = [];
+        transfer.bitmap = destination; transfer.frame = destinationFrame;
+        transfer.flown = true;
+        transfer.phase = "waiting";
+        transfer.overlay.dataset.artworkTransitionPhase = "waiting";
+        clearTimeout(transfer.timer);
+        transfer.timer = setTimeout(() => fade(transfer), ARTWORK_READY_TIMEOUT_MS);
+        transfer.finishFlight();
+        queue();
+      };
+      return true;
+    };
     const measure = (transfer: Transfer) => {
-      if (current.current !== transfer || transfer.phase !== "waiting") return;
+      if (current.current !== transfer || transfer.phase === "fading" || transfer.phase === "settling") return;
       const state = latest.current;
       if (document.hidden || reduced.matches || state.status !== "authenticated" || state.generation !== transfer.generation) {
         cleanup(transfer); return;
@@ -128,9 +171,13 @@ export function ArtworkTransition() {
         if (document.querySelector(".detail-page .state-error, .detail-page .state-empty")) fade(transfer);
         return;
       }
-      if ((target.currentSrc || target.src) !== transfer.source) { cleanup(transfer); return; }
+      if ((target.currentSrc || target.src) !== transfer.source) { if (transfer.phase === "waiting") fade(transfer); return; }
       if (transfer.target?.image !== target) {
-        if (transfer.target) { cleanup(transfer); return; }
+        if (transfer.target) {
+          const old = transfer.target;
+          if (old.visibility) old.image.style.setProperty("visibility", old.visibility, old.priority);
+          else old.image.style.removeProperty("visibility");
+        }
         const landing = { image: target, visibility: target.style.getPropertyValue("visibility"), priority: target.style.getPropertyPriority("visibility"), decoded: false };
         transfer.target = landing;
         target.style.visibility = "hidden";
@@ -140,6 +187,7 @@ export function ArtworkTransition() {
           queue();
         }, () => fade(transfer));
       }
+      if (transfer.phase === "moving") return;
       if (!target.complete) return;
       if (!target.naturalWidth) { fade(transfer); return; }
       if (!transfer.decoded || !transfer.target.decoded) return;
@@ -154,27 +202,37 @@ export function ArtworkTransition() {
       transfer.lastTarget = destination;
       transfer.lastFrame = destinationFrame;
       if (transfer.stableFrames < 2) { queue(); return; }
-      const plan = artworkMotionPlan(transfer.bitmap, transfer.frame, destination, destinationFrame);
-      if (!plan) { fade(transfer); return; }
-
-      clearTimeout(transfer.timer);
-      transfer.observer.disconnect();
-      transfer.phase = "moving";
-      // Rebase once at the larger endpoint. The flight itself changes no layout
-      // dimensions: one uniformly scaled bitmap and an independently moving crop.
-      Object.assign(transfer.overlay.style, { width: `${plan.width}px`, height: `${plan.height}px`, transform: plan.from.transform });
-      transfer.image.style.clipPath = plan.from.clipPath;
       finishImageReveal(target);
-      const mobile = matchMedia("(max-width: 680px)").matches;
-      const timing = { duration: (transfer.direction === "return" ? 320 : 360) - (mobile ? 40 : 0), easing: "cubic-bezier(.2, .7, .25, 1)", fill: "both" as const };
-      const outer = transfer.overlay.animate([{ transform: plan.from.transform }, { transform: plan.to.transform }], timing);
-      outer.id = "artlive-artwork-frame";
-      const inner = transfer.image.animate([
-        { clipPath: plan.from.clipPath }, { clipPath: plan.to.clipPath },
-      ], timing);
-      inner.id = "artlive-artwork-image";
-      transfer.animations.push(outer, inner);
-      outer.onfinish = () => cleanup(transfer);
+      if (!transfer.flown) {
+        // A changed viewport cannot use an old return rectangle. It can still
+        // fly once the real gallery geometry is available.
+        if (!fly(transfer, destination, destinationFrame, true)) fade(transfer);
+        return;
+      }
+      const close = (["left", "top", "width", "height"] as const).every(key =>
+        Math.abs(transfer.bitmap[key] - destination[key]) < 1 && Math.abs(transfer.frame[key] - destinationFrame[key]) < 1);
+      if (close) cleanup(transfer);
+      else if (!fly(transfer, destination, destinationFrame, false)) fade(transfer);
+    };
+    const viewportKey = () => [document.documentElement.clientWidth, innerHeight, devicePixelRatio,
+      document.querySelector(".topbar")?.getBoundingClientRect().bottom || 0].join(":");
+    const feedKey = (generation: number) => {
+      const feed = getGalleryFeedSnapshot(generation);
+      return feed ? `${galleryFeedKey(feed.query)}:${feed.page?.orderDate || ""}` : "";
+    };
+    const openingDestination = (source: HTMLImageElement) => {
+      const host = measurement.current;
+      const image = host?.querySelector("img");
+      if (!host || !image) return null;
+      host.inert = true;
+      host.style.width = `${document.documentElement.clientWidth}px`;
+      image.width = source.naturalWidth; image.height = source.naturalHeight;
+      host.hidden = false;
+      try {
+        const bitmap = fitArtworkRect(image.getBoundingClientRect(), source.naturalWidth, source.naturalHeight, "contain");
+        const frame = bitmap && sourceFrame(image, bitmap);
+        return bitmap && frame ? { bitmap, frame } : null;
+      } finally { host.hidden = true; }
     };
     const capture = (event: MouseEvent) => {
       // Assistive-technology clicks may have no preceding pointer/key event.
@@ -197,13 +255,36 @@ export function ArtworkTransition() {
         : link.closest<HTMLElement>("[data-artwork-source]");
       const source = owner?.querySelector("img");
       if (!source || !source.complete || !source.naturalWidth || !source.getClientRects().length) return;
-      const bitmap = bitmapRect(source);
-      const frame = bitmap && sourceFrame(source, bitmap);
-      if (!bitmap || !frame || frame.width < 24 || frame.height < 24) return;
+      let bitmap = bitmapRect(source);
+      let frame = bitmap && sourceFrame(source, bitmap);
+      if (!bitmap) return;
+      // A title can remain clickable after its image scrolls behind the topbar.
+      // Use a small copy at the visible card/click location in that case, instead
+      // of silently discarding an otherwise valid decoded-image transition.
+      if (!frame || frame.width < 24 || frame.height < 24) {
+        const rect = link.getBoundingClientRect();
+        const topbar = document.querySelector(".topbar")?.getBoundingClientRect().bottom || 0;
+        const x = event.detail ? event.clientX : rect.left + rect.width / 2;
+        const y = event.detail ? event.clientY : rect.top + rect.height / 2;
+        bitmap = fitArtworkRect({ left: Math.max(0, Math.min(innerWidth - 80, x - 40)),
+          top: Math.max(topbar, Math.min(innerHeight - 80, y - 40)), width: 80, height: 80 }, source.naturalWidth, source.naturalHeight, "contain");
+        frame = bitmap;
+      }
+      if (!bitmap || !frame) return;
       const initial = artworkMotionPlan(bitmap, frame, bitmap, frame);
       if (!initial) return;
-      if (!returning) origin.current = location.pathname === "/gallery"
-        ? { paintingId, generation: latest.current.generation, kind: owner?.matches(".daily-card") ? "daily" : "card", savedAt: Date.now() } : null;
+      const generation = latest.current.generation;
+      const destinationGeometry = returning
+        ? entry?.viewport === viewportKey() && entry.feedKey === feedKey(generation) ? { bitmap: entry.bitmap, frame: entry.frame } : null
+        : openingDestination(source);
+      if (!returning) {
+        origin.current = location.pathname === "/gallery"
+          ? { paintingId, generation, kind: owner?.matches(".daily-card") ? "daily" : "card", savedAt: Date.now(),
+            bitmap, frame, viewport: viewportKey(), feedKey: feedKey(generation) } : null;
+        saveArtworkPreview({ paintingId, generation, source: source.currentSrc || source.src,
+          title: owner?.dataset.artworkTitle || source.alt || "无题", author: owner?.dataset.artworkAuthor || "佚名",
+          period: owner?.dataset.artworkPeriod || "年代未详", width: source.naturalWidth, height: source.naturalHeight, savedAt: Date.now() });
+      }
       const overlay = document.createElement("div");
       overlay.className = styles.overlay;
       overlay.setAttribute("aria-hidden", "true");
@@ -226,9 +307,16 @@ export function ArtworkTransition() {
         direction: returning ? "return" : "open", galleryKind: returning ? entry?.kind : undefined,
         source: image.src, bitmap, frame, overlay, image, decoded: false, phase: "waiting", arrived: false, stableFrames: 0,
         observer, timer: setTimeout(() => fade(transfer), ARTWORK_READY_TIMEOUT_MS), raf: 0, animations: [],
+        flown: false, finishFlight: () => {},
       };
       current.current = transfer;
       document.body.append(overlay);
+      // The source has already decoded. Reusing it is sufficient to start the
+      // visual flight; an independent decode still verifies the landing copy.
+      if (destinationGeometry) {
+        transfer.finishFlight = beginArtworkFlight(destination.pathname, generation);
+        if (!fly(transfer, destinationGeometry.bitmap, destinationGeometry.frame, true)) transfer.finishFlight();
+      }
       observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-gallery-ready", "data-gallery-restoring"] });
       void image.decode().then(() => {
         if (current.current !== transfer) return;
@@ -238,7 +326,9 @@ export function ArtworkTransition() {
       queue();
     };
     const stop = () => cleanup();
-    const onScroll = () => { if (current.current?.phase === "moving") cleanup(); else queue(); };
+    // Router scroll reset and gallery anchor restoration are expected during a
+    // flight. User scrolling is already caught by wheel/touch/key interruptions.
+    const onScroll = () => { if (current.current?.phase === "waiting") current.current.stableFrames = 0; queue(); };
     const onVisibility = () => { if (document.hidden) cleanup(); };
     cancel.current = stop;
     inspect.current = queue;
@@ -270,6 +360,7 @@ export function ArtworkTransition() {
 
   useLayoutEffect(() => {
     const entry = origin.current;
+    if (status !== "authenticated") clearArtworkPreview();
     if (entry && (status !== "authenticated" || sessionIdentity.generation !== entry.generation
       || (pathname !== "/gallery" && pathname !== `/gallery/${encodeURIComponent(entry.paintingId)}`))) origin.current = null;
     const transfer = current.current;
@@ -281,5 +372,12 @@ export function ArtworkTransition() {
     else inspect.current();
   }, [pathname, status, sessionIdentity.generation]);
 
-  return null;
+  return <div ref={measurement} className={styles.measure} hidden aria-hidden="true" data-artwork-measure>
+    <div className="page-shell detail-page" data-artwork-measure>
+      <div className="detail-layout">
+        <ArtworkViewer title="画作" author="作者" period="年代" image={<img alt="" width={1} height={1} />}
+          actions={<><button className="button" tabIndex={-1}>返回画廊</button><button className="button" tabIndex={-1}>引用作品</button><button className="button" tabIndex={-1}>收藏</button></>} />
+      </div>
+    </div>
+  </div>;
 }

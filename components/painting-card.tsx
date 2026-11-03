@@ -17,7 +17,7 @@ type PaintingCardProps = {
 export function PaintingCard({ painting, authenticated, favoriteBusy, onFavorite, masonry = false, priority = false }: PaintingCardProps) {
   const detailPath = `/gallery/${painting.paintingId}`;
   return (
-    <article className={`painting-card glass-panel${masonry ? " gallery-painting-card" : ""}`} data-artwork-source={painting.paintingId}>
+    <article className={`painting-card glass-panel${masonry ? " gallery-painting-card" : ""}`} data-artwork-source={painting.paintingId} data-artwork-title={painting.title || "无题"} data-artwork-author={painting.authorName || "佚名"} data-artwork-period={painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"}>
       <div className="painting-media">
         <MediaImage image={painting.image} alt={painting.title || "无题画作"} layout={masonry ? "artwork" : "fixed"} loading={masonry ? priority ? "eager" : "lazy" : undefined} />
       </div>

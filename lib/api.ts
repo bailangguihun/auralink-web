@@ -11,7 +11,7 @@ import {
   parseWorkflowPage,
 } from "./studio-contracts.ts";
 import { parseUserProfile } from "./profile-contract.ts";
-import { parsePaintingStatistics, parsePoetryGraph } from "./knowledge-contracts.ts";
+import { parsePaintingStatistics, parsePaintingMetricPage, parsePoetryGraph, type MetricName, type PaintingMetricQuery } from "./knowledge-contracts.ts";
 import {
   parseCritiqueCapability, parseHistoricalPaintingGuide, parsePaintingCritiqueTask, parsePaintingGuide,
 } from "./painting-insight-contracts.ts";
@@ -403,6 +403,11 @@ export const api = {
   mediaBlob: apiMediaBlob,
   paintingStatistics: async (token: string, signal?: AbortSignal) =>
     parsePaintingStatistics(await apiRequest<unknown>("/api/v1/knowledge/painting-statistics", { token, signal })),
+  paintingMetric: async (metric: MetricName, query: PaintingMetricQuery, token: string, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ page: String(query.page), size: String(query.size), q: query.q, sort: query.sort });
+    if (query.revision) params.set("revision", query.revision);
+    return parsePaintingMetricPage(await apiRequest<unknown>(`/api/v1/knowledge/painting-statistics/${metric}?${params}`, { token, signal }), metric);
+  },
   poetryGraph: async (token: string, signal?: AbortSignal) =>
     parsePoetryGraph(await apiRequest<unknown>("/api/v1/knowledge/poetry-graph", { token, signal })),
 };

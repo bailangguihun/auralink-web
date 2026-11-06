@@ -7,6 +7,7 @@ import { ArtworkViewer } from "@/components/artwork-viewer";
 import { beginArtworkFlight, clearArtworkPreview, saveArtworkPreview } from "@/lib/artwork-flight";
 import { getGalleryFeedSnapshot, galleryFeedKey } from "@/lib/gallery-feed";
 import { captureArtworkBitmap, captureGalleryScene } from "@/lib/artwork-gallery-scene";
+import { prefetchPaintingDetail } from "@/lib/painting-detail-data";
 
 import { useSession } from "@/components/session-provider";
 import { artworkMotionPlan, fitArtworkRect, intersectArtworkRects, type ArtworkRect } from "@/lib/artwork-transition-geometry";
@@ -73,9 +74,9 @@ function finishImageReveal(image: HTMLImageElement) {
 /** Copies only the already-visible public image; navigation and data reads stay native. */
 export function ArtworkTransition() {
   const pathname = usePathname();
-  const { status, sessionIdentity } = useSession();
-  const latest = useRef({ pathname, status, generation: sessionIdentity.generation });
-  latest.current = { pathname, status, generation: sessionIdentity.generation };
+  const { status, token, sessionIdentity } = useSession();
+  const latest = useRef({ pathname, status, token, generation: sessionIdentity.generation });
+  latest.current = { pathname, status, token, generation: sessionIdentity.generation };
   const current = useRef<Transfer | null>(null);
   const measurement = useRef<HTMLDivElement>(null);
   // Only the last gallery entry, in memory; no route, query or auth persistence.
@@ -374,6 +375,11 @@ export function ArtworkTransition() {
       // requires a new image read/decode before the first moving frame.
       transfer.finishFlight = beginArtworkFlight(destination.pathname, generation);
       if (!fly(transfer, destinationGeometry.bitmap, destinationGeometry.frame, true)) { cleanup(transfer); return; }
+      // Only the clicked artwork is read. The detail joins this request when its
+      // route arrives; text and business components still wait for both visuals.
+      if (!returning && latest.current.token) {
+        void prefetchPaintingDetail(paintingId, latest.current.token, generation).catch(() => {});
+      }
       observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-gallery-ready", "data-gallery-restoring"] });
       queue();
     };
@@ -443,7 +449,7 @@ export function ArtworkTransition() {
       <div className="detail-layout">
         <ArtworkViewer concealText title="画作" author="作者" period="年代" image={<img alt="" width={1} height={1} style={{ visibility: "hidden" }} />}
           actions={<><button className="button" tabIndex={-1}>返回画廊</button><button className="button" tabIndex={-1}>引用作品</button><button className="button" tabIndex={-1}>收藏</button></>} />
-        <section className="detail-info glass-panel" style={{ minHeight: "calc(100svh - 136px)" }} />
+        <section className="detail-info glass-panel" />
       </div>
     </div>
   </div>;

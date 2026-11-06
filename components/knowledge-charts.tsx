@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as echarts from "echarts/core";
 import { BarChart, PieChart, LineChart, GraphChart } from "echarts/charts";
 import { TooltipComponent, GridComponent, AriaComponent } from "echarts/components";
@@ -11,6 +11,7 @@ import type { CountItem, PoetryNode, PoetryLink } from "@/lib/knowledge-contract
 import { neighborIds } from "@/lib/knowledge-contracts";
 import { resizeMeasuredChart } from "@/lib/chart-resize";
 import { paintingChartHeight } from "@/lib/knowledge-presentation";
+import { graphViewportFit, type GraphPoint } from "@/lib/graph-viewport";
 
 echarts.use([BarChart, PieChart, LineChart, GraphChart, TooltipComponent, GridComponent, AriaComponent, CanvasRenderer]);
 const palette = ["#8b6b52", "#657763", "#ad875d", "#778b8c", "#986b6a", "#baa07b", "#78727e", "#9f956b"];
@@ -23,24 +24,73 @@ const base: EChartsOption = {
 };
 
 type Click = { dataType?: string; data?: { id?: string; source?: string; target?: string }; dataIndex?: number };
-function CanvasChart({ option, label, onClick, className = "", height }: { option: EChartsOption; label: string; onClick?: (event: Click) => void; className?: string; height?: number }) {
+// ECharts does not expose force-layout positions through getOption(). Keep the
+// version-specific read in one guarded adapter; movement uses public actions.
+function graphPixels(chart: echarts.EChartsType): GraphPoint[] {
+  const model = (chart as unknown as { getModel(): { getSeriesByIndex(index: number): {
+    getData(): { count(): number; getItemLayout(index: number): number[] };
+  } } }).getModel().getSeriesByIndex(0);
+  const data = model.getData();
+  const points: GraphPoint[] = [];
+  for (let index = 0; index < data.count(); index++) {
+    const point = chart.convertToPixel({ seriesIndex: 0 }, data.getItemLayout(index));
+    if (Array.isArray(point) && point.length >= 2) points.push([point[0], point[1]]);
+  }
+  return points;
+}
+
+function CanvasChart({ option, label, onClick, className = "", height, graphKey }: { option: EChartsOption; label: string; onClick?: (event: Click) => void; className?: string; height?: number; graphKey?: string }) {
   const element = useRef<HTMLDivElement>(null);
   const instance = useRef<echarts.EChartsType | null>(null);
+  const frames = useRef<number[]>([]);
+  const manualView = useRef(false);
+  const previousGraph = useRef<string | undefined>(undefined);
   const [failed, setFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const isGraph = graphKey !== undefined;
+  const fitGraph = useCallback(() => {
+    frames.current.forEach(cancelAnimationFrame);
+    frames.current = [requestAnimationFrame(() => {
+      frames.current.push(requestAnimationFrame(() => {
+        const chart = instance.current, container = element.current;
+        if (!chart || !container || chart.isDisposed() || manualView.current) return;
+        try {
+          const series = (chart.getOption().series as { zoom?: number }[])[0];
+          const fit = graphViewportFit(graphPixels(chart), chart.getWidth(), chart.getHeight(), series.zoom ?? 1);
+          if (!fit) return;
+          chart.dispatchAction({ type: "graphRoam", seriesIndex: 0, zoom: fit.factor, originX: fit.centerX, originY: fit.centerY });
+          chart.dispatchAction({ type: "graphRoam", seriesIndex: 0, dx: fit.dx, dy: fit.dy });
+          container.dataset.graphFitted = "true";
+        } catch { container.dataset.graphFitted = "false"; }
+      }));
+    })];
+  }, []);
   useEffect(() => {
     if (!element.current) return;
     const container = element.current;
     const chart = echarts.init(container, undefined, { renderer: "canvas" });
     instance.current = chart;
-    const observer = new ResizeObserver(() => { resizeMeasuredChart(chart, container); });
+    const observer = new ResizeObserver(() => {
+      resizeMeasuredChart(chart, container);
+      if (isGraph && !manualView.current) fitGraph();
+    });
     observer.observe(container);
-    return () => { observer.disconnect(); chart.dispose(); instance.current = null; };
-  }, []);
+    return () => { frames.current.forEach(cancelAnimationFrame); observer.disconnect(); chart.dispose(); instance.current = null; };
+  }, [fitGraph, isGraph]);
   useEffect(() => {
     if (!instance.current) return;
-    try { instance.current.setOption(option, { notMerge: true }); setFailed(false); }
+    try {
+      instance.current.setOption(option, { notMerge: !isGraph });
+      setFailed(false);
+      if (graphKey !== undefined && previousGraph.current !== graphKey) {
+        previousGraph.current = graphKey;
+        manualView.current = false;
+        if (element.current) element.current.dataset.graphFitted = "false";
+        fitGraph();
+      }
+    }
     catch { setFailed(true); }
-  }, [option]);
+  }, [option, graphKey, isGraph, fitGraph]);
   useEffect(() => {
     const chart = instance.current;
     if (!chart || !onClick) return;
@@ -48,9 +98,24 @@ function CanvasChart({ option, label, onClick, className = "", height }: { optio
     chart.on("click", handle);
     return () => { chart.off("click", handle); };
   }, [onClick]);
+  const zoom = (factor: number) => {
+    const chart = instance.current;
+    if (!chart) return;
+    manualView.current = true;
+    chart.dispatchAction({ type: "graphRoam", seriesIndex: 0, zoom: factor, originX: chart.getWidth() / 2, originY: chart.getHeight() / 2 });
+  };
+  const canvas = <div className={`knowledge-chart ${className}`} style={height === undefined ? undefined : { height }} ref={element} role="img" aria-label={label}
+    onPointerDown={isGraph ? () => { manualView.current = true; } : undefined} onWheelCapture={isGraph ? () => { manualView.current = true; } : undefined} />;
   return <>
-    <div className={`knowledge-chart ${className}`} style={height === undefined ? undefined : { height }} ref={element} role="img" aria-label={label} />
-    {failed ? <StatePanel compact kind="error" title="图表暂时无法绘制" description="可在下方数据列表查看数值。请重新加载页面后重试。" /> : null}
+    {isGraph ? <div className={`knowledge-graph-view${expanded ? " is-expanded" : ""}`}>
+      <div className="knowledge-graph-controls" role="group" aria-label="图谱视野">
+        <button className="button" type="button" onClick={() => { manualView.current = false; fitGraph(); }}>适应全图</button>
+        <button className="button" type="button" aria-label="放大图谱" onClick={() => zoom(1.25)}>＋</button>
+        <button className="button" type="button" aria-label="缩小图谱" onClick={() => zoom(0.8)}>−</button>
+        <button className="button" type="button" aria-expanded={expanded} onClick={() => { manualView.current = false; setExpanded(value => !value); }}>{expanded ? "收起视图" : "展开视图"}</button>
+      </div>{canvas}
+    </div> : canvas}
+    {failed ? <StatePanel compact kind="error" title="图表暂时无法绘制" /> : null}
   </>;
 }
 
@@ -71,7 +136,7 @@ export function MetricChart({ items, kind, unit, label, compact = false }: { ite
       series: [{ type: "bar", data: items.map((item) => item.value), barMaxWidth: 19, label: { show: true, position: "right", color: "#6b5f4e" }, itemStyle: { borderRadius: [0, 3, 3, 0] } }],
     };
   }, [items, kind, unit]);
-  return <><CanvasChart option={option} label={label} height={compact ? paintingChartHeight(kind, items.length) : undefined} />{kind === "pie" ? <><ul className="knowledge-legend" aria-label={`${label}图例`}>{items.slice(0, 21).map((item, index) => <li key={`${item.name}-${index}`}><span style={{ background: palette[index % palette.length] }} aria-hidden="true" /><b>{item.name}</b><em>{item.value}</em></li>)}</ul>{items.length > 21 ? <p className="knowledge-method">图例列出前 21 项，完整数值见下方列表；环图仍包含全部项目。</p> : null}</> : null}</>;
+  return <><CanvasChart option={option} label={label} height={compact ? paintingChartHeight(kind, items.length) : undefined} />{kind === "pie" ? <ul className="knowledge-legend" aria-label={`${label}图例`}>{items.map((item, index) => <li key={`${item.name}-${index}`}><span style={{ background: palette[index % palette.length] }} aria-hidden="true" /><b>{item.name}</b><em>{item.value}</em></li>)}</ul> : null}</>;
 }
 
 export function PoetryChart({ nodes, links, selectedId, focused, onNode, onEdge }: {
@@ -87,9 +152,9 @@ export function PoetryChart({ nodes, links, selectedId, focused, onNode, onEdge 
       ...base, animation: !reducedMotion,
       aria: { enabled: true, label: { description: graphDescription } },
       series: [{
-        type: "graph", layout: "force", roam: true, draggable: true, zoom: !focused && nodes.length > 100 ? 0.35 : 1, center: ["50%", "50%"],
-        scaleLimit: { min: 0.15, max: 8 },
-        force: { repulsion: focused ? 240 : 100, gravity: 0.07, edgeLength: [40, 105], layoutAnimation: !reducedMotion },
+        id: "poetry-network", type: "graph", layout: "force", roam: true, draggable: true,
+        scaleLimit: { min: 0.01, max: 8 },
+        force: { repulsion: focused ? 240 : 100, gravity: 0.07, edgeLength: [40, 105], layoutAnimation: false },
         categories: categories.map((name) => ({ name })),
         label: { show: focused || nodes.length < 45, position: "right", color: "#514534", fontSize: 11 },
         edgeSymbol: ["none", "none"],
@@ -99,7 +164,8 @@ export function PoetryChart({ nodes, links, selectedId, focused, onNode, onEdge 
       }],
     };
   }, [focused, graphDescription, links, nodes, selectedId]);
-  return <CanvasChart option={option} label={graphDescription} className="knowledge-graph" onClick={(event) => {
+  const graphKey = `${focused}:${nodes.map(node => node.id).join("|")}`;
+  return <CanvasChart option={option} label={graphDescription} graphKey={graphKey} className="knowledge-graph" onClick={(event) => {
     if (event.dataType === "edge" && typeof event.dataIndex === "number" && links[event.dataIndex]) onEdge(links[event.dataIndex]);
     else if (event.data?.id) onNode(event.data.id);
   }} />;

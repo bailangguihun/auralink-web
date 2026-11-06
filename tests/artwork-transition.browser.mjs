@@ -30,6 +30,7 @@ const caseNames = [
   'background-click-blocks-old-card', 'background-click-blocks-old-favorite',
   'held-touch-survives-route-handoff',
   'right-button-clears-background', 'middle-button-clears-background',
+  'fast-detail-waits-for-background', 'detail-cache-reopen', 'session-switch-rejects-old-detail',
 ];
 if (selected) for (const name of selected) assert(caseNames.includes(name), `Unknown ARTWORK_CASES entry: ${name}`);
 const paintingId = id(90);
@@ -138,11 +139,14 @@ async function scenario(name, options, run) {
     const nativeFetch = window.fetch;
     window.fetch = function (input, init) {
       const url = new URL(input instanceof Request ? input.url : String(input), location.href);
-      window.__artworkRequests.push({
+      const entry = {
         path: url.pathname, origin: url.origin, at: performance.now(),
         activeFrames: window.__artworkLiveAnimations.filter(animation => animation.id === 'artlive-artwork-frame' && animation.playState === 'running').length,
         activeBackgrounds: window.__artworkLiveAnimations.filter(animation => animation.id === 'artlive-artwork-background' && animation.playState === 'running').length,
-      });
+      };
+      const signal = input instanceof Request ? input.signal : init?.signal;
+      signal?.addEventListener('abort', () => { entry.abortedAt = performance.now(); }, { once: true });
+      window.__artworkRequests.push(entry);
       return nativeFetch.call(this, input, init);
     };
     const animate = Element.prototype.animate;
@@ -169,6 +173,7 @@ async function scenario(name, options, run) {
             const moving = document.querySelector('[data-artwork-transition-overlay]');
             const source = window.__artworkSources.findLast(value => value.direction === result.direction)?.image;
             const rect = scene?.getBoundingClientRect();
+            const detailPanel = scene?.querySelector('.detail-info')?.getBoundingClientRect();
             const css = scene && getComputedStyle(scene);
             window.__artworkFirstPaints.push({
               direction: result.direction, at: performance.now(),
@@ -183,6 +188,8 @@ async function scenario(name, options, run) {
                 hiddenFromAccessibility: scene.getAttribute('aria-hidden') === 'true',
                 inertScenery: Boolean(scene.querySelector('[inert]')),
                 imageCount: scene.querySelectorAll('img').length,
+                detailPanel: detailPanel ? { top: detailPanel.top, bottom: detailPanel.bottom,
+                  width: detailPanel.width, height: detailPanel.height } : null,
                 canvases: Array.from(scene.querySelectorAll('canvas')).map(canvas => ({ width: canvas.width,
                   height: canvas.height, visibility: getComputedStyle(canvas).visibility,
                   drawn: drawnCanvases.has(canvas) })) } : null,
@@ -248,10 +255,12 @@ async function scenario(name, options, run) {
     if (!['GET', 'HEAD'].includes(method) || !allowedRead) {
       record.forbidden.push({ method, path: url.pathname }); await route.fulfill({ status: 405, headers, body: '{}' }); return;
     }
-    const call = { method, path: url.pathname, startedAt: Date.now(), completed: false };
+    const account = options.accountAware && request.headers().authorization?.includes('FIXTURE_ACCOUNT_B') ? 'B' : 'A';
+    const call = { method, path: url.pathname, account, startedAt: Date.now(), completed: false };
     record.calls.push(call);
     const gate = gates.get(url.pathname);
-    if (gate) { gate.observed.resolve(); await gate.promise; }
+    const gated = gate && (!gate.account || gate.account === account);
+    if (gated) { gate.observed.resolve(); await gate.promise; }
     if (url.pathname === detailApi && options.detailDelayMs) {
       call.injectedDelayMs = options.detailDelayMs; await delay(options.detailDelayMs);
     }
@@ -261,7 +270,14 @@ async function scenario(name, options, run) {
       ? { status: 200, contentType: 'application/json', body: { submissionAvailable: false, reason: 'Synthetic read-only fixture; model submissions disabled' } }
       : url.pathname === detailApi && options.detailStatus
         ? { status: options.detailStatus, contentType: 'application/json', body: { message: 'Synthetic detail read failure' } }
-        : responseFor(fixture, method, url, null);
+        : responseFor(fixture, method, url, null, account);
+    if (url.pathname === detailApi && response.status === 200) {
+      if (options.generatedText) response.body.generatedText = options.generatedText;
+      if (options.accountAware) {
+        response.body.title = account === 'A' ? '旧账号详情禁止回流' : '新账号作品详情';
+        response.body.generatedText = account === 'A' ? '旧账号响应只用于隔离验证。' : '新账号响应已经确认。';
+      }
+    }
     adjustImageMetadata(response.body);
     try {
       await route.fulfill({ status: response.status, headers, contentType: response.contentType,
@@ -271,12 +287,17 @@ async function scenario(name, options, run) {
       // The app can legitimately abort a read after navigation/account change.
       if (!/closed|disposed|handled|canceled|cancelled|invalid interception/i.test(String(error))) throw error;
       call.aborted = true;
+    } finally {
+      if (gated) gate.delivered.resolve();
     }
   });
-  const gate = path => { const value = { path, ...deferred(), observed: deferred() }; gates.set(path, value); return value; };
+  const gate = (path, scope = {}) => { const value = { path, ...scope, ...deferred(), observed: deferred(), delivered: deferred() }; gates.set(path, value); return value; };
   const release = (path, value) => { gates.delete(path); value.released = true; value.resolve(); };
   const animations = () => page.evaluate(() => window.__artworkAnimations);
-  const resetAnimations = () => page.evaluate(() => { window.__artworkAnimations = []; });
+  const resetAnimations = () => page.evaluate(() => {
+    window.__artworkAnimations = []; window.__artworkClicks = []; window.__artworkSources = [];
+    window.__artworkFirstPaints = []; window.__artworkTextDuringVisuals = []; window.__artworkRequests = [];
+  });
   const cleared = async () => {
     await page.waitForFunction(() => !document.querySelector('[data-artwork-transition-overlay], [data-artwork-transition-scene]'));
     assert.equal(await page.locator('[data-artwork-target] img, [data-artwork-source] img').evaluateAll(images => images.filter(image => image.style.visibility === 'hidden').length), 0, 'No hidden target leaks after transition');
@@ -355,7 +376,9 @@ async function scenario(name, options, run) {
     const reads = data.requests.filter(request => request.origin === api && (request.path === detailApi
       || request.path.startsWith(detailApi + '/') || request.path === '/api/v1/critic/capability'));
     assert(reads.some(request => request.path === detailApi), 'The detail GET was actually issued');
-    for (const request of reads) {
+    // The chosen detail read overlaps the local visual transition. Dependent
+    // business reads still start only after both visuals finish and data commits.
+    for (const request of reads.filter(request => request.path !== detailApi)) {
       assert.equal(request.activeFrames, 0, `${request.path} does not start during the main flight`);
       assert.equal(request.activeBackgrounds, 0, `${request.path} does not start during the background transition`);
       assert(request.at >= frame.finishedAt, `${request.path} waits until the actual opening finish event`);
@@ -373,6 +396,38 @@ async function scenario(name, options, run) {
     }, paintingId);
     assert(await preview.getByRole('button', { name: '引用作品发帖', exact: true }).isDisabled());
     assert(await preview.getByRole('button', { name: '收藏', exact: true }).isDisabled());
+    const header = preview.locator('.detail-info > header');
+    await header.locator('h1').waitFor({ state: 'visible' });
+    assert.equal((await header.locator('h1').innerText()).trim(), record.previewMetadata.title, 'Known title is shown while detail data is pending');
+    assert.equal((await header.locator('p').innerText()).trim(), record.previewMetadata.author, 'Known author is shown while detail data is pending');
+    assert.equal((await header.locator('span').innerText()).trim(), record.previewMetadata.period, 'Known period is shown while detail data is pending');
+    const geometry = await page.evaluate(async () => {
+      const sample = () => {
+        const rect = document.querySelector('main.detail-page .detail-info').getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height,
+          footerTop: document.querySelector('.site-footer')?.getBoundingClientRect().top ?? null,
+          viewportHeight: innerHeight, viewportWidth: innerWidth };
+      };
+      let previous;
+      for (let frame = 0; frame < 120; frame += 1) {
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const current = sample();
+        if (previous && ['top', 'width', 'height', 'footerTop'].every(key => current[key] === previous[key])) return current;
+        previous = current;
+      }
+      throw new Error('Pending detail panel geometry never settled');
+    });
+    assert(geometry.height >= geometry.viewportHeight - 136 - 1, 'Pending right panel preserves its full first-screen minimum height');
+    if (geometry.viewportWidth > 900) {
+      const scene = await page.evaluate(() => window.__artworkFirstPaints.find(value => value.direction === 'open')?.scene?.detailPanel);
+      if (scene) {
+        assert(Math.abs(geometry.top - scene.top) <= 1, 'Pending right panel keeps the transition top edge');
+        assert(Math.abs(geometry.width - scene.width) <= 1, 'Pending right panel keeps the transition width');
+        assert(geometry.height >= scene.height - 1, 'The right panel does not collapse when the transition hands off');
+      }
+      assert(geometry.footerTop === null || geometry.footerTop >= geometry.viewportHeight - 1, 'Footer does not flash into the first viewport during loading');
+    }
+    record.pendingPanelGeometry = geometry;
     record.previewWhileDetailPending = true;
   };
   const openGallery = async ({ decoded = true } = {}) => {
@@ -387,6 +442,9 @@ async function scenario(name, options, run) {
     assert((await page.locator('main.gallery-page[data-gallery-ready="true"]').innerText()).trim(), 'The app has meaningful rendered page content');
     assert.equal(await page.locator('nextjs-portal [role="dialog"], #webpack-dev-server-client-overlay, vite-error-overlay').count(), 0, 'No framework error overlay');
     const source = page.locator(`.gallery-row-item [data-artwork-source="${paintingId}"]`);
+    record.previewMetadata = await source.evaluate(node => ({
+      title: node.dataset.artworkTitle, author: node.dataset.artworkAuthor, period: node.dataset.artworkPeriod,
+    }));
     await source.scrollIntoViewIfNeeded();
     if (decoded) await page.waitForFunction(paintingId => {
       const image = document.querySelector(`.gallery-row-item [data-artwork-source="${paintingId}"] img`);
@@ -480,7 +538,9 @@ try {
   await scenario('slow-route-code', {}, async ({ openGallery, openPainting, completedFlight, detailVisible, gate, release, deferredReads, cleared, record }) => {
     await openGallery(); const route = gate('route:' + detailPath), detail = gate(detailApi); await openPainting();
     await completedFlight('open'); await observed(route); assert(!route.released);
-    assert(!record.calls.some(call => call.path === detailApi), 'Cold route still pending while main flight already completed');
+    await observed(detail);
+    assert.equal(record.calls.filter(call => call.path === detailApi).length, 1, 'The clicked detail read starts before the cold route resolves');
+    assert(!detail.released, 'The authoritative detail response is still held independently of the route');
     release('route:' + detailPath, route); await observed(detail); release(detailApi, detail);
     await detailVisible(); await cleared(); await deferredReads();
   });
@@ -522,14 +582,16 @@ try {
     await returnToGallery(); await cleared(); assert.deepEqual(await animations(), [], 'Reduced motion never creates an artwork animation');
   });
   await scenario('session-change-clears-transfer', {}, async ({ page, openGallery, openPainting, startedFlight, gate, release, cleared }) => {
-    await openGallery(); const route = gate('route:' + detailPath); await openPainting(); await startedFlight('open');
+    await openGallery(); const route = gate('route:' + detailPath), detail = gate(detailApi); await openPainting(); await startedFlight('open');
+    await observed(detail);
     await page.evaluate(() => {
       localStorage.removeItem('artlive.session.token.v1');
       window.dispatchEvent(new StorageEvent('storage', { key: 'artlive.session.token.v1', oldValue: 'ISOLATED_ARTWORK_TRANSITION_FIXTURE', newValue: null }));
     });
-    await cleared(); release('route:' + detailPath, route);
+    await cleared(); release('route:' + detailPath, route); release(detailApi, detail);
     await page.waitForURL(url => url.pathname === '/login'); await cleared();
     assert.equal(await page.locator('.detail-page [data-artwork-target]').count(), 0, 'Old authenticated target never reappears');
+    await page.waitForFunction(path => window.__artworkRequests.some(request => request.path === path && request.abortedAt !== undefined), detailApi);
   });
   await scenario('detail-read-failure-after-flight', { detailStatus: 503 }, async ({ page, openGallery, openPainting, completedFlight, cleared, deferredReads }) => {
     await openGallery(); await openPainting(); await completedFlight('open');
@@ -596,7 +658,8 @@ try {
     await openPainting(); await firstPaint('open');
     await completedFlight('open'); await completedBackground('open');
     assert(record.routes.some(route => route.path === detailPath && route.injectedDelayMs === 2500), 'The real route read was delayed by 2.5 seconds');
-    assert(!record.calls.some(call => call.path === detailApi), 'Detail data has not bypassed the cold route');
+    assert.equal(record.calls.filter(call => call.path === detailApi).length, 1, 'The selected artwork data loads while the route code is delayed');
+    assert(!record.calls.some(call => call.path.startsWith(detailApi + '/') || call.path === '/api/v1/critic/capability'), 'Dependent insight reads remain deferred while the route is pending');
     const scene = page.locator('[data-artwork-transition-scene]');
     assert(await scene.isVisible(), 'Complete destination background remains while the route is delayed');
     assert(await scene.locator('.detail-artwork').count(), 'The early background includes the real viewer frame layout');
@@ -612,11 +675,65 @@ try {
     await completedFlight('open');
     await page.locator('main.detail-page [data-artwork-preview="true"]').waitFor({ state: 'attached' });
     assert(await page.evaluate(() => window.__artworkLiveAnimations.some(animation => animation.id === 'artlive-artwork-background' && animation.playState === 'running')), 'The mounted detail preview is observed while the independently delayed background is still moving');
-    assert(!record.calls.some(call => call.path === detailApi), 'Finishing the image alone does not release the detail GET');
+    await observed(detail);
+    assert.equal(record.calls.filter(call => call.path === detailApi).length, 1, 'Detail data starts during the visual transition without duplicate reads');
+    assert(!record.calls.some(call => call.path.startsWith(detailApi + '/') || call.path === '/api/v1/critic/capability'), 'Finishing the image alone does not release dependent insight reads');
     assert.deepEqual(await page.evaluate(() => window.__artworkTextDuringVisuals), [], 'Neither preview heading nor detail loading text appears during the remaining background transition');
     await page.screenshot({ path: `${output}/background-pending-after-image.png` });
     await completedBackground('open'); await observed(detail); await previewVisible(); await deferredReads();
     release(detailApi, detail); await detailVisible(); await cleared();
+  });
+  await scenario('fast-detail-waits-for-background', { backgroundDurationMs: 1800, generatedText: '快速返回的作品正文必须等背景动画结束才显示。' }, async ({ page, record, openGallery, openPainting, completedFlight, completedBackground, detailVisible, deferredReads, cleared }) => {
+    await openGallery();
+    const received = page.waitForResponse(response => new URL(response.url()).pathname === detailApi && response.status() === 200);
+    await openPainting(); await received; await completedFlight('open');
+    await page.locator('main.detail-page .detail-layout[data-artwork-text-ready="false"]').waitFor({ state: 'attached' });
+    const read = await page.evaluate(path => window.__artworkRequests.find(request => request.path === path), detailApi);
+    assert(read.activeFrames > 0 && read.activeBackgrounds > 0, 'The lightweight detail GET overlaps both image and background animations');
+    assert(await page.evaluate(() => window.__artworkLiveAnimations.some(animation => animation.id === 'artlive-artwork-background' && animation.playState === 'running')), 'Fast data arrives while the background is still animating');
+    assert.equal(await page.locator('main.detail-page .detail-info').getByText('快速返回的作品正文必须等背景动画结束才显示。', { exact: true }).count(), 0, 'Fast detail data has not committed its body before the visual gate');
+    assert.equal(await page.locator('main.detail-page').getByRole('heading', { name: '作品导览', exact: true }).count(), 0, 'Business panels are not mounted ahead of the visual gate');
+    assert(!record.calls.some(call => call.path.startsWith(detailApi + '/') || call.path === '/api/v1/critic/capability'), 'Fast detail data does not start insight reads during the transition');
+    await page.screenshot({ path: `${output}/fast-data-background-pending.png` });
+    await completedBackground('open'); await detailVisible(); await cleared(); await deferredReads();
+    assert(await page.locator('main.detail-page .detail-info').getByText('快速返回的作品正文必须等背景动画结束才显示。', { exact: true }).isVisible());
+    record.detailReadOverlappedVisuals = true;
+  });
+  await scenario('detail-cache-reopen', { backgroundDurationMs: 1200, generatedText: '同一会话短期复用的作品资料。' }, async ({ page, record, openGallery, openPainting, completedFlight, completedBackground, detailVisible, returnToGallery, cleared, resetAnimations }) => {
+    await openGallery(); await openPainting(); await completedFlight('open'); await completedBackground('open'); await detailVisible(); await cleared();
+    const firstReads = record.calls.filter(call => call.path === detailApi).length;
+    assert.equal(firstReads, 1, 'The initial prefetch and foreground subscription share one detail GET');
+    await returnToGallery(); await completedFlight('return'); await completedBackground('return'); await cleared();
+    await resetAnimations(); await openPainting(); await completedFlight('open');
+    await page.locator('main.detail-page .detail-layout[data-artwork-text-ready="false"]').waitFor({ state: 'attached' });
+    assert.equal(await page.locator('main.detail-page .detail-info').getByText('同一会话短期复用的作品资料。', { exact: true }).count(), 0, 'Cached detail body also waits for the new background transition');
+    await completedBackground('open'); await detailVisible(); await cleared();
+    assert.equal(record.calls.filter(call => call.path === detailApi).length, firstReads, 'Reopening the same painting within its session TTL does not repeat the detail GET');
+    assert.equal(await page.locator('main.detail-page [aria-label="正在读取作品资料"]').count(), 0, 'A cache hit has no post-flight loading skeleton');
+    record.cachedReopen = { firstReads, finalReads: record.calls.filter(call => call.path === detailApi).length };
+  });
+  await scenario('session-switch-rejects-old-detail', { accountAware: true }, async ({ page, record, openGallery, openPainting, completedFlight, detailVisible, gate, release, previewVisible, cleared }) => {
+    await openGallery(); const oldDetail = gate(detailApi, { account: 'A' });
+    await openPainting(); await observed(oldDetail); await completedFlight('open'); await previewVisible(); await cleared();
+    const replacement = page.waitForResponse(response => new URL(response.url()).pathname === detailApi
+      && response.request().headers().authorization?.includes('FIXTURE_ACCOUNT_B') && response.status() === 200);
+    await page.evaluate(() => {
+      localStorage.setItem('artlive.session.token.v1', 'FIXTURE_ACCOUNT_B');
+      window.dispatchEvent(new StorageEvent('storage', { key: 'artlive.session.token.v1', oldValue: 'ISOLATED_ARTWORK_TRANSITION_FIXTURE', newValue: 'FIXTURE_ACCOUNT_B' }));
+    });
+    await replacement; await detailVisible();
+    await page.locator('main.detail-page .detail-info h1').filter({ hasText: '新账号作品详情' }).waitFor({ state: 'visible' });
+    await page.waitForFunction(path => window.__artworkRequests.some(request => request.path === path && request.abortedAt !== undefined), detailApi);
+    release(detailApi, oldDetail);
+    await observed({ path: 'old detail response delivery', observed: oldDetail.delivered });
+    // Give the delivered old response a chance to run any queued continuation;
+    // two rendered frames expose an erroneous stale commit without a fixed sleep.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal((await page.locator('main.detail-page .detail-info h1').innerText()).trim(), '新账号作品详情', 'The old response cannot overwrite the new session');
+    assert.equal(await page.getByText('旧账号详情禁止回流', { exact: true }).count(), 0, 'No old-account detail is displayed after switching sessions');
+    assert.equal(record.calls.filter(call => call.path === detailApi && call.account === 'A').length, 1);
+    assert.equal(record.calls.filter(call => call.path === detailApi && call.account === 'B').length, 1, 'The new session performs its own authorized detail read');
+    record.sessionReplacement = { oldResponseReleased: true, oldRequestAborted: true, newAccountDetailVisible: true };
   });
   await scenario('tablet-landscape-round-trip', { viewport: { width: 1180, height: 820 }, touch: true }, async ({ page, openGallery, openPainting, firstPaint, completedFlight, completedBackground, detailVisible, returnToGallery, gate, release, previewVisible, deferredReads, cleared }) => {
     await openGallery(); const detail = gate(detailApi); await openPainting(); await firstPaint('open');

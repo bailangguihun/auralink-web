@@ -19,6 +19,12 @@ export type PaintingStatistics = {
   authorNames: { count: number; eligibleRecords: number };
   metrics: Record<MetricName, PaintingMetric>;
 };
+export type MetricSort = "value" | "name" | "chronological";
+export type PaintingMetricQuery = { page: number; size: number; q: string; sort: MetricSort; revision?: string };
+export type PaintingMetricPage = {
+  schemaVersion: 1; metric: MetricName; items: CountItem[]; page: number; size: number;
+  totalItems: number; totalPages: number; hasMore: boolean; revision: string;
+};
 export type PoetryNode = { id: string; name: string; category: string; size: number; description: string };
 export type PoetryLink = { source: string; target: string; value: number; label: string; summary: string; detail: string };
 export type PoetryGraph = {
@@ -82,6 +88,21 @@ export function parsePaintingStatistics(value: unknown): PaintingStatistics {
     metrics: Object.fromEntries(metricNames.map((name) => [name, metric(metrics[name], total, name === "sentimentByDynasty")])) as Record<MetricName, PaintingMetric>,
   };
 }
+/** Individual pages stay bounded even when the complete metric has thousands of groups. */
+export function parsePaintingMetricPage(value: unknown, expectedMetric: MetricName): PaintingMetricPage {
+  const input = record(value);
+  if (input.schemaVersion !== 1 || input.metric !== expectedMetric) return invalid();
+  const page = count(input.page), size = count(input.size), totalItems = count(input.totalItems);
+  const totalPages = count(input.totalPages), revision = text(input.revision);
+  if (size < 1 || size > 200 || revision.length === 0 || revision.length > 200
+    || totalPages !== Math.ceil(totalItems / size) || typeof input.hasMore !== "boolean") return invalid();
+  const values = items(input.items, size, expectedMetric === "sentimentByDynasty");
+  const expectedLength = Math.max(0, Math.min(size, totalItems - page * size));
+  if (values.length !== expectedLength || new Set(values.map(item => item.name)).size !== values.length
+    || input.hasMore !== (page + 1 < totalPages)) return invalid();
+  return { schemaVersion: 1, metric: expectedMetric, items: values, page, size, totalItems, totalPages, hasMore: input.hasMore, revision };
+}
+
 export function parsePoetryGraph(value: unknown): PoetryGraph {
   const input = record(value);
   if (input.schemaVersion !== 1 || input.source !== "legacy-poetry-snapshot") return invalid();

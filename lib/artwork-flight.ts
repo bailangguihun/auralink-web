@@ -18,7 +18,7 @@ export function getArtworkPreview(paintingId: string, generation: number): Artwo
     && Date.now() - preview.savedAt < 20 * 60_000 ? preview : null;
 }
 
-/** The local image and background transition defers detail reads and text.
+/** The local image and background transition defers content display, not reads.
  * The controller finishes this gate after both visual animations, independently
  * of route/API readiness. Cancelling or replacing a transition also releases it.
  */

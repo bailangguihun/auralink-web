@@ -60,6 +60,32 @@ const shot = async name => {
   report.screenshots.push({ name, sha256: createHash("sha256").update(await readFile(path)).digest("hex") });
 };
 let graph;
+const entityPage = async target => {
+  const navigation = page.getByRole("navigation", { name: "实体分页", exact: true });
+  const current = async () => {
+    const match = (await navigation.innerText()).match(/第\s*(\d+)\s*\//);
+    assert(match, "Entity pagination exposes its current page");
+    return Number(match[1]) - 1;
+  };
+  let index = await current();
+  while (index !== target) {
+    const next = index + (target > index ? 1 : -1);
+    await navigation.getByRole("button", { name: target > index ? "下一页" : "上一页", exact: true }).click();
+    await page.waitForFunction(expected => {
+      const text = document.querySelector('[aria-label="实体分页"]')?.textContent || "";
+      return Number(text.match(/第\s*(\d+)\s*\//)?.[1]) === expected;
+    }, next + 1);
+    index = await current();
+  }
+};
+const entityCard = async node => {
+  const index = graph.nodes.findIndex(item => item.id === node.id);
+  assert(index >= 0);
+  await entityPage(Math.floor(index / 20));
+  const card = page.locator(".knowledge-entity").nth(index % 20);
+  assert.equal(await card.locator("h3").innerText(), node.name);
+  return card;
+};
 try {
   await step("Existing isolated account login; unchanged six-painting statistics", async () => {
     await page.goto(`${web}/knowledge`);
@@ -81,60 +107,58 @@ try {
     report.snapshot = { graphSha256: graph.graphSha256, statsSha256: graph.statsSha256, nodes: 711, links: 609 };
     await graphCounts("full", 711, 609); await shot("poetry-aria-desktop");
   });
-  await step("Search and category filter keep description in sync with displayed data", async () => {
-    await page.getByLabel("搜索实体", { exact: true }).fill("李白");
-    const nodes = graph.nodes.filter(n => `${n.name}\n${n.category}`.includes("李白"));
-    const ids = new Set(nodes.map(n => n.id));
-    await graphCounts("search", nodes.length, graph.links.filter(l => ids.has(l.source) && ids.has(l.target)).length);
-    await page.getByRole("button", { name: "重置筛选", exact: true }).click();
-    const category = graph.nodes[0].category;
-    await page.locator(".knowledge-search select").selectOption(category);
-    const categoryIds = new Set(graph.nodes.filter(n => n.category === category).map(n => n.id));
-    await graphCounts("category", categoryIds.size, graph.links.filter(l => categoryIds.has(l.source) && categoryIds.has(l.target)).length);
-    await page.getByRole("button", { name: "重置筛选", exact: true }).click();
-    await graphCounts("reset", 711, 609);
+  await step("Poetry tab opens directly on the full graph without removed introduction or filters", async () => {
+    assert.equal(await page.locator(".knowledge-snapshot, .knowledge-search").count(), 0);
+    assert.equal(await page.getByLabel("搜索实体", { exact: true }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "重置筛选", exact: true }).count(), 0);
+    assert.equal(await page.locator(".knowledge-inspector").count(), 0);
+    await entityPage(1);
+    await graphCounts("entity-page-full", 711, 609);
+    assert.equal(await page.locator(".knowledge-entity h3").first().innerText(), graph.nodes[20].name);
+    await entityPage(0);
   });
-  await step("Keyboard entity focus, relation detail and clear/reset retain truthful counts", async () => {
-    await page.getByLabel("搜索实体", { exact: true }).fill("李白");
-    const node = graph.nodes.find(n => `${n.name}\n${n.category}`.includes("李白"));
+  await step("Keyboard entity focus, relation detail and clear retain truthful counts", async () => {
+    const node = graph.nodes.find(item => graph.links.some(link => link.source === item.id || link.target === item.id));
+    assert(node, "The real snapshot provides an entity with a relationship");
     const ids = new Set([node.id]);
     for (const link of graph.links) { if (link.source === node.id) ids.add(link.target); if (link.target === node.id) ids.add(link.source); }
-    const card = page.locator(".knowledge-entity").first();
+    const card = await entityCard(node);
     await card.focus(); await page.keyboard.press("Enter");
-    await graphCounts("one-hop", ids.size, graph.links.filter(l => ids.has(l.source) && ids.has(l.target)).length);
+    await graphCounts("one-hop", ids.size, graph.links.filter(link => ids.has(link.source) && ids.has(link.target)).length);
     const summary = page.locator(".knowledge-inspector summary");
     await summary.focus(); await page.keyboard.press("Enter");
     const relation = page.locator(".knowledge-relations button").first();
     await relation.focus(); await page.keyboard.press("Space");
     assert.match(await page.locator(".knowledge-inspector").innerText(), /关系详情/);
     await page.getByRole("button", { name: "清除选择", exact: true }).focus(); await page.keyboard.press("Space");
-    await page.getByRole("button", { name: "重置筛选", exact: true }).click();
     await graphCounts("keyboard-reset", 711, 609);
+    assert.equal(await page.locator(".knowledge-inspector").count(), 0);
   });
-  await step("Existing isolated node: one node / zero links; narrow layout", async () => {
-    const connected = new Set(graph.links.flatMap(l => [l.source, l.target]));
-    const node = graph.nodes.find(n => !connected.has(n.id) && graph.nodes.filter(other => `${other.name}\n${other.category}`.includes(n.name)).length === 1);
-    assert(node, "The real snapshot must provide a uniquely searchable isolated node");
-    await page.getByLabel("搜索实体", { exact: true }).fill(node.name);
-    await graphCounts("isolated", 1, 0);
-    await page.locator(".knowledge-entity").first().focus(); await page.keyboard.press("Enter");
+  await step("Existing isolated node remains reachable through entity pages; narrow layout", async () => {
+    const connected = new Set(graph.links.flatMap(link => [link.source, link.target]));
+    const node = graph.nodes.find(item => !connected.has(item.id));
+    assert(node, "The real snapshot must provide an isolated node");
+    const card = await entityCard(node);
+    await graphCounts("isolated-card-full", 711, 609);
+    await card.focus(); await page.keyboard.press("Enter");
     await graphCounts("isolated-focus", 1, 0);
     assert.match(await page.locator(".knowledge-inspector").innerText(), /此实体没有相邻关系/);
     await page.setViewportSize({ width: 390, height: 844 });
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await shot("poetry-aria-isolated-narrow");
   });
-  await step("Empty search has no stale graph; reset and pagination stay keyboard accessible", async () => {
-    await page.getByLabel("搜索实体", { exact: true }).fill("__no_such_poetry_entity__");
-    await page.getByText("没有匹配的实体", { exact: true }).waitFor();
-    assert.equal(await page.locator(".knowledge-graph").count(), 0);
-    await page.getByRole("button", { name: "重置筛选", exact: true }).focus(); await page.keyboard.press("Enter");
-    await graphCounts("empty-reset", 711, 609);
+  await step("Clear selection restores the full graph; entity pagination stays keyboard accessible", async () => {
+    await page.getByRole("button", { name: "清除选择", exact: true }).focus(); await page.keyboard.press("Enter");
+    await graphCounts("selection-reset", 711, 609);
+    assert.equal(await page.locator(".knowledge-inspector").count(), 0);
+    assert.equal(await page.locator(".knowledge-snapshot, .knowledge-search").count(), 0);
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await shot("poetry-aria-full-narrow");
-    await page.getByRole("button", { name: "下一页", exact: true }).focus(); await page.keyboard.press("Enter");
-    assert.match(await page.getByRole("navigation", { name: "实体分页" }).innerText(), /第 2 \/ 36 页/);
-    assert.equal(report.requests.filter(r => /china-map|china\.json/.test(r.path)).length, 0);
+    await entityPage(0);
+    const pagination = page.getByRole("navigation", { name: "实体分页", exact: true });
+    await pagination.getByRole("button", { name: "下一页", exact: true }).focus(); await page.keyboard.press("Enter");
+    assert.match(await pagination.innerText(), /第 2 \/ 36 页/);
+    assert.equal(report.requests.filter(request => /china-map|china\.json/.test(request.path)).length, 0);
     assert.deepEqual(report.errors, []);
   });
   report.result = "passed";

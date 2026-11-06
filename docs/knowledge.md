@@ -1,5 +1,9 @@
 # Knowledge / Database
 
+For the current full-data UI and paginated metric API, see
+[知识库全量浏览](knowledge-full-data.md). The sections below retain the initial
+release contract; the old disclosure/table UI has been superseded.
+
 `/knowledge` contains Painting Statistics and Poetry Graph within the existing
 AppShell, ProtectedRoute and session provider. It needs the matching Core API
 business change; the currently deployed Core does not provide these endpoints.

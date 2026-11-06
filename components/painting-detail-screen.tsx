@@ -4,16 +4,17 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { ArtworkViewer } from "@/components/artwork-viewer";
-import { DetailSkeleton, LoadingSection, Skeleton, SkeletonRows } from "@/components/loading";
+import { DetailSkeleton, LoadingSection, PaintingDetailBodySkeleton } from "@/components/loading";
 import { ArrowIcon, HeartIcon } from "@/components/icons";
 import { useFavorites } from "@/components/favorite-provider";
 import { MediaImage } from "@/components/media-image";
 import { PaintingInsights } from "@/components/painting-insights";
 import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
-import { api, ApiError, errorMessage } from "@/lib/api";
+import { ApiError, errorMessage } from "@/lib/api";
 import { getArtworkPreview, isArtworkFlightActive, waitForArtworkFlight, type ArtworkPreview } from "@/lib/artwork-flight";
 import { resolveMediaUrl } from "@/lib/media";
+import { readPaintingDetail } from "@/lib/painting-detail-data";
 import type { PaintingDetail, PaintingImage } from "@/lib/types";
 
 /** Only reuse the public bitmap already displayed by this app, never a new media origin. */
@@ -61,12 +62,17 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
     const request = new AbortController();
     setLoading(true);
     setError(null);
+    // Start the selected artwork read while its image is moving. Attach both
+    // handlers immediately, but commit its content only after the visual gate.
+    const detail = readPaintingDetail(paintingId, token, sessionIdentity.generation, request.signal, attempt > 0)
+      .then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
     void (async () => {
       await waitForArtworkFlight(`/gallery/${encodeURIComponent(paintingId)}`, sessionIdentity.generation, request.signal);
       if (!active || request.signal.aborted || !isCurrentSession(sessionIdentity)) return;
       setTextReady(true);
-      const result = await api.painting(paintingId, token, request.signal);
-      if (active && !request.signal.aborted && isCurrentSession(sessionIdentity)) setPainting(result);
+      const result = await detail;
+      if (!result.ok) throw result.error;
+      if (active && !request.signal.aborted && isCurrentSession(sessionIdentity)) setPainting(result.value);
     })().catch((caught) => {
       if (!active || request.signal.aborted || !isCurrentSession(sessionIdentity)) return;
       handleAuthError(caught);
@@ -140,12 +146,16 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
         </>} />
 
       <section className="detail-info glass-panel" aria-busy={!painting || undefined}>
+        <header style={textReady ? undefined : { visibility: "hidden" }} aria-hidden={!textReady || undefined}>
+          <span>{period}</span><h1>{title}</h1><p>{author}</p>
+        </header>
         {painting ? <>
-        <header><span>{painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"}</span><h1>{painting.title || "无题"}</h1><p>{painting.authorName || "佚名"}</p></header>
         {painting.generatedText ? <div className="detail-section"><h2>作品资料</h2><p>{painting.generatedText}</p></div> : null}
         <dl className="fact-grid">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || "未详"}</dd></div>)}</dl>
         <PaintingInsights paintingId={painting.paintingId} imageAvailable={painting.imageAvailable && Boolean(painting.image)} />
-        </> : <div style={textReady ? undefined : { visibility: "hidden" }} aria-hidden={!textReady || undefined}><LoadingSection label="正在读取作品资料" onRetry={() => setAttempt(value => value + 1)}><Skeleton className="skeleton-title" /><SkeletonRows lines={8} /></LoadingSection></div>}
+        </> : <div style={textReady ? undefined : { visibility: "hidden" }} aria-hidden={!textReady || undefined}>
+          <PaintingDetailBodySkeleton onRetry={() => setAttempt(value => value + 1)} />
+        </div>}
       </section>
     </div>
   );

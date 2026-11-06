@@ -188,6 +188,8 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const priorScroll = useRef({ first: '', last: '', height: 0, top: 0 });
   const [branch, setBranch] = useState<Branch | null>(null); const [text, setText] = useState(''); const [model, setModel] = useState(''); const [ragflow, setRagflow] = useState(false); const [webSearch, setWebSearch] = useState(false); const [busy, setBusy] = useState(false); const busyRef = useRef(false); const composing = useRef(false); const [connection, setConnection] = useState('');
   const [live, setLive] = useState<Run | null>(null); const [editing, setEditing] = useState<Message | null>(null); const [editText, setEditText] = useState(''); const [notice, setNotice] = useState(''); const [timelineOpen, setTimelineOpen] = useState(false); const [summaryOpen, setSummaryOpen] = useState(false);
+  const chatScope = `CHAT_EXECUTION:${id}`;
+  const [unconfirmedChat, setUnconfirmedChat] = useState(false);
   const draft = useAssistantAttachments(id, revision, ledger, access); const attachments = draft.attachments;
   const messages = usePage<Message>(`/sessions/${enc(id)}/messages/page?branchId=${enc(branchId)}`, access, row => row.id, revision, true);
   const runs = usePage<Run>(status.executionAvailable ? `/sessions/${enc(id)}/runs/page?branchId=${enc(branchId)}` : null, access, row => row.id, revision);
@@ -204,23 +206,30 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     let alive = true;
     void (async () => {
       let recovered = false;
-      for (const [scope, record] of ledger.entries()) {
+      const pending = ledger.entries();
+      setUnconfirmedChat(pending.some(([scope]) => scope === chatScope));
+      for (const [scope, record] of pending) {
         const [operation, sessionId] = scope.split(':'); if (sessionId !== id || operation === 'UPLOAD_ATTACHMENT') continue;
         const result = await request((token, signal) => assistantRequest<{ status: string; resultType?: string; resultId?: string }>('/requests/resolve', token, signal, 'POST', { operation, requestKey: record.key, sessionId: id }));
         if (!alive) return;
         if (result.status === 'FOUND') {
+          const stillPending = () => ledger.entries().find(([name]) => name === scope)?.[1].key === record.key;
+          if (!stillPending()) continue;
           if (result.resultType === 'BRANCH' && result.resultId) branchRef.current(result.resultId);
           if (result.resultType === 'RUN' && result.resultId) {
             const recoveredRun = await request((token, signal) => assistantRequest<Run>(`/runs/${enc(result.resultId!)}`, token, signal));
-            if (!alive) return; setLive(recoveredRun); if (recoveredRun.branchId !== branchId) branchRef.current(recoveredRun.branchId);
+            if (!alive) return;
+            if (!stillPending()) continue;
+            setLive(recoveredRun); if (recoveredRun.branchId !== branchId) branchRef.current(recoveredRun.branchId);
           }
           ledger.resolved(scope); recovered = true;
+          if (scope === chatScope) { setUnconfirmedChat(false); setError(''); }
         }
       }
       if (alive && recovered) { setNotice('已找回上次请求的持久记录；没有再次发起生成。'); reload(); }
     })().catch(error => { if (alive) report(error); });
     return () => { alive = false; };
-  }, [id, branchId, ledger, request, report, reload, revision]);
+  }, [id, branchId, chatScope, ledger, request, report, reload, revision]);
   useEffect(() => {
     if (!activityTick) return; let alive = true;
     void request((token, signal) => assistantRequest<AssistantSession>(`/sessions/${enc(id)}`, token, signal)).then(current => { if (alive && current.version !== session.version) reload(); }).catch(error => {
@@ -255,7 +264,27 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     })();
     return () => controller.abort();
   }, [runningId, token, sessionIdentity, isCurrentSession, signOutIfCurrent, reload]);
-  const act = async (action: () => Promise<void>) => { if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(''); try { await action(); } catch (error) { report(error); } finally { busyRef.current = false; setBusy(false); } };
+  const act = async (action: () => Promise<void>) => { if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(''); try { await action(); } catch (error) { report(error); } finally { setUnconfirmedChat(ledger.entries().some(([scope]) => scope === chatScope)); busyRef.current = false; setBusy(false); } };
+  const closeUnconfirmedChat = () => act(async () => {
+    const record = ledger.entries().find(([scope]) => scope === chatScope)?.[1];
+    if (!record) return;
+    const result = await request((token, signal) => assistantRequest<{ status: string; resultId?: string }>('/requests/resolve', token, signal, 'POST', { operation: 'CHAT_EXECUTION', requestKey: record.key, sessionId: id, closeIfMissing: true }));
+    const stillPending = () => ledger.entries().find(([scope]) => scope === chatScope)?.[1].key === record.key;
+    if (!stillPending()) return;
+    if (result.status === 'CLOSED') {
+      setNotice('上次发送的请求键已关闭。请核对历史后重新发送。');
+    } else if (result.status === 'FOUND' && result.resultId) {
+      const run = await request((token, signal) => assistantRequest<Run>(`/runs/${enc(result.resultId!)}`, token, signal));
+      if (!stillPending()) return;
+      setLive(run);
+      if (run.branchId !== branchId) onBranch(run.branchId);
+      setNotice('已找回上次发送的记录。');
+    } else {
+      throw new Error('服务端尚未确认关闭上次发送。请稍后重试。');
+    }
+    ledger.resolved(chatScope);
+    reload();
+  });
   const command = (value: string, ids: string[]) => ({ branchId, expectedVersion: branch?.version, text: value, attachmentIds: ids, modelKey: model, retrieval: assistantRetrievalRequest(registry, selectedArtworks.length > 0, ragflow, webSearch), artworkRefs: selectedArtworkReferences(selectedArtworks) });
   const submitCommand = async (path: string, payload: ReturnType<typeof command>, scope: string, operation: string) => {
     const requestKey = await ledger.key(scope, payload);
@@ -273,7 +302,24 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     event?.preventDefault(); if (!generationAvailable || (!text.trim() && !attachments.length) || !branch || !selectedModel || pendingChat || busyRef.current || messages.loading || messages.error || draft.loading || draft.error || draft.hasMore || attachments.length > 4) return;
     await act(async () => { const payload = command(text, attachments.map(image => image.id)); const scope = `CHAT_EXECUTION:${id}`; const result = await submitCommand(`/sessions/${enc(id)}/runs`, payload, scope, 'CHAT_EXECUTION'); ledger.resolved(scope); setLive(result.run); setText(''); setSelectedArtworks([]); reload(); });
   };
+  const uploadDisabled = busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat;
   const upload = async (file: File | undefined) => { if (file) await act(() => draft.upload(file)); };
+  const pasteImage = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const images = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
+    if (!images.length) return;
+    event.preventDefault();
+    if (images.length > 1) {
+      setError('请一次粘贴一张图片。');
+      return;
+    }
+    if (uploadDisabled) {
+      setError(attachments.length >= 4 || draft.hasMore
+        ? '每条消息最多可添加四张图片，请先移除一张或发送当前消息。'
+        : '当前暂时无法添加图片，请稍后再试。');
+      return;
+    }
+    void upload(images[0]);
+  };
   const cancel = async (run: Run) => act(async () => { const value = await request((token, signal) => assistantRequest<Run>(`/runs/${enc(run.id)}/cancel`, token, signal, 'POST')); setLive(value); reload(); });
   const retry = async (run: Run) => act(async () => { requireGeneration(); if (!branch) return; const scope = `RETRY_EXECUTION:${id}:${run.id}`; const payload = { expectedVersion: branch.version, acknowledgePossiblePriorCharge: true }; const key = await ledger.key(scope, payload); const result = await request((token, signal) => assistantRequest<{ run: Run }>(`/runs/${enc(run.id)}/retry`, token, signal, 'POST', { ...payload, requestKey: key })); ledger.resolved(scope); onBranch(result.run.branchId); setLive(result.run); reload(); });
   const choose = async (run: Run, cardId: string, optionId: string) => act(async () => { requireGeneration(); if (!branch) return; const payload = { branchId, expectedVersion: branch.version, modelKey: model, cardId, optionId }; const scope = `CHAT_EXECUTION:${id}`; const key = await ledger.key(scope, payload); const result = await request((token, signal) => assistantRequest<{ run: Run }>(`/runs/${enc(run.id)}/choices`, token, signal, 'POST', { ...payload, requestKey: key })); ledger.resolved(scope); setLive(result.run); reload(); });
@@ -320,6 +366,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       {!status.executionAvailable ? <button className={styles.pill} onClick={() => setPanel('tools')}>图片存储与说明</button> : null}
     </nav>
     {error ? <div role="alert" className={`${styles.notice} ${styles.error}`}>{error}<button className={styles.small} onClick={() => { setError(''); reload(); }}>重新读取</button></div> : null}
+    {unconfirmedChat ? <div className={styles.notice}>已保存的消息会恢复，尚未受理的发送将关闭。<button type="button" className={styles.small} disabled={busy} onClick={() => void closeUnconfirmedChat()}>核对并恢复发送</button></div> : null}
     {notice ? <p role="status" className={styles.notice}>{notice}<button className={styles.small} onClick={() => setNotice('')} aria-label="收起提示">×</button></p> : null}
     <section ref={messageScroll} data-page-scroll tabIndex={0} aria-label="对话历史" className={styles.messages} onScroll={event => { const area = event.currentTarget; followBottom.current = area.scrollHeight - area.scrollTop - area.clientHeight < 80; priorScroll.current = { ...priorScroll.current, height: area.scrollHeight, top: area.scrollTop }; }}>
       <div className={styles.messageColumn}>
@@ -348,7 +395,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       {editedHead ? <div className={styles.notice}>编辑已保存为新分支；原分支保留。<button type="button" className="button" disabled={busy || !!pendingChat || !model || !generationAvailable} onClick={() => void executeEdit()}>生成编辑后的回复</button></div> : null}
 </div>
       {selectedArtworks.length ? <button type="button" className={styles.selectionChip} onClick={() => setPanel('artworks')}>已选 {selectedArtworks.length} 幅平台作品 · 查看 / 调整</button> : null}
-      <div className={styles.inputRow}><textarea ref={textareaRef} aria-label="消息" rows={1} value={text} maxLength={32000} placeholder="聊聊你的画题…" onChange={event => setText(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229) { event.preventDefault(); void submit(); } }} />
+      <div className={styles.inputRow}><textarea ref={textareaRef} aria-label="消息" rows={1} value={text} maxLength={32000} placeholder="聊聊你的画题…" onPaste={pasteImage} onChange={event => setText(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229) { event.preventDefault(); void submit(); } }} />
       {running ? <button type="button" className={styles.sendButton} disabled={busy} onClick={() => void cancel(pendingChat || running)} aria-label="取消生成">停止</button> : <button type="submit" className={styles.sendButton} disabled={busy || !generationAvailable || !model || !branch || messages.loading || !!messages.error || draft.loading || !!draft.error || draft.hasMore || attachments.length > 4 || (!text.trim() && !attachments.length) || (!!attachments.length && !selectedModel?.capabilities.images)} aria-label="发送消息">发送 <span aria-hidden>↑</span></button>}
       </div>
       <div className={styles.composerActions}>
@@ -357,7 +404,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
           <button type="button" className={styles.small} onClick={() => setPanel('artworks')} aria-haspopup="dialog">平台作品</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="联网搜索" aria-pressed={webSearch} disabled={!onlineSearchAvailable || busy || !!pendingChat} title={onlineSearchAvailable ? '为下一条消息启用联网搜索' : '联网搜索尚未配置'} onClick={() => setWebSearch(value => !value)}>{webSearch ? '✓ ' : ''}联网搜索</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="知识库检索" aria-pressed={ragflow} disabled={!knowledgeSearchAvailable || busy || !!pendingChat} title={knowledgeSearchAvailable ? '为下一条消息启用知识库检索' : '知识库接口已预留，RAGFlow 尚未配置'} onClick={() => setRagflow(value => !value)}>{ragflow ? '✓ ' : ''}知识库检索</button>
-          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png" disabled={busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
+          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png" disabled={uploadDisabled} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
           {speech.supported ? <button type="button" className={styles.small} onClick={speech.listen}>{speech.listening ? '停止语音' : '语音输入'}</button> : null}
           {speech.speaking ? <button type="button" className={styles.small} onClick={speech.stop}>停止朗读</button> : null}
           <button type="button" className={styles.small} onClick={() => setPanel('tools')} aria-haspopup="dialog" aria-label="更多工具与恢复">•••</button>

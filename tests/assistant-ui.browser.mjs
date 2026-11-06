@@ -66,6 +66,26 @@ try {
   await page.reload({waitUntil:'networkidle'});await page.getByTestId(`attachment-${id(80)}`).getByRole('img').first().waitFor();assert.equal(state.writes.length,1,'Refresh does not upload or generate again');
   await page.setViewportSize({width:390,height:540});await page.getByRole('textbox',{name:'消息',exact:true}).fill('键盘收起前\n保留编辑内容\n第三行\n第四行');await noOverflow();const b=await page.getByRole('button',{name:'发送消息',exact:true}).boundingBox();assert(b.y+b.height<=540);await shot('keyboard-height');
  },{long:true});
+ await scenario('paste-image-into-message-composer',async({page,state})=>{
+  const input=page.getByRole('textbox',{name:'消息',exact:true});
+  await input.fill('已有的输入文字');
+  const textPastePrevented=await input.evaluate(el=>{
+   const clipboardData=new DataTransfer();clipboardData.setData('text/plain','复制的文字');
+   return !el.dispatchEvent(new ClipboardEvent('paste',{clipboardData,bubbles:true,cancelable:true}));
+  });
+  assert.equal(textPastePrevented,false);
+  assert.equal(state.writes.length,0);
+  const imagePastePrevented=await input.evaluate((el,bytes)=>{
+   const clipboardData=new DataTransfer();
+   clipboardData.items.add(new File([new Uint8Array(bytes)],'image.png',{type:'image/png'}));
+   return !el.dispatchEvent(new ClipboardEvent('paste',{clipboardData,bubbles:true,cancelable:true}));
+  },[...png]);
+  assert.equal(imagePastePrevented,true);
+  await page.getByTestId(`attachment-${id(80)}`).getByRole('img').first().waitFor();
+  assert.equal(await input.inputValue(),'已有的输入文字');
+  assert.equal(state.writes.length,1);
+  assert.match(state.writes[0].path,/\/attachments$/);
+ });
  await scenario('branch-pagination-and-source-association',async({page,state,dialog,open,close})=>{
   await open('输入历史','↳ 输入历史');await dialog('输入历史').getByRole('button',{name:'加载更早输入记录'}).click();await dialog('输入历史').getByText('更早的真实用户输入（隔离记录）',{exact:true}).waitFor();await close();
   await open('会话与分支');await dialog('会话与分支').getByLabel('分支',{exact:true}).selectOption(id(3));await close();await page.getByText('这是保留的历史分支回复。',{exact:true}).waitFor();
@@ -79,6 +99,27 @@ try {
   await page.getByTestId('assistant-live').getByRole('heading',{name:'正在展开思路'}).waitFor();await shot('streaming');await page.reload({waitUntil:'domcontentloaded'});await page.getByTestId('assistant-live').waitFor();assert.equal(state.writes.length,0);
   await page.getByRole('button',{name:'取消生成',exact:true}).click();await until(()=>state.runs.at(-1).status==='CANCELLED','Cancel persisted');await page.getByTestId('assistant-live').getByText('已取消',{exact:true}).waitFor();assert.equal(state.writes.length,1);assert(state.writes[0].path.endsWith('/cancel'));
  },{active:true});
+ await scenario('unconfirmed-chat-can-be-closed-after-refresh',async({page,state})=>{
+  state.rejectNextChat=true;
+  const input=page.getByRole('textbox',{name:'消息',exact:true});
+  const send=page.getByRole('button',{name:'发送消息',exact:true});
+  await input.fill('原问题');await send.click();
+  const recover=page.getByRole('button',{name:'核对并恢复发送',exact:true});
+  await recover.waitFor();
+  await page.reload({waitUntil:'domcontentloaded'});await recover.waitFor();
+  await input.fill('修改后的问题');await send.click();
+  await page.getByText(/上一请求的结果尚未确认/).waitFor();
+  const submissions=()=>state.writes.filter(x=>x.path.endsWith('/runs'));
+  assert.equal(submissions().length,1);
+  await recover.click();
+  await page.getByText(/上次发送的请求键已关闭/).waitFor();
+  assert.equal(submissions().length,1);
+  assert.equal(await input.inputValue(),'修改后的问题');
+  await send.click();await page.getByTestId('assistant-live').waitFor();
+  assert.equal(submissions().length,2);
+  assert.notEqual(submissions()[0].body.requestKey,submissions()[1].body.requestKey);
+  assert.equal(submissions()[1].body.text,'修改后的问题');
+ });
  await scenario('uncertain-submit-resolves-without-replay',async({page,state})=>{
   await page.getByRole('textbox',{name:'消息',exact:true}).fill('隔离请求');await page.getByRole('button',{name:'发送消息',exact:true}).click();await until(()=>state.writes.some(x=>x.path.endsWith('/runs')),'one synthetic admission');await page.reload({waitUntil:'domcontentloaded'});await page.getByTestId('assistant-live').waitFor();assert.equal(state.writes.filter(x=>x.path.endsWith('/runs')).length,1);assert(state.writes.some(x=>x.path.endsWith('/requests/resolve')));
  },{uncertainSubmit:true});

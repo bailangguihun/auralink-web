@@ -57,7 +57,20 @@ export function KnowledgeSkeleton({ graph = false }: { graph?: boolean }) {
 }
 
 export function DetailSkeleton() {
-  return <><div className="skeleton-breadcrumb"><Skeleton className="skeleton-short" /></div><div className="detail-layout" aria-hidden="true"><div className="detail-media glass-panel"><Skeleton className="skeleton-image skeleton-detail-image" /></div><div className="detail-copy glass-panel"><Skeleton className="skeleton-title" /><SkeletonRows lines={6} /></div></div></>;
+  return <><div className="skeleton-breadcrumb"><Skeleton className="skeleton-short" /></div><div className="detail-layout" aria-hidden="true"><div className="detail-media glass-panel"><Skeleton className="skeleton-image skeleton-detail-image" /></div><div className="detail-info glass-panel"><header><Skeleton className="skeleton-short" /><Skeleton className="skeleton-title" /><Skeleton className="skeleton-short" /></header><PaintingDetailBodySkeleton showStatus={false} /></div></div></>;
+}
+
+/** Keep the pending document aligned with its real heading, copy and facts. */
+export function PaintingDetailBodySkeleton({ onRetry, showStatus = true }: { onRetry?: () => void; showStatus?: boolean }) {
+  return <>
+    <div className="detail-section detail-copy-loading">
+      <h2>作品资料</h2>
+      {showStatus ? <LoadingSection label="正在读取作品资料" onRetry={onRetry}><SkeletonRows lines={8} /></LoadingSection> : <SkeletonRows lines={8} />}
+    </div>
+    <div className="fact-grid detail-facts-loading" aria-hidden="true">
+      {Array.from({ length: 4 }, (_, i) => <div key={i}><Skeleton className="skeleton-short" /><Skeleton /></div>)}
+    </div>
+  </>;
 }
 
 export function CreationGridSkeleton() {

@@ -61,8 +61,8 @@ export function responseFor(s,method,u,body) {
  }
  if(p.endsWith('/cancel')) {const r=s.runs.find(r=>r.id===p.split('/').at(-2));r.status='CANCELLED';return json(r);}
  if(p.match(/\/runs\/[^/]+$/)&&method==='GET'){const r=s.runs.find(r=>r.id===p.split('/').at(-1));return json(s.badSourceIdentity?{...r,sessionId:id(999)}:r);}
- if(p.endsWith('/runs')&&method==='POST') {const r=run(150,body.branchId,'EXECUTING');s.runs.push(r);return s.uncertainSubmit?{abort:true}:json({run:r,replay:false});}
- if(p.endsWith('/requests/resolve'))return json(s.uncertainSubmit?{status:'FOUND',resultType:'RUN',resultId:id(150)}:{status:'NOT_FOUND'});
+ if(p.endsWith('/runs')&&method==='POST') {if(s.rejectNextChat){s.rejectNextChat=false;return json({message:'隔离：发送失败'},503);}const r=run(150,body.branchId,'EXECUTING');s.runs.push(r);return s.uncertainSubmit?{abort:true}:json({run:r,replay:false});}
+ if(p.endsWith('/requests/resolve'))return json(s.uncertainSubmit?{status:'FOUND',resultType:'RUN',resultId:id(150)}:{status:body.closeIfMissing?'CLOSED':'NOT_FOUND'});
  if(p.endsWith('/artworks/page'))return json({items:[{artworkId:id(70),batchId:id(75),revision:3,projectionVersion:'public-v1',sourceRecordId:'fixture-only',fields:[{key:'core.title',value:'隔离山水作品',rawValue:null,valueStatus:'PRESENT',assertionStatus:'UNSPECIFIED'}]}],page:0,size:10,totalPages:1,totalElements:1});
  s.unknown.push({method,path:p});return json({message:'Unimplemented isolated fixture endpoint'},404);
 }

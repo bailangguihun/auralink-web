@@ -43,7 +43,7 @@ try {
   await go('/'+route+(route==='assistant'?`?session=${id(1)}`:''));await page.locator('.paper-skeleton:visible').first().waitFor();await noOverflow();await shot('loading');
   record.loadingGeometry=await page.evaluate(()=>Object.fromEntries(['.page-header','.gallery-filters','.daily-media','.knowledge-tabs'].flatMap(selector=>{const el=[...document.querySelectorAll(selector)].find(node=>node.getBoundingClientRect().height>0);if(!el)return [];const b=el.getBoundingClientRect();return [[selector,{x:b.x,y:b.y,width:b.width,height:b.height}]];})));
   assert(mobile ? await page.getByRole('button',{name:'打开导航'}).isVisible() : await page.getByRole('navigation',{name:'主导航'}).isVisible());
-  if(route==='studio')assert(await page.getByRole('button',{name:'执行全流程',exact:true}).isDisabled());
+  if(route==='studio')assert(await page.getByRole('button',{name:'执行流程',exact:true}).isDisabled());
   if(route==='assistant')assert(await page.getByRole('button',{name:'发送',exact:true}).isDisabled());
   const selectors={gallery:'[aria-label="画作目录"] .painting-card h3',knowledge:'.knowledge-count strong',studio:'.creation-card h3',assistant:'[data-testid="assistant-message"]',me:'.profile-facts dd'};
   await page.locator(selectors[route]).first().waitFor();await sleep(2300);await noOverflow();await shot('ready');
@@ -69,9 +69,11 @@ try {
   await page.evaluate(()=>{localStorage.setItem('artlive.session.token.v1','ISOLATED_B');dispatchEvent(new StorageEvent('storage',{key:'artlive.session.token.v1'}));});
   await page.getByText('B@example.invalid',{exact:true}).waitFor();await page.getByRole('heading',{name:'B 收藏 1',exact:true}).waitFor();await sleep(1700);assert.equal(await page.getByRole('heading',{name:/A 收藏/}).count(),0);await shot('account-b');
  },{ignoreAbort:true});
- await scenario('studio-list-failure-keeps-editor-and-results',async({page,state,go,shot})=>{
-  state.fail['/api/v1/me/workflows']=503;await go('/studio');await page.locator('.creation-card h3').first().waitFor();await page.getByRole('button',{name:/^文字节点/}).click();await page.getByLabel('画面描述').fill('未提交的工坊草稿');await page.getByRole('button',{name:'打开流程',exact:true}).click();await page.getByText(/流程列表刷新失败/).waitFor();assert.equal(await page.getByText('还没有保存的流程。',{exact:true}).count(),0);assert.equal(await page.getByLabel('画面描述').inputValue(),'未提交的工坊草稿');await shot('partial-failure');
-  delete state.fail['/api/v1/me/workflows'];await page.getByRole('button',{name:'重新读取流程列表'}).click();await page.locator('.workflow-small-panel li').first().waitFor();assert.equal(await page.getByLabel('画面描述').inputValue(),'未提交的工坊草稿');
+ await scenario('studio-unused-workflow-list-does-not-block-editor',async({page,state,go,shot})=>{
+  state.fail['/api/v1/me/workflows']=503;await go('/studio');await page.locator('.creation-card h3').first().waitFor();await page.getByRole('button',{name:/^文字节点/}).click();await page.getByLabel('画面描述').fill('未提交的工坊草稿');
+  assert.equal(state.requests.filter(r=>r.path==='/api/v1/me/workflows').length,0,'No saved-workflow list read during ordinary editing');
+  assert.equal(await page.getByRole('button',{name:'打开流程',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'保存流程',exact:true}).count(),0);
+  assert.equal(await page.getByLabel('画面描述').inputValue(),'未提交的工坊草稿');assert(await page.locator('.creation-card h3').count()>0);await shot('editor-and-results');
  });
  await scenario('knowledge-tab-revisit-error-and-keyboard',async({page,state,go,shot})=>{
   await go('/knowledge');await page.locator('.knowledge-count strong').first().waitFor();state.fail['/api/v1/knowledge/poetry-graph']=503;

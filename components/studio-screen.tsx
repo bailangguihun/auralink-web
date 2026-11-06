@@ -7,6 +7,7 @@ import { CreationGridSkeleton, LoadingSection, LoadingStatus, PendingIndicator, 
 import { StatePanel } from "@/components/state-panel";
 import { useSession } from "@/components/session-provider";
 import { WorkflowDesigner } from "@/components/workflow-designer";
+import { StudioExecutionDialog } from "@/components/studio-execution-dialog";
 import { api, ApiError, errorMessage, isAbortError } from "@/lib/api";
 import { classifyCreationStatus, pollCreation, type PollOutcome } from "@/lib/creation-polling";
 import { resolveMediaUrl } from "@/lib/media";
@@ -30,7 +31,6 @@ import type {
   PaintingSummary,
   WorkflowCapabilities,
   WorkflowDetail,
-  WorkflowLifecycleStatus,
   WorkflowOperationCapability,
   WorkflowPage,
 } from "@/lib/types";
@@ -40,7 +40,6 @@ const CREATION_PAGE_SIZE = 12;
 
 type PollUiState = "idle" | "polling" | "timeout" | "unknown" | "error";
 type ActionPhase = "idle" | "savingWorkflow" | "uploading" | "submitting";
-type NamePromptMode = "save" | "execute" | null;
 type PaintingInput =
   | { kind: "catalog"; painting: PaintingSummary }
   | { kind: "upload"; file: File }
@@ -93,19 +92,19 @@ function userFacingAvailability(
 ): string | null {
   if (!editor.sourceModality) return "请先选择一种输入。";
   if (sourceIssue) return sourceIssue;
-  if (editor.operations.length === 0) return "请至少添加一个创作步骤；仅输入可以保存为流程草稿。";
+  if (editor.operations.length === 0) return "请至少添加一个创作步骤。";
   if (!editorCanActivate(editor)) {
     return editor.operations.some((operation) => operation.code === "PAINTING_TO_VIDEO")
-      ? "视频节点暂未开放，只能保存为流程草稿。"
+      ? "视频节点暂未开放，请调整创作步骤。"
       : "当前流程还不能执行。";
   }
   if (editor.operations.length > (capabilities?.maxExecutionTransformSteps ?? 2)) {
-    return "当前运行环境最多支持两个转换步骤；这个组合可保存为流程草稿。";
+    return "当前运行环境最多支持两个转换步骤，请调整创作步骤。";
   }
-  if (capabilities?.featureEnabled !== true) return "创作服务当前未开放，仍可保存和编辑流程。";
+  if (capabilities?.featureEnabled !== true) return "创作服务当前未开放，可以先编辑流程。";
   if (editor.operations.some((operation) => operation.code === "PAINTING_TO_MUSIC")) {
     if (editor.operations.length !== 1 || editor.sourceModality !== "PAINTING") {
-      return "音乐创作仅支持一幅画廊国画或本人上传国画直接生成音乐；组合音乐流程仍可保存为草稿。";
+      return "音乐创作仅支持一幅画廊国画或本人上传国画直接生成音乐，请调整创作步骤。";
     }
     if (painting?.kind === "upload" && capabilities.operations.find((item) => item.code === "PAINTING_TO_MUSIC")?.executionConstraint
         !== "CATALOG_OR_OWNED_UPLOAD_PAINTING_SINGLE_TRANSFORM_ONLY") {
@@ -113,7 +112,7 @@ function userFacingAvailability(
     }
   }
   if (editor.operations.some((operation) => operation.executionAvailable !== true)) {
-    return "当前流程所需的创作服务暂未开放，仍可保存流程。";
+    return "当前流程所需的创作服务暂未开放。";
   }
   return null;
 }
@@ -130,12 +129,20 @@ function sourceIssueFor(
     case "POEM":
       return text.trim() ? null : "请填写古诗内容。";
     case "IMAGE":
-      return imageFile ? null : "请选择一张图像。";
+      return uploadIssue(imageFile, "图像");
     case "PAINTING":
-      return painting ? null : "请选择一幅国画。";
+      return painting?.kind === "catalog" ? null : uploadIssue(painting?.file ?? null, "国画");
     default:
       return "请先选择一种输入。";
   }
+}
+
+function uploadIssue(file: File | null, label: string): string | null {
+  if (!file) return `请选择一${label === "国画" ? "幅" : "张"}${label}。`;
+  if (!file.size) return "所选文件为空，请重新选择。";
+  if (file.size > MAX_UPLOAD_BYTES) return `${label}图片超过允许的 10 MiB 上限。`;
+  if (!["image/jpeg", "image/png"].includes(file.type)) return "请选择 JPEG 或 PNG 图片。";
+  return null;
 }
 
 export function StudioScreen() {
@@ -168,14 +175,11 @@ function StudioWorkspace() {
   const [workflows, setWorkflows] = useState<WorkflowPage | null>(null);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState("");
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowDetail | null>(null);
-  const [workflowName, setWorkflowName] = useState("");
   const [workflowEditor, setWorkflowEditor] = useState<WorkflowEditorState>(emptyWorkflowEditor);
   const [workflowDirty, setWorkflowDirty] = useState(false);
   const [workflowSaveError, setWorkflowSaveError] = useState<string | null>(null);
   const [workflowSaveUncertain, setWorkflowSaveUncertain] = useState(false);
-  const [namePrompt, setNamePrompt] = useState<NamePromptMode>(null);
-  const [pendingWorkflowName, setPendingWorkflowName] = useState("");
-  const [showWorkflowPicker, setShowWorkflowPicker] = useState(false);
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
 
   const [creationPage, setCreationPage] = useState<CreationPage | null>(null);
   const [creationPageNumber, setCreationPageNumber] = useState(0);
@@ -463,8 +467,6 @@ function StudioWorkspace() {
     }
   }, [handleSessionError, sessionCurrent, token]);
 
-  useEffect(() => { void refreshWorkflowList(); return () => workflowListController.current?.abort(); }, [refreshWorkflowList]);
-
   const updateEditor = useCallback((next: WorkflowEditorState) => {
     abortForInputChange();
     if (next.sourceModality !== workflowEditor.sourceModality) resetSourceInputs();
@@ -478,27 +480,21 @@ function StudioWorkspace() {
     workflowController.current?.abort();
     setSelectedWorkflowId("");
     setSelectedWorkflow(null);
-    setWorkflowName("");
     setWorkflowEditor(emptyWorkflowEditor());
     resetSourceInputs();
-    setWorkflowLoadState("ready");
     setLoadingWorkflows(false);
-    setWorkflowSaveError(null);
-    setWorkflowSaveUncertain(false);
-    setWorkflowDirty(false);
-    setShowWorkflowPicker(false);
-    setNamePrompt(null);
-  }, [abortForInputChange, resetSourceInputs]);
-
-  const openWorkflow = useCallback(async (workflowId: string, reload = false) => {
-    if (!token) return;
-    if (workflowId === selectedWorkflowId && workflowLoadState === "ready" && !reload) {
-      setShowWorkflowPicker(false);
-      return;
+    // Clearing edits must not discard an unresolved save or submission. Only an
+    // explicit read of a chosen workflow can resolve a missing save response.
+    if (!workflowSaveUncertain) {
+      setWorkflowLoadState("ready");
+      setWorkflowSaveError(null);
     }
-    // Reopening the same workflow is explicit; do not silently discard its draft.
-    if (workflowId === selectedWorkflowId && (workflowDirty || textSource || imageFile || paintingInput)
-        && !window.confirm("重新读取会放弃此流程未保存的编辑和当前输入，继续吗？")) return;
+    setWorkflowDirty(false);
+    setShowNamePrompt(false);
+  }, [abortForInputChange, resetSourceInputs, workflowSaveUncertain]);
+
+  const recoverWorkflow = useCallback(async (workflowId: string) => {
+    if (!token || !workflowSaveUncertain) return;
     abortForInputChange();
     workflowController.current?.abort();
     const controller = new AbortController();
@@ -506,44 +502,39 @@ function StudioWorkspace() {
     const epoch = editorEpoch.current;
     const valid = () => sessionCurrent() && !controller.signal.aborted
       && workflowController.current === controller && editorEpoch.current === epoch;
-    setSelectedWorkflowId(workflowId);
-    setSelectedWorkflow(null);
-    setWorkflowName("");
-    setWorkflowEditor(emptyWorkflowEditor());
-    resetSourceInputs();
     setWorkflowLoadState("loading");
     setLoadingWorkflows(true);
     setWorkflowSaveError(null);
-    setShowWorkflowPicker(false);
-    setNamePrompt(null);
+    setShowNamePrompt(false);
     try {
       const result = await api.workflow(workflowId, token, controller.signal);
       if (!valid()) return;
-      if (result.workflowId !== workflowId) throw new Error("返回的流程身份不匹配，请重新打开。");
+      if (result.workflowId !== workflowId) throw new Error("返回的流程身份不匹配，请重新核对。");
       const restored = editorFromWorkflow(result, capabilities);
       if (!restored) throw new Error("此流程定义不能读取，请重新选择流程。");
       setSelectedWorkflow(result);
-      setWorkflowName(result.name);
+      setSelectedWorkflowId(result.workflowId);
+      // Recovery explicitly selects a stored definition, but it is not a new
+      // submission and need not discard a compatible local text/file input.
+      if (restored.sourceModality !== workflowEditor.sourceModality) resetSourceInputs();
       setWorkflowEditor(restored);
       setWorkflowDirty(false);
       setWorkflowSaveUncertain(false);
       setWorkflowLoadState("ready");
-      setWorkflowSaveError(result.conversionRequired ? "这个历史流程含有不兼容节点，请调整后保存。" : null);
+      setWorkflowSaveError(result.conversionRequired ? "这个流程含有不兼容节点，请调整后再执行。" : null);
+      setWorkflows(null);
+      setWorkflowListError(null);
     } catch (caught) {
       if (!valid()) return;
       handleSessionError(caught);
       setWorkflowLoadState("error");
-      setWorkflowSaveError(`流程未加载，不能保存或执行。${errorMessage(caught)}`);
+      setWorkflowSaveError(`暂时无法核对流程，请稍后重新读取。${errorMessage(caught)}`);
     } finally {
       if (valid()) setLoadingWorkflows(false);
     }
-  }, [abortForInputChange, capabilities, handleSessionError, resetSourceInputs, selectedWorkflowId, sessionCurrent, token, workflowDirty, workflowLoadState, textSource, imageFile, paintingInput]);
+  }, [abortForInputChange, capabilities, handleSessionError, resetSourceInputs, sessionCurrent, token, workflowEditor.sourceModality, workflowSaveUncertain]);
 
-  const saveWorkflow = useCallback(async (
-    status: WorkflowLifecycleStatus,
-    name: string,
-    preserveActionPhase = false,
-  ): Promise<WorkflowDetail | null> => {
+  const saveExecutionWorkflow = useCallback(async (name: string): Promise<WorkflowDetail | null> => {
     if (!token || workflowLoadState !== "ready" || workflowSaveUncertain
         || (selectedWorkflowId && !selectedWorkflow) || !workflowSaveGuard.current.enter()) return null;
     const controller = new AbortController();
@@ -556,7 +547,7 @@ function StudioWorkspace() {
     let requestStarted = false;
     let acknowledged = false;
     try {
-      const payload = workflowDefinitionFromEditor(workflowEditor, capabilities, name, "", status);
+      const payload = workflowDefinitionFromEditor(workflowEditor, capabilities, name, "", "ACTIVE");
       setActionPhase("savingWorkflow");
       requestStarted = true;
       const saved = selectedWorkflow
@@ -566,13 +557,10 @@ function StudioWorkspace() {
       if (!valid()) return null;
       setSelectedWorkflow(saved);
       setSelectedWorkflowId(saved.workflowId);
-      setWorkflowName(saved.name);
       setWorkflowSaveUncertain(false);
       setWorkflowDirty(false);
-      // Saving acknowledges this definition; it never restores/reset source inputs.
-      const refreshed = await refreshWorkflowList();
-      if (!valid()) return null;
-      if (!refreshed) setWorkflowSaveError("流程已保存，但列表刷新失败。不会重复创建流程；可重新读取列表。");
+      // The acknowledged definition is enough to submit. A separate workflow
+      // list refresh is neither required nor proof of a lost acknowledgement.
       return saved;
     } catch (caught) {
       if (!valid()) return null;
@@ -581,7 +569,9 @@ function StudioWorkspace() {
         || (caught.status === 422 && ["WORKFLOW_INVALID", "WORKFLOW_SCHEMA_UNSUPPORTED", "WORKFLOW_GRAPH_TOO_LARGE"].includes(caught.code ?? "")));
       if (requestStarted && !acknowledged && !rejected) {
         setWorkflowSaveUncertain(true);
-        setWorkflowSaveError("保存结果未确认。请读取列表并明确打开已有流程；空列表不能证明保存失败。");
+        setWorkflows(null);
+        setWorkflowListError(null);
+        setWorkflowSaveError("流程准备结果未确认，尚未提交创作。请核对已保存的流程后继续，暂不重复提交。");
       } else {
         handleSessionError(caught);
         setWorkflowSaveError(errorMessage(caught));
@@ -590,29 +580,18 @@ function StudioWorkspace() {
     } finally {
       if (workflowSaveController.current === controller) {
         workflowSaveController.current = null;
-        if (sessionCurrent() && !preserveActionPhase) setActionPhase("idle");
       }
       workflowSaveGuard.current.leave();
     }
-  }, [capabilities, handleSessionError, refreshWorkflowList, selectedWorkflow, selectedWorkflowId, sessionCurrent, token, workflowEditor, workflowLoadState, workflowSaveUncertain]);
-
-  const requestSave = () => {
-    if (!workflowEditor.sourceModality || workflowLoadState !== "ready" || workflowSaveUncertain) return;
-    if (selectedWorkflow) {
-      void saveWorkflow("DRAFT", selectedWorkflow.name);
-      return;
-    }
-    setPendingWorkflowName(workflowName || "未命名流程");
-    setNamePrompt("save");
-  };
+  }, [capabilities, handleSessionError, selectedWorkflow, selectedWorkflowId, sessionCurrent, token, workflowEditor, workflowLoadState, workflowSaveUncertain]);
 
   const sourceIssue = sourceIssueFor(workflowEditor, textSource, imageFile, paintingInput);
   const executionDisabledReason = submissionStatus !== "idle"
     ? submissionUncertain ? "上次创作提交结果未确认，本登录会话暂不能再次提交。" : "创作提交正在处理中。"
     : currentExecution && (!currentExecution.detail || !["SUCCEEDED", "PARTIAL_SUCCESS", "FAILED"].includes(currentExecution.detail.status))
       ? "本次提交已确认，执行终态尚未确认；不会重复提交同一轮。更改输入或流程可准备下一轮。"
-    : workflowLoadState !== "ready" ? "流程尚未成功加载，请重新打开或新建流程。"
-    : workflowSaveUncertain ? "流程保存结果尚未确认。"
+    : workflowLoadState !== "ready" ? "流程尚未核对完成，请使用下方核对入口。"
+    : workflowSaveUncertain ? "流程准备结果尚未确认，请先核对。"
     : userFacingAvailability(workflowEditor, capabilities, sourceIssue, paintingInput);
 
   const createSource = async (
@@ -651,21 +630,25 @@ function StudioWorkspace() {
     return { modality: "PAINTING", assetId: asset.assetId };
   };
 
-  async function executeWorkflow(nameOverride?: string) {
-    const name = (nameOverride ?? selectedWorkflow?.name ?? workflowName).trim();
+  const requestExecution = () => {
+    if (!token || !sessionCurrent() || submissionGate.snapshot() !== "idle" || actionPhase !== "idle") return;
+    if (executionDisabledReason) { setActionError(executionDisabledReason); return; }
+    setActionError(null);
+    setShowNamePrompt(true);
+  };
+
+  async function executeWorkflow(nameInput: string) {
+    const name = nameInput.trim();
+    if (!name || name.length > 120 || /[\u0000-\u001f\u007f-\u009f]/.test(nameInput)) return;
     // The synchronous session gate protects the handler as well as the button.
     if (!token || !sessionCurrent() || submissionGate.snapshot() !== "idle") return;
     const existing = executionRef.current;
     if (existing?.epoch === editorEpoch.current
         && (!existing.detail || !["SUCCEEDED", "PARTIAL_SUCCESS", "FAILED"].includes(existing.detail.status))) return;
     if (executionDisabledReason) { setActionError(executionDisabledReason); return; }
-    if (!name) {
-      setPendingWorkflowName("未命名流程");
-      setNamePrompt("execute");
-      return;
-    }
     const operation = submissionGate.begin();
     if (operation === null) return;
+    setShowNamePrompt(false);
     const epoch = editorEpoch.current;
     const controller = new AbortController();
     actionController.current = controller;
@@ -674,7 +657,7 @@ function StudioWorkspace() {
     setActionError(null);
     let creationPostStarted = false;
     try {
-      const saved = await saveWorkflow("ACTIVE", name, true);
+      const saved = await saveExecutionWorkflow(name);
       if (!saved || !valid()) return;
       const source = await createSource(controller, workflowEditor.sourceModality, valid);
       if (!valid()) return;
@@ -709,22 +692,9 @@ function StudioWorkspace() {
     }
   }
 
-  const submitNamePrompt = () => {
-    const name = pendingWorkflowName.trim();
-    if (!name) return;
-    setWorkflowName(name);
-    const mode = namePrompt;
-    setNamePrompt(null);
-    if (mode === "execute") {
-      void executeWorkflow(name);
-    } else {
-      void saveWorkflow("DRAFT", name);
-    }
-  };
-
   const requestClear = () => {
     const meaningful = Boolean(workflowDirty || textSource || imageFile || paintingInput);
-    if (meaningful && !window.confirm("清空当前未保存的工作流内容？已保存的流程和作品不会被删除。")) return;
+    if (meaningful && !window.confirm("清空当前流程和输入内容？已有作品不会被删除，也不会取消已提交的创作。")) return;
     newWorkflow();
   };
 
@@ -863,40 +833,29 @@ function StudioWorkspace() {
         value={workflowEditor}
         disabled={actionPhase !== "idle"}
         editingDisabled={!capabilities || loadingDiscovery || workflowSaveUncertain || workflowLoadState !== "ready"}
-        dirty={workflowDirty}
-        saving={actionPhase === "savingWorkflow"}
+        executing={actionPhase !== "idle"}
         executionDisabledReason={executionDisabledReason}
         sourceBody={sourceBody}
         operationBody={operationBody}
         onChange={updateEditor}
-        onSave={requestSave}
-        onOpen={() => setShowWorkflowPicker((current) => !current)}
-        onExecute={() => void executeWorkflow()}
+        onExecute={requestExecution}
         onClear={requestClear}
       />
 
-      {showWorkflowPicker ? <section className="workflow-small-panel glass-panel" aria-label="打开已保存流程">
-        <header><h3>打开流程</h3>{selectedWorkflowId ? <button type="button" className="button" onClick={() => void openWorkflow(selectedWorkflowId, true)}>重新载入当前流程</button> : null}<button className="button button-quiet" type="button" onClick={newWorkflow}>新建流程</button></header>
-        {loadingWorkflows ? workflows ? <LoadingStatus label="正在更新流程列表，暂保留已读取内容" /> : <LoadingSection label="正在读取流程" onRetry={() => void refreshWorkflowList()}><SkeletonRows /></LoadingSection> : null}
+      {workflowSaveUncertain ? <section className="workflow-small-panel glass-panel" aria-label="核对流程状态">
+        <header><h3>核对流程状态</h3><button className="button" type="button" disabled={loadingWorkflows} onClick={() => void refreshWorkflowList()}>读取待核对流程</button></header>
+        <p>只有确认已有记录后才能继续；读取列表不会再次提交创作。请选择与本次名称和步骤相符的流程，同类型的输入内容会保留。</p>
+        {loadingWorkflows ? <LoadingSection label="正在核对流程"><SkeletonRows /></LoadingSection> : null}
         {workflows?.items.length ? <ul>{workflows.items.map((workflow) => <li key={workflow.workflowId}>
-          <button type="button" onClick={() => void openWorkflow(workflow.workflowId)}>
-            <strong>{workflow.name}</strong><span>{workflow.status === "DRAFT" ? "草稿" : "可执行流程"} · {modalityLabels[workflow.sourceModality]} → {modalityLabels[workflow.terminalModality]}</span>
+          <button type="button" disabled={loadingWorkflows} onClick={() => void recoverWorkflow(workflow.workflowId)}>
+            <strong>{workflow.name}</strong><span>{modalityLabels[workflow.sourceModality]} → {modalityLabels[workflow.terminalModality]} · {displayTime(workflow.updatedAt)}</span><span>使用此流程继续</span>
           </button>
-        </li>)}</ul> : !loadingWorkflows && !workflowListError && workflows ? <p>还没有保存的流程。</p> : null}
-        {workflowSaveUncertain ? <button className="button" type="button" onClick={() => void refreshWorkflowList()}>重新读取流程</button> : null}
+        </li>)}</ul> : !loadingWorkflows && !workflowListError && workflows ? <p>暂未找到可核对的记录。空列表不能确认上次请求失败，请稍后再核对。</p> : null}
+        {workflowListError ? <p className="inline-error" role="alert">暂时无法读取待核对流程：{workflowListError}</p> : null}
       </section> : null}
 
-      {namePrompt ? <section className="workflow-name-dialog glass-panel" role="dialog" aria-modal="true" aria-labelledby="workflow-name-title">
-        <h3 id="workflow-name-title">为流程命名</h3>
-        <p>名称只用于识别这条创作路径。</p>
-        <label><span className="sr-only">流程名称</span><input autoFocus value={pendingWorkflowName} maxLength={120}
-          onChange={(event) => setPendingWorkflowName(event.target.value)} onKeyDown={(event) => {
-            if (event.key === "Enter") { event.preventDefault(); submitNamePrompt(); }
-          }} /></label>
-        <div><button className="button button-quiet" type="button" onClick={() => setNamePrompt(null)}>返回</button><button className="button button-primary" type="button" disabled={!pendingWorkflowName.trim()} onClick={submitNamePrompt}>保存</button></div>
-      </section> : null}
+      {showNamePrompt ? <StudioExecutionDialog onCancel={() => setShowNamePrompt(false)} onConfirm={(name) => void executeWorkflow(name)} /> : null}
 
-      {workflowListError ? <p className="inline-error studio-wide-error" role="alert">流程列表刷新失败：{workflowListError} <button type="button" className="button" onClick={() => void refreshWorkflowList()}>重新读取流程列表</button></p> : null}
       {workflowSaveError ? <p className="inline-error studio-wide-error" role="alert">{workflowSaveError}</p> : null}
       {actionError ? <p className="inline-error studio-wide-error" role="alert">{actionError}</p> : null}
       {submissionUncertain ? <p className="studio-reason studio-wide-error" role="status">提交结果未确认：本登录会话已暂停新的创作提交，编辑、新建和读取历史不会解除保护。现有接口不能凭空列表确认请求失败。离开页面只停止等待，不会取消后台创作；刷新或其他标签页尚无跨页幂等保证，请勿据此重发。</p> : null}
@@ -914,7 +873,7 @@ function StudioWorkspace() {
           <div className="creation-grid">
             {creationPage.items.map((creation) => <button className="creation-card glass-panel" type="button" key={creation.creationId} onClick={() => void openCreation(creation.creationId)}>
               <span className={`creation-status status-${creation.status.toLowerCase()}`}>{statusLabels[creation.status] || "状态待确认"}</span>
-              <h3>{creation.workflowName || "未命名流程"}</h3>
+              <h3>{creation.workflowName || "未命名创作"}</h3>
               <p>{modalityLabels[creation.sourceModality] || "输入"} → {modalityLabels[creation.finalModality || ""] || "等待结果"}</p>
               <time>{displayTime(creation.updatedAt)}</time>
             </button>)}
@@ -924,7 +883,7 @@ function StudioWorkspace() {
             <span>第 {creationPage.page + 1} / {Math.max(creationPage.totalPages, 1)} 页</span>
             <button className="button" type="button" disabled={loadingCreations || creationPage.last} onClick={() => setCreationPageNumber((current) => current + 1)}>下一页</button>
           </nav>
-        </> : !loadingCreations && !creationError && creationPage ? <StatePanel kind="empty" title="还没有作品" description="保存流程不会创建作品；提交成功后，每一轮创作都会在这里显示。" /> : null}
+        </> : !loadingCreations && !creationError && creationPage ? <StatePanel kind="empty" title="还没有作品" description="配置流程并填写输入后，点击“执行流程”开始创作。每次提交的结果都会在这里显示。" /> : null}
       </section>
 
       {detailLoading ? <LoadingStatus label="正在读取历史详情" /> : null}

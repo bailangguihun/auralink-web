@@ -273,7 +273,24 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     event?.preventDefault(); if (!generationAvailable || (!text.trim() && !attachments.length) || !branch || !selectedModel || pendingChat || busyRef.current || messages.loading || messages.error || draft.loading || draft.error || draft.hasMore || attachments.length > 4) return;
     await act(async () => { const payload = command(text, attachments.map(image => image.id)); const scope = `CHAT_EXECUTION:${id}`; const result = await submitCommand(`/sessions/${enc(id)}/runs`, payload, scope, 'CHAT_EXECUTION'); ledger.resolved(scope); setLive(result.run); setText(''); setSelectedArtworks([]); reload(); });
   };
+  const uploadDisabled = busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat;
   const upload = async (file: File | undefined) => { if (file) await act(() => draft.upload(file)); };
+  const pasteImage = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const images = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
+    if (!images.length) return;
+    event.preventDefault();
+    if (images.length > 1) {
+      setError('请一次粘贴一张图片。');
+      return;
+    }
+    if (uploadDisabled) {
+      setError(attachments.length >= 4 || draft.hasMore
+        ? '每条消息最多可添加四张图片，请先移除一张或发送当前消息。'
+        : '当前暂时无法添加图片，请稍后再试。');
+      return;
+    }
+    void upload(images[0]);
+  };
   const cancel = async (run: Run) => act(async () => { const value = await request((token, signal) => assistantRequest<Run>(`/runs/${enc(run.id)}/cancel`, token, signal, 'POST')); setLive(value); reload(); });
   const retry = async (run: Run) => act(async () => { requireGeneration(); if (!branch) return; const scope = `RETRY_EXECUTION:${id}:${run.id}`; const payload = { expectedVersion: branch.version, acknowledgePossiblePriorCharge: true }; const key = await ledger.key(scope, payload); const result = await request((token, signal) => assistantRequest<{ run: Run }>(`/runs/${enc(run.id)}/retry`, token, signal, 'POST', { ...payload, requestKey: key })); ledger.resolved(scope); onBranch(result.run.branchId); setLive(result.run); reload(); });
   const choose = async (run: Run, cardId: string, optionId: string) => act(async () => { requireGeneration(); if (!branch) return; const payload = { branchId, expectedVersion: branch.version, modelKey: model, cardId, optionId }; const scope = `CHAT_EXECUTION:${id}`; const key = await ledger.key(scope, payload); const result = await request((token, signal) => assistantRequest<{ run: Run }>(`/runs/${enc(run.id)}/choices`, token, signal, 'POST', { ...payload, requestKey: key })); ledger.resolved(scope); setLive(result.run); reload(); });
@@ -348,7 +365,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       {editedHead ? <div className={styles.notice}>编辑已保存为新分支；原分支保留。<button type="button" className="button" disabled={busy || !!pendingChat || !model || !generationAvailable} onClick={() => void executeEdit()}>生成编辑后的回复</button></div> : null}
 </div>
       {selectedArtworks.length ? <button type="button" className={styles.selectionChip} onClick={() => setPanel('artworks')}>已选 {selectedArtworks.length} 幅平台作品 · 查看 / 调整</button> : null}
-      <div className={styles.inputRow}><textarea ref={textareaRef} aria-label="消息" rows={1} value={text} maxLength={32000} placeholder="聊聊你的画题…" onChange={event => setText(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229) { event.preventDefault(); void submit(); } }} />
+      <div className={styles.inputRow}><textarea ref={textareaRef} aria-label="消息" rows={1} value={text} maxLength={32000} placeholder="聊聊你的画题…" onPaste={pasteImage} onChange={event => setText(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229) { event.preventDefault(); void submit(); } }} />
       {running ? <button type="button" className={styles.sendButton} disabled={busy} onClick={() => void cancel(pendingChat || running)} aria-label="取消生成">停止</button> : <button type="submit" className={styles.sendButton} disabled={busy || !generationAvailable || !model || !branch || messages.loading || !!messages.error || draft.loading || !!draft.error || draft.hasMore || attachments.length > 4 || (!text.trim() && !attachments.length) || (!!attachments.length && !selectedModel?.capabilities.images)} aria-label="发送消息">发送 <span aria-hidden>↑</span></button>}
       </div>
       <div className={styles.composerActions}>
@@ -357,7 +374,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
           <button type="button" className={styles.small} onClick={() => setPanel('artworks')} aria-haspopup="dialog">平台作品</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="联网搜索" aria-pressed={webSearch} disabled={!onlineSearchAvailable || busy || !!pendingChat} title={onlineSearchAvailable ? '为下一条消息启用联网搜索' : '联网搜索尚未配置'} onClick={() => setWebSearch(value => !value)}>{webSearch ? '✓ ' : ''}联网搜索</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="知识库检索" aria-pressed={ragflow} disabled={!knowledgeSearchAvailable || busy || !!pendingChat} title={knowledgeSearchAvailable ? '为下一条消息启用知识库检索' : '知识库接口已预留，RAGFlow 尚未配置'} onClick={() => setRagflow(value => !value)}>{ragflow ? '✓ ' : ''}知识库检索</button>
-          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png" disabled={busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
+          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png" disabled={uploadDisabled} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
           {speech.supported ? <button type="button" className={styles.small} onClick={speech.listen}>{speech.listening ? '停止语音' : '语音输入'}</button> : null}
           {speech.speaking ? <button type="button" className={styles.small} onClick={speech.stop}>停止朗读</button> : null}
           <button type="button" className={styles.small} onClick={() => setPanel('tools')} aria-haspopup="dialog" aria-label="更多工具与恢复">•••</button>

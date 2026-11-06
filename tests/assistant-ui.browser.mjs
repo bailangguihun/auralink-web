@@ -79,6 +79,27 @@ try {
   await page.getByTestId('assistant-live').getByRole('heading',{name:'正在展开思路'}).waitFor();await shot('streaming');await page.reload({waitUntil:'domcontentloaded'});await page.getByTestId('assistant-live').waitFor();assert.equal(state.writes.length,0);
   await page.getByRole('button',{name:'取消生成',exact:true}).click();await until(()=>state.runs.at(-1).status==='CANCELLED','Cancel persisted');await page.getByTestId('assistant-live').getByText('已取消',{exact:true}).waitFor();assert.equal(state.writes.length,1);assert(state.writes[0].path.endsWith('/cancel'));
  },{active:true});
+ await scenario('unconfirmed-chat-can-be-closed-after-refresh',async({page,state})=>{
+  state.rejectNextChat=true;
+  const input=page.getByRole('textbox',{name:'消息',exact:true});
+  const send=page.getByRole('button',{name:'发送消息',exact:true});
+  await input.fill('原问题');await send.click();
+  const recover=page.getByRole('button',{name:'核对并恢复发送',exact:true});
+  await recover.waitFor();
+  await page.reload({waitUntil:'domcontentloaded'});await recover.waitFor();
+  await input.fill('修改后的问题');await send.click();
+  await page.getByText(/上一请求的结果尚未确认/).waitFor();
+  const submissions=()=>state.writes.filter(x=>x.path.endsWith('/runs'));
+  assert.equal(submissions().length,1);
+  await recover.click();
+  await page.getByText(/上次发送的请求键已关闭/).waitFor();
+  assert.equal(submissions().length,1);
+  assert.equal(await input.inputValue(),'修改后的问题');
+  await send.click();await page.getByTestId('assistant-live').waitFor();
+  assert.equal(submissions().length,2);
+  assert.notEqual(submissions()[0].body.requestKey,submissions()[1].body.requestKey);
+  assert.equal(submissions()[1].body.text,'修改后的问题');
+ });
  await scenario('uncertain-submit-resolves-without-replay',async({page,state})=>{
   await page.getByRole('textbox',{name:'消息',exact:true}).fill('隔离请求');await page.getByRole('button',{name:'发送消息',exact:true}).click();await until(()=>state.writes.some(x=>x.path.endsWith('/runs')),'one synthetic admission');await page.reload({waitUntil:'domcontentloaded'});await page.getByTestId('assistant-live').waitFor();assert.equal(state.writes.filter(x=>x.path.endsWith('/runs')).length,1);assert(state.writes.some(x=>x.path.endsWith('/requests/resolve')));
  },{uncertainSubmit:true});

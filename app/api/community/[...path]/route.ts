@@ -1,4 +1,4 @@
-import { communityPath } from "@/lib/community-proxy";
+import { communityPath, communityUpstreamFailure } from "@/lib/community-proxy";
 import { configuredCommunityOrigin } from "@/lib/community-host-origin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +45,8 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
     });
     return new Response(upstream.body, { status: upstream.status, headers });
   } catch {
-    return failure(503, "COMMUNITY_RESULT_UNCERTAIN", "请求结果尚未确认，请读取操作记录，不要重复提交。");
+    const error = communityUpstreamFailure(request.method);
+    return failure(503, error.code, error.message);
   }
 }
 export const GET = proxy;

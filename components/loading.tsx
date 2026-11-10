@@ -74,7 +74,7 @@ export function PaintingDetailBodySkeleton({ onRetry, showStatus = true }: { onR
 }
 
 export function CreationGridSkeleton() {
-  return <div className="creation-grid" aria-hidden="true">{[0, 1, 2].map(i => <div className="creation-card glass-panel" key={i}><Skeleton className="skeleton-short" /><SkeletonRows /></div>)}</div>;
+  return <div className="creation-grid" aria-hidden="true">{[0, 1, 2, 3, 4, 5].map(i => <div className="creation-card glass-panel" key={i}><Skeleton className="skeleton-short" /><SkeletonRows /></div>)}</div>;
 }
 
 export function StudioSkeleton() {

@@ -12,6 +12,7 @@ import { readCache } from "@/lib/read-cache";
 import { communityApi, definiteWriteFailure, operationStorageKey, readOperation,
   type CommunityPost, type GalleryReference, type OperationHandle, type OperationResult } from "@/lib/community";
 import { CommunityLoading } from "./community-loading";
+import { MediaImage } from "@/components/media-image";
 import "./community.css";
 
 type Write = (path: string, method: string, body: object, kind: string) => Promise<OperationResult | null>;
@@ -19,9 +20,19 @@ function Reference({ value }: { value: GalleryReference }) {
   if (value.state !== "AVAILABLE") return <div className="community-reference">
     <span>引用的画廊作品</span><p>{value.state === "UNAVAILABLE" ? "原作已不可查看，引用关系保留。" : "暂时无法核实原作，请稍后重新读取。"}</p>
   </div>;
-  return <div className="community-reference"><span>画廊原作</span>
-    <Link href={"/gallery/" + value.paintingId} prefetch={false}>{value.title || "无题"}</Link>
-    <p>{[value.authorName, value.period].filter(Boolean).join(" · ") || "作者资料暂缺"}</p>
+  const title = value.title || "无题", href = "/gallery/" + value.paintingId;
+  return <div className="community-reference" data-artwork-source={value.paintingId}
+    data-artwork-title={title} data-artwork-author={value.authorName} data-artwork-period={value.period}>
+    <span>画廊原作</span>
+    <Link className="community-reference-media" href={href} prefetch={false}
+      data-artwork-link={value.paintingId} aria-label={`查看《${title}》的画廊原作`}>
+      <MediaImage image={value.image ?? null} alt={title} loading="lazy" />
+    </Link>
+    <div className="community-reference-caption">
+      <div><Link className="community-reference-title" href={href} prefetch={false} data-artwork-link={value.paintingId}>{title}</Link>
+        <p>{[value.authorName, value.period].filter(Boolean).join(" · ") || "作者资料暂缺"}</p></div>
+      <Link className="community-reference-open" href={href} prefetch={false} data-artwork-link={value.paintingId}>查看画廊原作 <span aria-hidden="true">↗</span></Link>
+    </div>
   </div>;
 }
 function PostCard({ post, detail, busy, write }: { post: CommunityPost; detail?: boolean; busy: boolean; write: Write }) {

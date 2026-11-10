@@ -384,6 +384,8 @@ export const api = {
       ),
       parseCreationDetail,
     ),
+  deleteCreationHistory: (creationId: string, token: string, signal?: AbortSignal) =>
+    apiRequest<void>(`/api/v1/me/creations/${encodeURIComponent(creationId)}`, { method: "DELETE", token, signal }),
   retryCreation: async (
     creationId: string,
     expectedRetryVersion: number,

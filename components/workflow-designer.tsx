@@ -56,6 +56,7 @@ type Props = {
   disabled?: boolean;
   editingDisabled?: boolean;
   executing?: boolean;
+  executionLabel?: string;
   executionDisabledReason: string | null;
   sourceBody: ReactNode;
   operationBody: (operation: WorkflowOperationCapability, index: number) => ReactNode;
@@ -81,6 +82,7 @@ export function WorkflowDesigner({
   disabled = false,
   editingDisabled = false,
   executing = false,
+  executionLabel = "提交中",
   executionDisabledReason,
   sourceBody,
   operationBody,
@@ -195,7 +197,7 @@ export function WorkflowDesigner({
             type="button"
             disabled={disabled || !value.sourceModality || Boolean(executionDisabledReason)}
             onClick={onExecute}
-          >{executing ? <><PendingIndicator /> 正在提交…</> : "执行流程"}</button>
+          >{executing ? <><PendingIndicator /> {executionLabel}…</> : "执行流程"}</button>
         </div>
       </header>
 

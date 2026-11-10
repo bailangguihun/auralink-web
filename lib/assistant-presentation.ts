@@ -23,13 +23,40 @@ function choiceJson(value: string): boolean {
 
 /** Hide transport-only choice payloads and internal retrieval diagnostics from readers. */
 export function assistantVisibleMarkdown(value: string): string {
-  const withoutChoiceFences = value.replace(/```(?:choice|json)?\s*\n([\s\S]*?)```/gi, (block, body: string) => choiceJson(body.trim()) ? '' : block);
-  return withoutChoiceFences.split(/\n\s*\n/).filter(block => {
+  const withoutReservedFences = value.replace(/```assistant-choices\b[^\n]*\n[\s\S]*?(?:```|$)/gi, '');
+  const withoutChoiceFences = withoutReservedFences.replace(/```(?:choice|json)?\s*\n([\s\S]*?)(?:```|$)/gi, (block, body: string) => choiceJson(body.trim()) ? '' : block);
+  // A trailing pretty-printed payload can contain blank lines between its cards.
+  const tail = withoutChoiceFences.search(/^[ \t]*(?:\[|\{)\s*$/m);
+  const withoutChoiceTail = tail >= 0 && choiceJson(withoutChoiceFences.slice(tail).trim())
+    ? withoutChoiceFences.slice(0, tail) : withoutChoiceFences;
+  return withoutChoiceTail.split(/\n\s*\n/).filter(block => {
     const text = block.trim();
     if (!text) return false;
     if (retrievalDisclosure.test(text)) return false;
     return !((text.startsWith('[') || text.startsWith('{')) && choiceJson(text));
   }).join('\n\n').trim();
+}
+
+export type ImageCrop = { x: number; y: number; width: number; height: number };
+export type IllustratedSection = { markdown: string; image?: { id: string; label: string; crop: ImageCrop } };
+
+/** Crop references resolve only to the persisted attachments of this reply's user message. */
+export function assistantIllustratedSections(value: string, imageIds: string[]): IllustratedSection[] {
+  const visible = assistantVisibleMarkdown(value).replace(/^!\[[^\]\n]*\]\(assistant-crop:[^\n)]*$/gm, '');
+  if (!/^!\[[^\]\n]+\]\(assistant-crop:/m.test(visible)) return [{ markdown: visible }];
+  return visible.split(/(?=^#{2,3} )/m).filter(Boolean).map(markdown => {
+    let image: IllustratedSection['image'];
+    const cleaned = markdown.replace(/^!\[([^\]\n]{1,120})\]\(assistant-crop:([^\n)]*)\)[ \t]*$/gm, (_, label: string, reference: string) => {
+      const parts = reference.split(',');
+      const [index, x, y, width, height] = parts.map(Number);
+      if (!image && parts.length === 5 && parts.every(part => /^\d+(?:\.\d+)?$/.test(part)) && Number.isInteger(index) && index >= 1 && index <= imageIds.length
+        && x >= 0 && y >= 0 && width >= 0.05 && height >= 0.05 && x + width <= 1.000001 && y + height <= 1.000001) {
+        image = { id: imageIds[index - 1], label, crop: { x, y, width, height } };
+      }
+      return '';
+    }).trim();
+    return { markdown: cleaned, image };
+  });
 }
 
 /** Text links require a deliberate click; no model-authored URL is used as media. */

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
-import { CreationRunHistory, CreationStepOutput } from "@/components/creation-run-history";
+import { CreationRunHistory, CreationStepOutput, PrivateMediaPreview } from "@/components/creation-run-history";
 import { CreationGridSkeleton, LoadingSection, LoadingStatus, PendingIndicator, SkeletonRows } from "@/components/loading";
 import { StatePanel } from "@/components/state-panel";
 import { useSession } from "@/components/session-provider";
@@ -26,6 +26,7 @@ import type {
   CreationDetail,
   CreationPage,
   CreationSource,
+  CreationSummary,
   MediaAsset,
   PaintingPage,
   PaintingSummary,
@@ -36,7 +37,22 @@ import type {
 } from "@/lib/types";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const CREATION_PAGE_SIZE = 12;
+const CREATION_PAGE_SIZE = 6;
+const actionLabels = { idle: "准备中", savingWorkflow: "准备中", uploading: "上传中", submitting: "提交中" };
+const canDeleteHistory = (status: string) => ["SUCCEEDED", "PARTIAL_SUCCESS", "FAILED"].includes(status);
+type LocalSubmission = {
+  name: string;
+  createdAt: string;
+  sourceModality: string;
+  targetLabel: string;
+  file: File | null;
+  previewUrl: string | null;
+  text: string;
+  phase: "pending" | "accepted" | "uncertain" | "failed";
+  error: string | null;
+  creationId: string | null;
+  detail: CreationDetail | null;
+};
 
 type PollUiState = "idle" | "polling" | "timeout" | "unknown" | "error";
 type ActionPhase = "idle" | "savingWorkflow" | "uploading" | "submitting";
@@ -181,6 +197,20 @@ function StudioWorkspace() {
   const [workflowSaveUncertain, setWorkflowSaveUncertain] = useState(false);
   const [showNamePrompt, setShowNamePrompt] = useState(false);
 
+  const [localSubmission, setLocalSubmission] = useState<LocalSubmission | null>(null);
+  const localPreview = useFilePreview(localSubmission?.file ?? null);
+  // Before the receipt exists, reserve a real slot instead of hiding the sixth
+  // server record. The server's page size also changes, so no history is skipped.
+  const historyPageSize = localSubmission && !localSubmission.creationId ? CREATION_PAGE_SIZE - 1 : CREATION_PAGE_SIZE;
+  const historyPageSizeRef = useRef(CREATION_PAGE_SIZE);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deleteGuard = useRef(false);
+  const deletedIds = useRef(new Set<string>());
+  const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null);
+  const deleteController = useRef<AbortController | null>(null);
+  const detailRequestedId = useRef<string | null>(null);
+  const creationDetailRef = useRef<HTMLElement | null>(null);
+  const creationPageNumberRef = useRef(0);
   const [creationPage, setCreationPage] = useState<CreationPage | null>(null);
   const [creationPageNumber, setCreationPageNumber] = useState(0);
   const [selectedCreation, setSelectedCreation] = useState<CreationDetail | null>(null);
@@ -256,9 +286,12 @@ function StudioWorkspace() {
     galleryController.current?.abort();
     galleryController.current = null;
     setGalleryLoading(false);
-    stopPolling();
+    // Editing changes the canvas association, but the accepted work still updates its card.
+    historyPollController.current?.abort();
+    historyPollController.current = null;
+    setHistoryPollState("idle");
     setActionError(null);
-  }, [stopPolling]);
+  }, []);
 
   const resetSourceInputs = useCallback(() => {
     setTextSource("");
@@ -283,6 +316,7 @@ function StudioWorkspace() {
     historyPollController.current?.abort();
     workflowListController.current?.abort();
     galleryController.current?.abort();
+    deleteController.current?.abort();
     };
   }, []);
 
@@ -316,7 +350,7 @@ function StudioWorkspace() {
     return () => controller.abort();
   }, [discoveryAttempt, handleSessionError, sessionCurrent, stopPolling, token]);
 
-  const refreshCreations = useCallback(async () => {
+  const refreshCreations = useCallback(async (pageNumber = creationPageNumberRef.current) => {
     if (!token) return;
     const controller = new AbortController();
     creationsController.current?.abort();
@@ -324,10 +358,15 @@ function StudioWorkspace() {
     setLoadingCreations(true);
     setCreationError(null);
     try {
-      const result = await api.creations(creationPageNumber, CREATION_PAGE_SIZE, token, controller.signal);
+      const result = await api.creations(pageNumber, historyPageSizeRef.current, token, controller.signal);
       if (!controller.signal.aborted && sessionCurrent() && creationsController.current === controller) {
         hasCreationSnapshot.current = true;
-        setCreationPage(result);
+        setCreationPage({ ...result, items: result.items
+          .filter(item => !deletedIds.current.has(item.creationId))
+          .map(item => mergeCreationObservation(item, creationObservations.current.get(item.creationId) ?? item)) });
+        if (result.page > 0 && result.items.length === 0) {
+          setCreationPageNumber(Math.max(0, Math.min(result.page - 1, result.totalPages - 1)));
+        }
         setCreationReadStale(false);
       }
     } catch (caught) {
@@ -335,22 +374,26 @@ function StudioWorkspace() {
       handleSessionError(caught);
       setCreationError(errorMessage(caught, "暂时无法读取我的作品。请稍后重试。"));
       if (caught instanceof ApiError && [401, 403].includes(caught.status)) {
-        setCreationPage(null); setSelectedCreation(null); hasCreationSnapshot.current = false;
+        setCreationPage(null); setSelectedCreation(null); setLocalSubmission(null); hasCreationSnapshot.current = false;
       }
       setCreationReadStale(hasCreationSnapshot.current);
     } finally {
       if (!controller.signal.aborted && sessionCurrent() && creationsController.current === controller) setLoadingCreations(false);
     }
-  }, [creationPageNumber, handleSessionError, sessionCurrent, token]);
+  }, [handleSessionError, sessionCurrent, token]);
 
   useEffect(() => {
-    void refreshCreations();
+    creationPageNumberRef.current = creationPageNumber;
+    historyPageSizeRef.current = historyPageSize;
+    void refreshCreations(creationPageNumber);
     return () => creationsController.current?.abort();
-  }, [refreshCreations]);
+  }, [creationPageNumber, historyPageSize, refreshCreations]);
 
   const updateCreationCard = useCallback((detail: CreationDetail) => {
+    if (deletedIds.current.has(detail.creationId)) return;
+    setLocalSubmission(current => current?.creationId === detail.creationId ? { ...current, detail } : current);
     setCreationPage((current) => current ? {
-      ...current, items: current.items.map((item) => item.creationId === detail.creationId ? detail : item),
+      ...current, items: current.items.map((item) => item.creationId === detail.creationId ? mergeCreationObservation(item, detail) : item),
     } : current);
   }, []);
 
@@ -361,7 +404,8 @@ function StudioWorkspace() {
     const controller = new AbortController();
     slot.current = controller;
     const valid = () => sessionCurrent() && !controller.signal.aborted
-      && slot.current === controller && editorEpoch.current === epoch;
+      && slot.current === controller && !deletedIds.current.has(creationId)
+      && (target === "current" || editorEpoch.current === epoch);
     const setTargetState = target === "current" ? setPollState : setHistoryPollState;
     setTargetState("polling");
     void pollCreation({
@@ -384,9 +428,7 @@ function StudioWorkspace() {
           executionRef.current = updated;
           setCurrentExecution(updated);
         }
-        if (target === "history") {
-          setSelectedCreation((current) => current?.creationId === creationId ? detail : current);
-        }
+        setSelectedCreation((current) => current?.creationId === creationId ? detail : current);
         updateCreationCard(detail);
       },
     }).then((outcome: PollOutcome) => {
@@ -404,7 +446,8 @@ function StudioWorkspace() {
   }, [handleSessionError, observeCreation, refreshCreations, sessionCurrent, token, updateCreationCard]);
 
   const openCreation = useCallback(async (creationId: string) => {
-    if (!token) return;
+    if (!token || deletedIds.current.has(creationId)) return;
+    detailRequestedId.current = creationId;
     historyPollController.current?.abort();
     setHistoryPollState("idle");
     detailController.current?.abort();
@@ -412,7 +455,7 @@ function StudioWorkspace() {
     detailController.current = controller;
     const epoch = editorEpoch.current;
     const valid = () => sessionCurrent() && !controller.signal.aborted
-      && detailController.current === controller && editorEpoch.current === epoch;
+      && detailController.current === controller && editorEpoch.current === epoch && !deletedIds.current.has(creationId);
     setDetailLoading(true);
     setDetailError(null);
     try {
@@ -431,7 +474,9 @@ function StudioWorkspace() {
         }
       }
       setSelectedCreation(detail);
-      if (classifyCreationStatus(detail.status) === "active") startPolling(creationId, "history", epoch);
+      updateCreationCard(detail);
+      if (classifyCreationStatus(detail.status) === "active"
+          && !(current?.creationId === creationId && pollController.current)) startPolling(creationId, "history", epoch);
     } catch (caught) {
       if (!valid()) return;
       handleSessionError(caught);
@@ -439,7 +484,58 @@ function StudioWorkspace() {
     } finally {
       if (valid()) setDetailLoading(false);
     }
-  }, [handleSessionError, observeCreation, sessionCurrent, startPolling, token]);
+  }, [handleSessionError, observeCreation, sessionCurrent, startPolling, token, updateCreationCard]);
+
+  useEffect(() => {
+    if (!detailLoading && selectedCreation && detailRequestedId.current === selectedCreation.creationId) {
+      creationDetailRef.current?.scrollIntoView({ block: "start", behavior: "instant" });
+      creationDetailRef.current?.focus({ preventScroll: true });
+      detailRequestedId.current = null;
+    }
+  }, [detailLoading, selectedCreation]);
+
+  const deleteHistory = async (creation: Pick<CreationSummary, "creationId" | "workflowName" | "status">) => {
+    if (!token || deleteGuard.current || !canDeleteHistory(creation.status)) return;
+    if (!window.confirm(`删除“${creation.workflowName || "未命名创作"}”的历史记录？删除后将从我的作品中移除，关联媒体和执行记录会保留。`)) return;
+    deleteGuard.current = true;
+    setDeletingId(creation.creationId);
+    setDeleteError(null);
+    const controller = new AbortController();
+    deleteController.current = controller;
+    const valid = () => sessionCurrent() && !controller.signal.aborted;
+    try {
+      await api.deleteCreationHistory(creation.creationId, token, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]));
+      if (!valid()) return;
+      deletedIds.current.add(creation.creationId);
+      creationsController.current?.abort();
+      if (detailRequestedId.current === creation.creationId || selectedCreation?.creationId === creation.creationId) {
+        detailController.current?.abort();
+        detailRequestedId.current = null;
+        setDetailLoading(false);
+        historyPollController.current?.abort();
+        setHistoryPollState("idle");
+      }
+      if (executionRef.current?.creationId === creation.creationId) {
+        pollController.current?.abort();
+        executionRef.current = null;
+        setCurrentExecution(null);
+        setPollState("idle");
+      }
+      creationObservations.current.delete(creation.creationId);
+      setSelectedCreation(current => current?.creationId === creation.creationId ? null : current);
+      setLocalSubmission(current => current?.creationId === creation.creationId ? null : current);
+      setCreationPage(current => current ? { ...current, items: current.items.filter(item => item.creationId !== creation.creationId) } : current);
+      await refreshCreations();
+    } catch (caught) {
+      if (valid()) {
+        handleSessionError(caught);
+        setDeleteError({ id: creation.creationId, message: errorMessage(caught, "删除结果暂未确认，请刷新作品列表核对。") });
+      }
+    } finally {
+      deleteGuard.current = false;
+      if (valid()) setDeletingId(null);
+    }
+  };
 
   const refreshWorkflowList = useCallback(async (): Promise<boolean> => {
     if (!token) return false;
@@ -551,8 +647,8 @@ function StudioWorkspace() {
       setActionPhase("savingWorkflow");
       requestStarted = true;
       const saved = selectedWorkflow
-        ? await api.replaceWorkflow(selectedWorkflow.workflowId, payload, token, controller.signal)
-        : await api.createWorkflow(payload, token, controller.signal);
+        ? await api.replaceWorkflow(selectedWorkflow.workflowId, payload, token, AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]))
+        : await api.createWorkflow(payload, token, AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]));
       acknowledged = true;
       if (!valid()) return null;
       setSelectedWorkflow(saved);
@@ -568,6 +664,7 @@ function StudioWorkspace() {
       const rejected = caught instanceof ApiError && ([400, 401, 403, 404].includes(caught.status)
         || (caught.status === 422 && ["WORKFLOW_INVALID", "WORKFLOW_SCHEMA_UNSUPPORTED", "WORKFLOW_GRAPH_TOO_LARGE"].includes(caught.code ?? "")));
       if (requestStarted && !acknowledged && !rejected) {
+        setLocalSubmission(current => current ? { ...current, phase: "uncertain", error: "流程准备结果待确认，尚未提交创作。" } : current);
         setWorkflowSaveUncertain(true);
         setWorkflows(null);
         setWorkflowListError(null);
@@ -575,6 +672,7 @@ function StudioWorkspace() {
       } else {
         handleSessionError(caught);
         setWorkflowSaveError(errorMessage(caught));
+        setLocalSubmission(current => current ? { ...current, phase: "failed", error: errorMessage(caught) } : current);
       }
       return null;
     } finally {
@@ -609,7 +707,7 @@ function StudioWorkspace() {
       let asset = uploadedImage?.file === imageFile ? uploadedImage.asset : null;
       if (!asset) {
         setActionPhase("uploading");
-        asset = await api.uploadImage(imageFile, "IMAGE", token, controller.signal);
+        asset = await api.uploadImage(imageFile, "IMAGE", token, AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]));
         if (!valid()) throw new DOMException("Editor changed", "AbortError");
         setUploadedImage({ file: imageFile, asset });
       }
@@ -623,7 +721,7 @@ function StudioWorkspace() {
     let asset = uploadedPainting?.file === paintingInput.file ? uploadedPainting.asset : null;
     if (!asset) {
       setActionPhase("uploading");
-      asset = await api.uploadImage(paintingInput.file, "PAINTING", token, controller.signal);
+      asset = await api.uploadImage(paintingInput.file, "PAINTING", token, AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]));
       if (!valid()) throw new DOMException("Editor changed", "AbortError");
       setUploadedPainting({ file: paintingInput.file, asset });
     }
@@ -649,6 +747,15 @@ function StudioWorkspace() {
     const operation = submissionGate.begin();
     if (operation === null) return;
     setShowNamePrompt(false);
+    setLocalSubmission({ name, createdAt: new Date().toISOString(), sourceModality: workflowEditor.sourceModality!,
+      targetLabel: workflowEditor.operations.map(operation => modalityLabels[operation.outputModality] || operation.displayName).join(" → "),
+      file: workflowEditor.sourceModality === "IMAGE" ? imageFile : paintingInput?.kind === "upload" ? paintingInput.file : null,
+      previewUrl: paintingInput?.kind === "catalog" ? paintingInput.painting.image?.contentUrl ?? null : null,
+      text: textSource, phase: "pending", error: null, creationId: null, detail: null });
+    creationPageNumberRef.current = 0;
+    historyPageSizeRef.current = CREATION_PAGE_SIZE - 1;
+    if (creationPageNumber !== 0) setCreationPage(null);
+    setCreationPageNumber(0);
     const epoch = editorEpoch.current;
     const controller = new AbortController();
     actionController.current = controller;
@@ -665,7 +772,7 @@ function StudioWorkspace() {
       setActionPhase("submitting");
       creationPostStarted = true;
       submissionGate.markDispatched(operation);
-      const acknowledgement = await api.submitCreation({ workflowId: saved.workflowId, source }, token, controller.signal);
+      const acknowledgement = await api.submitCreation({ workflowId: saved.workflowId, source }, token, AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]));
       // A real ACK resolves this submission even if the editor changed. Never bind
       // its results to a different context, and never use a history list as an ACK.
       if (isCurrentSession(sessionIdentity)) submissionGate.acknowledge(operation);
@@ -673,12 +780,17 @@ function StudioWorkspace() {
       const acknowledged: AcknowledgedExecution = { creationId: acknowledgement.creationId, workflowId: saved.workflowId, epoch, graph, source, detail: null };
       executionRef.current = acknowledged;
       setCurrentExecution(acknowledged);
+      historyPageSizeRef.current = CREATION_PAGE_SIZE;
+      setLocalSubmission(current => current ? { ...current, creationId: acknowledgement.creationId, phase: "accepted" } : current);
       startPolling(acknowledgement.creationId, "current", epoch);
       void refreshCreations();
     } catch (caught) {
       const rejected = caught instanceof ApiError && creationAdmissionRejected(caught);
       if (creationPostStarted && rejected) submissionGate.rejectBeforeAdmission(operation);
       if (!valid()) return;
+      setLocalSubmission(current => current ? { ...current,
+        phase: creationPostStarted && !rejected ? "uncertain" : "failed",
+        error: creationPostStarted && !rejected ? "提交结果待确认，请读取作品列表核对，不要重复提交。" : errorMessage(caught) } : current);
       if (creationPostStarted && !rejected) {
         setActionError("创作提交结果暂时无法确认。不会自动重试；切换流程或刷新作品列表也不能证明请求被拒绝。");
       } else {
@@ -825,6 +937,24 @@ function StudioWorkspace() {
   }, [actionPhase, selectedRunStep, updateEditor, workflowEditor, workflowSaveUncertain]);
 
 
+  const acknowledgedSummary = localSubmission?.creationId
+    ? creationPage?.items.find(item => item.creationId === localSubmission.creationId) : null;
+  const localStatus = localSubmission?.detail && acknowledgedSummary
+    ? mergeCreationObservation(localSubmission.detail, acknowledgedSummary).status
+    : localSubmission?.detail?.status ?? acknowledgedSummary?.status ?? "QUEUED";
+  const localStatusLabel = localSubmission?.phase === "accepted" ? statusLabels[localStatus] || "状态待确认"
+    : localSubmission?.phase === "uncertain" ? "结果待确认"
+    : localSubmission?.phase === "failed" ? "提交未完成" : actionLabels[actionPhase];
+  const showLocalCard = Boolean(localSubmission && creationPageNumber === 0);
+  const historyItems = (creationPage?.items ?? [])
+    .filter(item => !deletedIds.current.has(item.creationId) && (!showLocalCard || item.creationId !== localSubmission?.creationId))
+    .slice(0, CREATION_PAGE_SIZE - (showLocalCard ? 1 : 0));
+  const deleteButton = (creation: Pick<CreationSummary, "creationId" | "workflowName" | "status">) => <button
+    className="creation-delete" type="button" disabled={Boolean(deletingId) || !canDeleteHistory(creation.status)}
+    aria-label={`删除记录：${creation.workflowName || "未命名创作"}`}
+    title={canDeleteHistory(creation.status) ? "删除历史记录" : "请等待执行结束后删除记录"}
+    onClick={() => void deleteHistory(creation)}>{deletingId === creation.creationId ? <PendingIndicator /> : null}删除记录</button>;
+
   return (
     <div className="studio-layout studio-layout-redesigned">
       {loadingDiscovery ? <LoadingStatus label="正在确认创作能力，暂不能执行" onRetry={() => setDiscoveryAttempt(value => value + 1)} /> : discoveryError ? <StatePanel compact kind="error" title="创作能力暂时无法确认" description={discoveryError} actionLabel="重新读取能力" onAction={() => setDiscoveryAttempt(value => value + 1)} /> : null}
@@ -834,6 +964,7 @@ function StudioWorkspace() {
         disabled={actionPhase !== "idle"}
         editingDisabled={!capabilities || loadingDiscovery || workflowSaveUncertain || workflowLoadState !== "ready"}
         executing={actionPhase !== "idle"}
+        executionLabel={actionLabels[actionPhase]}
         executionDisabledReason={executionDisabledReason}
         sourceBody={sourceBody}
         operationBody={operationBody}
@@ -860,6 +991,12 @@ function StudioWorkspace() {
       {actionError ? <p className="inline-error studio-wide-error" role="alert">{actionError}</p> : null}
       {submissionUncertain ? <p className="studio-reason studio-wide-error" role="status">提交结果未确认：本登录会话已暂停新的创作提交，编辑、新建和读取历史不会解除保护。现有接口不能凭空列表确认请求失败。离开页面只停止等待，不会取消后台创作；刷新或其他标签页尚无跨页幂等保证，请勿据此重发。</p> : null}
 
+      {localSubmission ? <div className="studio-reason studio-current-status" role="status">
+        <span><strong>{localSubmission.name}</strong> · {localStatusLabel}{localSubmission.phase === "accepted" && ["timeout", "error", "unknown"].includes(pollState) ? " · 自动更新已暂停，可查看作品重新读取" : ""}</span>
+        {localSubmission.creationId ? <button className="button" type="button"
+          onClick={() => void openCreation(localSubmission.creationId!)}>查看本次作品</button> : null}
+      </div> : null}
+
       <section className="studio-creations" aria-labelledby="my-creations-title">
         <div className="section-heading section-heading-left studio-list-heading">
           <div><h2 id="my-creations-title">我的作品</h2><p>每一条记录保存本轮输入和每一步实际产出的结果。</p></div>
@@ -867,29 +1004,53 @@ function StudioWorkspace() {
         </div>
         {creationError ? <p className="inline-error" role="alert">{creationError}</p> : null}
         {creationReadStale ? <p className="studio-reason" role="status">当前卡片与详情展示的是上次成功读取的状态，可能已经更新；请使用“刷新”或“刷新详情”核对。</p> : null}
-        {loadingCreations && !creationPage ? <LoadingSection label="正在读取我的作品" onRetry={() => void refreshCreations()}><CreationGridSkeleton /></LoadingSection> : null}
+        {loadingCreations && !creationPage && !showLocalCard ? <LoadingSection label="正在读取我的作品" onRetry={() => void refreshCreations()}><CreationGridSkeleton /></LoadingSection> : null}
         {loadingCreations && creationPage ? <LoadingStatus label={creationPage.page === creationPageNumber ? "正在更新本页作品，暂保留已读取状态" : `正在读取第 ${creationPageNumber + 1} 页，以下仍为第 ${creationPage.page + 1} 页作品`} /> : null}
-        {creationPage?.items.length ? <>
-          <div className="creation-grid">
-            {creationPage.items.map((creation) => <button className="creation-card glass-panel" type="button" key={creation.creationId} onClick={() => void openCreation(creation.creationId)}>
+        {showLocalCard || historyItems.length ? <div className="creation-grid">
+          {showLocalCard && localSubmission ? <article className="creation-card glass-panel creation-current" data-current-creation="true">
+            <div className="creation-card-heading">
+              <span className={`creation-status status-${localSubmission.phase === "accepted" ? localStatus.toLowerCase() : localSubmission.phase}`}>{localStatusLabel}</span>
+              {localSubmission.creationId ? deleteButton({ creationId: localSubmission.creationId, workflowName: localSubmission.name, status: localStatus }) : null}
+            </div>
+            <button className="creation-card-open" type="button" disabled={!localSubmission.creationId}
+              onClick={() => void openCreation(localSubmission.creationId!)}>
+              <h3>{localSubmission.name}</h3>
+              <p>{modalityLabels[localSubmission.sourceModality]} → {localSubmission.targetLabel}</p>
+              <time>{displayTime(localSubmission.createdAt)}</time>
+            </button>
+            {localPreview ? <img className="creation-input-preview" src={localPreview} alt="本次创作输入" />
+              : localSubmission.previewUrl ? <PrivateMediaPreview url={localSubmission.previewUrl} modality="PAINTING" alt="本次创作输入" className="creation-input-preview" />
+              : localSubmission.text ? <p className="creation-input-text">{localSubmission.text}</p> : null}
+            {localSubmission.detail?.steps.map(step => <div className="creation-card-step" key={step.stepId}>
+              <small>第 {step.stepIndex + 1} 步 · {step.status === "SUCCEEDED" ? "已完成" : step.status === "RUNNING" ? "创作中" : step.status === "FAILED" ? "未完成" : "等待执行"}</small>
+              {step.status === "SUCCEEDED" ? <CreationStepOutput step={step} /> : null}
+            </div>)}
+            {localSubmission.error || localSubmission.detail?.errorMessage ? <p className="inline-error">{localSubmission.error || localSubmission.detail?.errorMessage}</p> : null}
+            {deleteError?.id === localSubmission.creationId ? <p className="inline-error" role="alert">{deleteError.message}</p> : null}
+          </article> : null}
+          {historyItems.map(creation => <article className="creation-card glass-panel" key={creation.creationId}>
+            <div className="creation-card-heading">
               <span className={`creation-status status-${creation.status.toLowerCase()}`}>{statusLabels[creation.status] || "状态待确认"}</span>
+              {deleteButton(creation)}
+            </div>
+            <button className="creation-card-open" type="button" onClick={() => void openCreation(creation.creationId)}>
               <h3>{creation.workflowName || "未命名创作"}</h3>
               <p>{modalityLabels[creation.sourceModality] || "输入"} → {modalityLabels[creation.finalModality || ""] || "等待结果"}</p>
               <time>{displayTime(creation.updatedAt)}</time>
-            </button>)}
-          </div>
-          <nav className="pagination" aria-label="我的作品分页">
-            <button className="button" type="button" disabled={loadingCreations || creationPage.first} onClick={() => setCreationPageNumber((current) => Math.max(0, current - 1))}>上一页</button>
-            <span>第 {creationPage.page + 1} / {Math.max(creationPage.totalPages, 1)} 页</span>
-            <button className="button" type="button" disabled={loadingCreations || creationPage.last} onClick={() => setCreationPageNumber((current) => current + 1)}>下一页</button>
-          </nav>
-        </> : !loadingCreations && !creationError && creationPage ? <StatePanel kind="empty" title="还没有作品" description="配置流程并填写输入后，点击“执行流程”开始创作。每次提交的结果都会在这里显示。" /> : null}
+            </button>
+            {deleteError?.id === creation.creationId ? <p className="inline-error" role="alert">{deleteError.message}</p> : null}
+          </article>)}
+        </div> : !loadingCreations && !creationError && creationPage ? <StatePanel kind="empty" title="还没有作品" description="配置流程并填写输入后，点击“执行流程”开始创作。每次提交的结果都会在这里显示。" /> : null}
+        {creationPage && creationPage.totalElements > 0 ? <nav className="pagination" aria-label="我的作品分页">
+          <button className="button" type="button" disabled={loadingCreations || creationPage.first} onClick={() => setCreationPageNumber(current => Math.max(0, current - 1))}>上一页</button>
+          <span>第 {creationPage.page + 1} / {Math.max(creationPage.totalPages, 1)} 页 · 共 {creationPage.totalElements} 条</span>
+          <button className="button" type="button" disabled={loadingCreations || creationPage.last} onClick={() => setCreationPageNumber(current => current + 1)}>下一页</button>
+        </nav> : null}
       </section>
 
       {detailLoading ? <LoadingStatus label="正在读取历史详情" /> : null}
       {detailError ? <p className="inline-error" role="alert">{detailError}</p> : null}
-      {currentExecution ? <p className="studio-reason" role="status">本次提交已确认{pollState === "polling" ? "，正在读取执行状态" : ""}。<button className="button" type="button" onClick={() => void openCreation(currentExecution.creationId)}>在历史区查看本次执行</button></p> : null}
-      {selectedCreation ? <section className="creation-detail glass-panel" aria-labelledby="creation-detail-title">
+      {selectedCreation ? <section ref={creationDetailRef} tabIndex={-1} className="creation-detail glass-panel" aria-labelledby="creation-detail-title">
         <header className="studio-section-header">
           <div><span>历史创作（独立查看，不改变当前流程）</span><h2 id="creation-detail-title">{selectedCreation.workflowName || "创作详情"}</h2><p>{displayTime(selectedCreation.createdAt)}</p></div>
           <span className={`creation-status status-${selectedCreation.status.toLowerCase()}`}>{statusLabels[selectedCreation.status] || "状态待确认"}</span>
@@ -897,7 +1058,7 @@ function StudioWorkspace() {
         {historyPollState === "polling" ? <p className="polling-note" aria-live="polite">正在等待本轮步骤状态更新。</p> : null}
         <CreationRunHistory creation={selectedCreation} />
         {selectedCreation.errorMessage ? <p className="inline-error" role="alert">{selectedCreation.errorMessage}</p> : null}
-        <div className="creation-detail-actions"><button className="button" type="button" onClick={() => void openCreation(selectedCreation.creationId)}>刷新详情</button></div>
+        <div className="creation-detail-actions">{deleteButton(selectedCreation)}<button className="button" type="button" onClick={() => void openCreation(selectedCreation.creationId)}>刷新详情</button></div>
       </section> : null}
     </div>
   );

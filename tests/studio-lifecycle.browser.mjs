@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {newState,responseFor,id,png,wavFor} from './fixtures/studio-runtime.mjs';
+import {newState,responseFor,id,png,wavFor,creation} from './fixtures/studio-runtime.mjs';
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright');
 const origin=name=>{const u=new URL(process.env[name]);assert.equal(u.protocol,'http:');assert.equal(u.hostname,'127.0.0.1');assert(!u.username&&!u.password&&!u.search&&!u.hash);return u.origin;};
 const web=origin('STUDIO_WEB_URL'),api=origin('STUDIO_API_URL'),output=process.env.STUDIO_BROWSER_OUTPUT;
@@ -22,7 +22,7 @@ async function scenario(name,fn,options={}){
  await context.route('**/*',async route=>{
   const req=route.request(),u=new URL(req.url()),method=req.method();
   if(u.origin===api){
-   const headers={'access-control-allow-origin':web,'access-control-allow-methods':'GET,POST,PUT,OPTIONS','access-control-allow-headers':'authorization,content-type','cache-control':'no-store'};
+   const headers={'access-control-allow-origin':web,'access-control-allow-methods':'GET,POST,PUT,DELETE,OPTIONS','access-control-allow-headers':'authorization,content-type','cache-control':'no-store'};
    if(method==='OPTIONS')return route.fulfill({status:204,headers});
    const response=responseFor(state,method,u,req.postData()?.startsWith('{')?req.postDataJSON():null);
    if(response.delayMs)await sleep(response.delayMs);
@@ -49,7 +49,7 @@ async function scenario(name,fn,options={}){
  const choose=async(n=90)=>{await page.getByRole('button',{name:'从画廊选择',exact:true}).click();await page.locator('.gallery-picker-results').getByRole('button',{name:new RegExp(`合成国画${n}`)}).click();};
  const prompt=async()=>{await execute().click();await modal().waitFor();return modal();};
  const run=async(name='合成已确认执行')=>{const dialog=await prompt();await dialog.getByLabel('本次名称',{exact:true}).fill(name);await dialog.getByRole('button',{name:'开始执行',exact:true}).click();};
- const history=async(n=11)=>{await page.locator('.creation-card').filter({hasText:`合成历史${n}`}).click();await page.locator('#creation-detail-title').filter({hasText:`合成历史${n}`}).waitFor();};
+ const history=async(n=11)=>{await page.locator('.creation-card').filter({hasText:`合成历史${n}`}).locator('.creation-card-open').click();await page.locator('#creation-detail-title').filter({hasText:`合成历史${n}`}).waitFor();};
  const logout=async()=>{await page.getByRole('button',{name:'退出',exact:true}).click();await page.locator('.workflow-designer').waitFor({state:'detached'});};
  const audioReady=async(locator=node().locator('audio'))=>{await locator.waitFor();await locator.evaluate(a=>new Promise((resolve,reject)=>{if(a.readyState>=1)return resolve();a.addEventListener('loadedmetadata',resolve,{once:true});a.addEventListener('error',()=>reject(Error('Fixture WAV decode failed')),{once:true});}));};
  const shot=async suffix=>page.screenshot({path:`${output}/${name}-${suffix}.png`,fullPage:false});
@@ -62,6 +62,81 @@ async function scenario(name,fn,options={}){
  finally{record.workflowWrites=state.workflowWrites;record.submissions=state.submissionCount;record.uploads=state.uploadCount||0;record.requests=state.requests;await context.close();await writeFile(`${output}/BROWSER_RESULT.json`,JSON.stringify(result,null,2));console.log(`${record.status} ${name}${record.error?' '+record.error.split('\n')[0]:''}`);}
 }
 try{
+ for(const width of [1440,390])await scenario(`history-instant-card-${width}`,async({page,state,record,configure,run,shot})=>{
+  await configure('text');await page.getByLabel('画面描述').fill('命名后立即出现的山水输入');
+  await run('正在创作的新作品');
+  const card=page.locator('[data-current-creation]');await card.getByRole('heading',{name:'正在创作的新作品'}).waitFor();
+  assert.equal(state.submissionCount,0,'Card is visible before workflow save finishes');
+  assert.match(await card.innerText(),/准备中/);assert.match(await card.innerText(),/命名后立即出现/);
+  await shot('pending');await until(()=>state.submissionCount===1,'Only one creation POST');
+  await until(()=>card.innerText().then(t=>t.includes('创作中')),'Card follows real RUNNING state despite failed list reads');
+  assert.equal(await page.locator('.creation-card').filter({hasText:'正在创作的新作品'}).count(),1);
+  assert(await card.getByRole('button',{name:/删除记录/}).isDisabled());
+  const layout=await page.evaluate(()=>({designer:document.querySelector('.workflow-designer').getBoundingClientRect().bottom,stripTop:document.querySelector('.studio-current-status').getBoundingClientRect().top,stripBottom:document.querySelector('.studio-current-status').getBoundingClientRect().bottom,history:document.querySelector('.studio-creations').getBoundingClientRect().top,overflow:document.documentElement.scrollWidth>innerWidth}));
+  assert(layout.designer<=layout.stripTop&&layout.stripBottom<=layout.history);assert(!layout.overflow);
+  state.creations[0].status='SUCCEEDED';state.creations[0].steps[0].status='SUCCEEDED';
+  await until(()=>card.locator('.creation-card-step img').count().then(n=>n===1),'Completed step appears on current card');
+  await page.getByRole('button',{name:'查看本次作品',exact:true}).click();await page.getByRole('heading',{name:'正在创作的新作品',exact:true}).last().waitFor();
+  assert(await page.locator('.creation-detail').evaluate(e=>e.getBoundingClientRect().top>=0&&e.getBoundingClientRect().top<innerHeight));
+  assert.equal(state.submissionCount,1);record.checks={immediateCard:true,independentOfList:true,stateAndOutputUpdated:true,statusStripPosition:layout,detailLocated:true};
+ },{width,height:width===390?844:1000,delaySave:1200,delaySubmit:200,running:true,listFailure:true});
+ await scenario('history-paging-and-submit-from-page-two',async({page,state,record,configure,run})=>{
+  assert.equal(await page.locator('.creation-card').count(),6);
+  await page.getByRole('button',{name:'下一页',exact:true}).click();await page.getByText(/第 2 \/ 3 页/).waitFor();assert.equal(await page.locator('.creation-card').count(),6);
+  await configure('text');await page.getByLabel('画面描述').fill('第二页提交');await run('第二页的新作品');
+  await page.locator('[data-current-creation] h3').waitFor();assert.equal(await page.locator('[data-current-creation] h3').innerText(),'第二页的新作品');
+  await until(()=>state.submissionCount===1,'Submitted');await until(()=>page.locator('.creation-status.status-succeeded').count().then(n=>n>0),'Read cards');
+  await until(()=>page.locator('.pagination').innerText().then(t=>t.includes('共 14 条')),'First page contains server new record');
+  assert.equal(await page.locator('.creation-card').count(),6);assert.equal(await page.locator('.creation-card').filter({hasText:'第二页的新作品'}).count(),1);
+  assert(state.requests.filter(r=>r.path==='/api/v1/me/creations').every(r=>/size=[56]/.test(r.query)));
+  record.checks={sixPerPage:true,returnedToFirst:true,noDuplicate:true};
+ },{creations:Array.from({length:13},(_,i)=>creation(20+i)),delaySave:300});
+ await scenario('history-pending-pagination-keeps-every-record',async({page,state,record,configure,run})=>{
+  await configure('text');await page.getByLabel('画面描述').fill('等待保存');await run('准备中的记录');
+  await until(()=>page.locator('.creation-card').count().then(n=>n===6),'Pending card occupies one slot');
+  await until(()=>page.getByRole('button',{name:'下一页',exact:true}).isEnabled(),'Five server records fetched');
+  await page.getByRole('button',{name:'下一页',exact:true}).click();await page.getByText(/第 2 \/ 2 页/).waitFor();
+  assert.equal(await page.locator('.creation-card h3').allTextContents().then(t=>t.join(',')),'合成历史25,合成历史26');
+  assert.equal(state.submissionCount,0);record.checks={pendingSlotIncludedInPagination:true,sixthRecordAccessible:true};
+ },{creations:Array.from({length:7},(_,i)=>creation(20+i)),delaySave:4000});
+ await scenario('history-slow-upload-visible',async({page,state,record,configure,run})=>{
+  await configure('image');await page.locator('input[type=file]').first().setInputFiles({name:'fixture.png',mimeType:'image/png',buffer:png});
+  await run('上传中的画作');const card=page.locator('[data-current-creation]');await until(()=>card.innerText().then(t=>t.includes('上传中')),'Upload phase visible');
+  assert.equal(state.submissionCount,0);await card.locator('img.creation-input-preview').waitFor();
+  await until(()=>state.submissionCount===1,'Submit only after upload');assert.equal(state.uploadCount,1);record.checks={uploadPhase:true,inputPreview:true,noEarlyPost:true};
+ },{delayUpload:1200});
+ await scenario('history-delete-cancel-reload-and-last-page',async({page,state,record})=>{
+  const card=page.locator('.creation-card').filter({hasText:'合成历史20'});
+  page.removeAllListeners('dialog');page.once('dialog',d=>d.dismiss());await card.getByRole('button',{name:/删除记录/}).click();assert.equal(state.deleteCount||0,0);assert.equal(await page.locator('.creation-detail').count(),0);
+  page.on('dialog',d=>d.accept());await page.getByRole('button',{name:'下一页',exact:true}).click();await page.getByText(/第 2 \/ 2 页/).waitFor();
+  await page.locator('.creation-card').getByRole('button',{name:/删除记录/}).click();await page.getByText(/第 1 \/ 1 页/).waitFor();assert.equal(await page.locator('.creation-card').count(),6);
+  await page.reload();await page.locator('.creation-card').first().waitFor();assert.equal(await page.locator('.creation-card').filter({hasText:'合成历史26'}).count(),0);
+  assert.equal(state.deleteCount,1);record.checks={cancelNoRequest:true,noDetailSideEffect:true,lastPageFallback:true,reloadPersists:true};
+ },{creations:Array.from({length:7},(_,i)=>creation(20+i))});
+ await scenario('history-delete-failure-retains-record',async({page,state,record})=>{
+  const card=page.locator('.creation-card').filter({hasText:'合成历史11'});await card.getByRole('button',{name:/删除记录/}).click();await card.getByRole('alert').waitFor();
+  assert.match(await card.innerText(),/合成删除故障/);assert.equal(state.deleteCount,1);assert.equal(await page.locator('.creation-card').count(),2);assert.equal(await page.locator('.creation-detail').count(),0);record.checks={failurePreserved:true,deleteDidNotOpenDetail:true};
+ },{deleteFailure:true});
+ await scenario('history-delete-fences-late-detail-and-list',async({page,state,record})=>{
+  const card=page.locator('.creation-card').filter({hasText:'合成历史11'});state.delayHistory=1200;state.delayList=1200;
+  await card.locator('.creation-card-open').click();await page.getByRole('button',{name:'刷新',exact:true}).click();
+  await until(()=>state.detailReads===1,'Read began before deletion');await card.getByRole('button',{name:/删除记录/}).click();
+  await until(()=>page.locator('.creation-card').filter({hasText:'合成历史11'}).count().then(n=>n===0),'Deleted card removed');
+  await sleep(1500);assert.equal(await page.locator('.creation-detail').count(),0);assert.equal(await page.locator('.creation-card').filter({hasText:'合成历史11'}).count(),0);assert.equal(state.deleteCount,1);record.checks={lateDetailDiscarded:true,lateListDiscarded:true};
+ },{ignoreAbort:true});
+ await scenario('history-edited-canvas-keeps-card-updating',async({page,state,record,configure,choose,run,node})=>{
+  await configure();await choose();await run('独立更新的作品');await until(()=>state.detailReads>=1,'Initial state read');
+  await page.locator('input[type=range]').fill('17');state.creations[0].status='SUCCEEDED';state.creations[0].steps[0].status='SUCCEEDED';
+  await until(()=>page.locator('[data-current-creation] audio').count().then(n=>n===1),'Card updates after canvas edit');
+  assert.equal(await node().locator('audio').count(),0,'Old output never enters modified canvas');assert.equal(state.submissionCount,1);record.checks={cardIndependentOfEditor:true,canvasProtected:true};
+ },{running:true});
+ await scenario('history-delete-current-clears-detail-and-status',async({page,state,record,configure,run})=>{
+  await configure('text');await page.getByLabel('画面描述').fill('可删除的完成作品');await run('删除本次作品');
+  const card=page.locator('[data-current-creation]');await until(()=>card.getByRole('button',{name:/删除记录/}).isEnabled(),'Finished card deletable');
+  await page.getByRole('button',{name:'查看本次作品',exact:true}).click();await page.locator('.creation-detail').waitFor();
+  await page.locator('.creation-detail-actions').getByRole('button',{name:/删除记录/}).click();
+  await page.locator('[data-current-creation]').waitFor({state:'detached'});assert.equal(await page.locator('.creation-detail').count(),0);assert.equal(await page.locator('.studio-current-status').count(),0);record.checks={currentCleared:true,detailCleared:true};
+ });
  await scenario('simple-toolbar-and-empty-inputs',async({page,state,record,execute,configure,add,clear})=>{
   assert.equal(await page.getByRole('button',{name:'打开流程',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'保存流程',exact:true}).count(),0);assert(await execute().isDisabled());
   await add('文字');await page.getByLabel('画面描述').fill('只有输入还不能执行');assert(await execute().isDisabled());await add('国画');assert(await execute().isEnabled());
@@ -100,7 +175,7 @@ try{
  });
  await scenario('audio-duration-change-invalidates-current-only',async({page,state,record,configure,choose,run,node,audioReady})=>{
   await configure();await choose();await run();await audioReady();assert.equal(await node().locator('audio').evaluate(a=>a.duration),10);
-  await page.locator('input[type=range]').fill('23');assert.equal(await node().locator('audio').count(),0);await page.locator('.creation-card').filter({hasText:'合成已确认执行'}).click();await page.locator('.creation-step-history audio').waitFor();assert.equal(await page.locator('.creation-step-history').getByText('本次结果记录时长：10 秒',{exact:true}).count(),1);assert.equal(state.submissionCount,1);record.checks.newDurationDoesNotRewritePastAudio=true;
+  await page.locator('input[type=range]').fill('23');assert.equal(await node().locator('audio').count(),0);await page.locator('.creation-card').filter({hasText:'合成已确认执行'}).locator('.creation-card-open').click();await page.locator('.creation-step-history audio').waitFor();assert.equal(await page.locator('.creation-step-history').getByText('本次结果记录时长：10 秒',{exact:true}).count(),1);assert.equal(state.submissionCount,1);record.checks.newDurationDoesNotRewritePastAudio=true;
  });
  await scenario('invalid-file-blocked-before-naming',async({page,state,record,configure,execute,modal})=>{
   await configure('image');const input=page.locator('.workflow-node-source input[type=file]');
@@ -112,7 +187,7 @@ try{
   const file={name:'synthetic.png',mimeType:'image/png',buffer:png};await page.locator('.workflow-painting-input input[type=file]').setInputFiles(file);const preview=page.getByAltText('待使用的本地国画预览');await preview.waitFor();const before=await preview.getAttribute('src');
   await prompt();await modal().getByRole('button',{name:'取消',exact:true}).click();assert.equal(state.uploadCount||0,0);assert.equal(state.workflowWrites,0);assert.equal(await preview.getAttribute('src'),before);
   await run('上传国画配乐');await audioReady();assert.deepEqual(state.lastSubmitted.source,{modality:'PAINTING',assetId:id(60)});assert.equal(state.uploadCount,1);assert.equal(await node().locator('audio').evaluate(a=>a.duration),3);assert.equal(await preview.getAttribute('src'),before);
-  await page.reload();await page.locator('.creation-card').filter({hasText:'上传国画配乐'}).click();await audioReady(page.locator('.creation-step-history audio'));assert.equal(state.submissionCount,1);assert.equal(state.uploadCount,1);record.checks={deferredUpload:true,filePreserved:true,ownedAssetIdentity:true,refreshNoResubmit:true};
+  await page.reload();await page.locator('.creation-card').filter({hasText:'上传国画配乐'}).locator('.creation-card-open').click();await audioReady(page.locator('.creation-step-history audio'));assert.equal(state.submissionCount,1);assert.equal(state.uploadCount,1);record.checks={deferredUpload:true,filePreserved:true,ownedAssetIdentity:true,refreshNoResubmit:true};
  });
  await scenario('source-replacement-clears-result-and-identities',async({page,state,record,configure,choose,run,node,audioReady})=>{
   await configure();await choose();await run();await audioReady();await page.getByRole('button',{name:'更换国画',exact:true}).click();assert.equal(await node().locator('audio').count(),0);
@@ -120,14 +195,14 @@ try{
   await configure();await choose(91);await run('第三次画廊');await audioReady();assert.deepEqual(state.lastSubmitted.source,{modality:'PAINTING',paintingId:id(91)});assert.equal(state.uploadCount,1);assert.equal(state.submissionCount,3);record.checks.noMixedSourceIdentities=true;
  });
  for(const rejected of [{status:422,code:'CREATION_SOURCE_INVALID'},{status:503,code:'CREATION_QUEUE_FULL'}])await scenario(`definitive-${rejected.status}-rejection-allows-deliberate-retry`,async({page,state,record,configure,choose,run,execute})=>{
-  await configure();await choose();await run();await page.getByText('合成请求明确拒绝',{exact:true}).waitFor();await until(()=>execute().isEnabled(),'Known rejection should permit deliberate retry');assert.equal(state.submissionCount,1);assert.equal(await page.getByText(/本登录会话已暂停新的创作提交/).count(),0);record.checks={knownRejection:true,noAutomaticRetry:true};
+  await configure();await choose();await run();await page.getByRole('alert').filter({hasText:'合成请求明确拒绝'}).waitFor();await until(()=>execute().isEnabled(),'Known rejection should permit deliberate retry');assert.equal(state.submissionCount,1);assert.equal(await page.getByText(/本登录会话已暂停新的创作提交/).count(),0);record.checks={knownRejection:true,noAutomaticRetry:true};
  },{rejectSubmit:rejected});
  await scenario('definitive-save-rejection-preserves-input-and-no-creation',async({page,state,record,configure,run,execute})=>{
-  await configure('text');await page.getByLabel('画面描述').fill('修正前后均保留');await run('可修正的名字');await page.getByText('合成流程明确拒绝',{exact:true}).waitFor();assert(await execute().isEnabled());assert.equal(await page.getByLabel('画面描述').inputValue(),'修正前后均保留');assert.equal(state.workflowWrites,1);assert.equal(state.submissionCount,0);state.rejectSave=false;await run('修正后');await until(()=>state.submissionCount===1,'Explicit retry after definitive rejection');record.checks.validationFailureDoesNotBecomeUnknown=true;
+  await configure('text');await page.getByLabel('画面描述').fill('修正前后均保留');await run('可修正的名字');await page.getByRole('alert').filter({hasText:'合成流程明确拒绝'}).waitFor();assert(await execute().isEnabled());assert.equal(await page.getByLabel('画面描述').inputValue(),'修正前后均保留');assert.equal(state.workflowWrites,1);assert.equal(state.submissionCount,0);state.rejectSave=false;await run('修正后');await until(()=>state.submissionCount===1,'Explicit retry after definitive rejection');record.checks.validationFailureDoesNotBecomeUnknown=true;
  },{rejectSave:true});
  await scenario('unknown-save-recovery-only-explicit-and-preserves-input',async({page,state,record,configure,run,execute})=>{
   await configure('text');await page.getByLabel('画面描述').fill('保存响应丢失仍保留');await run('待核对本轮');await until(()=>state.workflowWrites===1,'Save received');await page.getByText(/流程准备结果未确认/).first().waitFor();assert(await execute().isDisabled());assert.equal(state.submissionCount,0);
-  await page.getByRole('button',{name:'读取待核对流程',exact:true}).click();await page.getByText('待核对本轮',{exact:true}).waitFor();assert(await execute().isDisabled(),'A list read is not an ACK');assert.equal(state.workflowWrites,1);
+  await page.getByRole('button',{name:'读取待核对流程',exact:true}).click();await page.locator('.workflow-small-panel').getByText('待核对本轮',{exact:true}).waitFor();assert(await execute().isDisabled(),'A list read is not an ACK');assert.equal(state.workflowWrites,1);
   const row=page.locator('li').filter({hasText:'待核对本轮'});await row.getByRole('button',{name:/使用此流程继续/}).click();await until(()=>execute().isEnabled(),'Explicit recovery permits a later execution');assert.equal(await page.getByLabel('画面描述').inputValue(),'保存响应丢失仍保留');assert.equal(state.submissionCount,0);
   state.loseSaveAcknowledgement=false;await run('核对后执行');await until(()=>state.submissionCount===1,'Explicit confirmation after recovery');assert.equal(state.workflowWrites,2);record.checks={unknownNotRetried:true,listDoesNotAcknowledge:true,explicitRecoveryPreservesInput:true};
  },{loseSaveAcknowledgement:true});
@@ -140,7 +215,7 @@ try{
   await configure();await choose();await run();await until(()=>state.submissionCount===1,'Submission received');assert.equal(state.detailReads,0);assert(await execute().isDisabled());await execute().evaluate(e=>e.click());assert.equal(state.submissionCount,1);await audioReady();assert(await execute().isEnabled());record.checks.ackAwaitingObservationKeepsButtonClosed=true;
  });
  for(const reverse of [false,true])await scenario(reverse?'late-history-cannot-regress-terminal':'late-poll-cannot-regress-terminal',async({page,state,record,configure,choose,run,node,execute,audioReady})=>{
-  await configure();await choose();state.detailDelays=[reverse?2200:1300,0];await run();const view=page.getByRole('button',{name:'在历史区查看本次执行',exact:true});if(reverse)await view.click();await until(()=>state.detailReads>=1,'Old RUNNING read started');state.creations[0].status='SUCCEEDED';state.creations[0].steps[0].status='SUCCEEDED';if(!reverse)await view.click();await audioReady();await sleep(1450);assert.equal(await node().locator('audio').count(),1);assert(await execute().isEnabled());assert.equal(await page.locator('.creation-detail > header .creation-status').innerText(),'已完成');assert.equal(state.submissionCount,1);record.checks.terminalObservationDoesNotRegress=true;
+  await configure();await choose();state.detailDelays=[reverse?2200:1300,0];await run();const view=page.getByRole('button',{name:'查看本次作品',exact:true});if(reverse)await view.click();await until(()=>state.detailReads>=1,'Old RUNNING read started');state.creations[0].status='SUCCEEDED';state.creations[0].steps[0].status='SUCCEEDED';if(!reverse)await view.click();await audioReady();await sleep(1450);assert.equal(await node().locator('audio').count(),1);assert(await execute().isEnabled());assert.equal(await page.locator('.creation-detail > header .creation-status').innerText(),'已完成');assert.equal(state.submissionCount,1);record.checks.terminalObservationDoesNotRegress=true;
  },{running:true,ignoreAbort:true});
  await scenario('unknown-run-status-unlocks-only-with-new-input',async({page,state,record,configure,choose,run,execute})=>{
   await configure();await choose();await run();await until(()=>state.detailReads>=1,'Unknown run observed');assert(await execute().isDisabled());await page.locator('input[type=range]').fill('11');assert(await execute().isEnabled());assert.equal(state.submissionCount,1);record.checks.unknownStatusIsNotTerminal=true;
@@ -149,7 +224,7 @@ try{
   await configure();await choose();await run();await until(()=>state.detailReads>=1,'Detail read');await sleep(200);assert.equal(await node().locator('img,audio').count(),0);assert.equal(await page.locator('input[type=range]').count(),1);record.checks.modalityAndOperationMustMatch=true;
  },{mismatchedStep:true});
  await scenario('late-history-and-poll-after-clear-are-rejected',async({page,state,record,configure,choose,run,clear,node})=>{
-  await configure();state.delayHistory=600;await page.locator('.creation-card').filter({hasText:'合成历史11'}).click();await clear();await sleep(750);assert.equal(await page.locator('#creation-detail-title').count(),0);
+  await configure();state.delayHistory=600;await page.locator('.creation-card').filter({hasText:'合成历史11'}).locator('.creation-card-open').click();await clear();await sleep(750);assert.equal(await page.locator('#creation-detail-title').count(),0);
   await configure();await choose();await run();await until(()=>state.detailReads>=2,'Current poll began');await clear();await sleep(750);assert.equal(await node().count(),0);assert.equal(state.submissionCount,1);record.checks.delayedReadsCannotRestoreClearedContext=true;
  },{ignoreAbort:true});
  await scenario('late-save-after-logout-does-not-submit',async({page,state,record,configure,run,logout})=>{

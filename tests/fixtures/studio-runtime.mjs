@@ -20,13 +20,13 @@ export function workflow(n, music=true) {
 export function creation(n, music=false, workflowNo=1) {
   return {creationId:id(n),workflowId:id(workflowNo),workflowName:`合成历史${n}`,status:'SUCCEEDED',errorCode:null,errorMessage:null,recoveryState:'NONE',sourceModality:music?'PAINTING':'TEXT_DESCRIPTION',sourcePaintingId:music?id(90):null,sourceAssetId:null,sourcePaintingTitle:music?'合成国画90':null,sourcePaintingContentUrl:music?`/api/v1/assets/${imageId}/content`:null,sourceText:music?null:'离线合成山水输入',sourceAssetContentUrl:null,sourceAssetDownloadUrl:null,finalModality:music?'AUDIO':'PAINTING',finalAssetId:music?audioId:imageId,finalAssetContentUrl:`/api/v1/assets/${music?audioId:imageId}/content`,finalAssetDownloadUrl:null,finalText:null,finalPoem:null,createdAt:at,updatedAt:at,startedAt:at,finishedAt:at,retryVersion:0,retryAvailable:false,retryBlockedReason:null,executionAttemptCount:1,steps:[{stepId:id(n+100),stepIndex:0,nodeId:'step1',operation:music?'PAINTING_TO_MUSIC':'TEXT_TO_PAINTING',inputModality:music?'PAINTING':'TEXT_DESCRIPTION',outputModality:music?'AUDIO':'PAINTING',status:'SUCCEEDED',attemptCount:1,errorCode:null,errorMessage:null,outputAssetId:music?audioId:imageId,outputAssetContentUrl:`/api/v1/assets/${music?audioId:imageId}/content`,outputAssetDownloadUrl:null,outputText:null,outputPoem:null,requestedDurationSeconds:music?10:null,startedAt:at,finishedAt:at}]};
 }
-export const pageOf=items=>({items,page:0,size:12,totalElements:items.length,totalPages:items.length?1:0,first:true,last:true,hasNext:false});
+export const pageOf=(items,page=0,size=12)=>({items:items.slice(page*size,(page+1)*size),page,size,totalElements:items.length,totalPages:Math.ceil(items.length/size),first:page===0,last:(page+1)*size>=items.length,hasNext:(page+1)*size<items.length});
 export function newState(options={}) {
   return {workflows:[workflow(1,options.music!==false),workflow(2,true)],creations:[creation(11),creation(12,true)],submissionCount:0,workflowWrites:0,detailReads:0,requests:[],nextId:300,...options};
 }
 export function responseFor(state, method, url, body) {
   const p=url.pathname;
-  state.requests.push({method,path:p});
+  state.requests.push({method,path:p,query:url.search});
   const json=(body,status=200,delayMs=0)=>({status,body,delayMs,contentType:'application/json'});
   if(p==='/api/user/profile')return json({success:true,data:{id:900001,username:'synthetic-studio',fullName:'合成验收账户',email:'synthetic@example.invalid',createdAt:null,updatedAt:null}});
   if(p==='/api/v1/workflow/node-types'&&state.legacyMusic){const copy=structuredClone(capabilities);copy.operations.find(x=>x.code==='PAINTING_TO_MUSIC').executionConstraint='CATALOG_PAINTING_SINGLE_TRANSFORM_ONLY';return json(copy);}
@@ -43,10 +43,20 @@ export function responseFor(state, method, url, body) {
     if(state.loseSaveAcknowledgement)return {abort:true,delayMs:state.delaySave||0};
     return json(structuredClone(w),200,state.delaySave||0);
   }
-  if(p==='/api/v1/me/creations')return state.listFailure?json({message:'合成作品列表故障'},503,state.delayList||0):json(pageOf(state.creations),200,state.delayList||0);
+  if(p==='/api/v1/me/creations')return state.listFailure?json({message:'合成作品列表故障'},503,state.delayList||0):json(pageOf(state.creations.filter(c=>!c.historyDeleted),Number(url.searchParams.get('page')||0),Number(url.searchParams.get('size')||12)),200,state.delayList||0);
+  if(p.startsWith('/api/v1/me/creations/')&&method==='DELETE'){
+    state.deleteCount=(state.deleteCount||0)+1;
+    if(state.deleteFailure)return json({message:'合成删除故障'},503,state.delayDelete||0);
+    const c=state.creations.find(x=>x.creationId===p.split('/').at(-1));
+    if(!c)return json({message:'创作不存在'},404);
+    if(!['SUCCEEDED','FAILED','PARTIAL_SUCCESS'].includes(c.status))return json({message:'作品仍在创作中'},409);
+    c.historyDeleted=true;
+    return {status:204,body:undefined,delayMs:state.delayDelete||0};
+  }
   if(p.startsWith('/api/v1/creations/')&&method==='GET'){
     state.detailReads++;
     const c=state.creations.find(x=>x.creationId===p.split('/').at(-1));
+    if(!c||c.historyDeleted)return json({message:'创作不存在'},404);
     return json(structuredClone(c),200,state.detailDelays?.[state.detailReads-1]??state.delayHistory??0);
   }
   if(p==='/api/v1/creations'&&method==='POST'){
@@ -58,6 +68,7 @@ export function responseFor(state, method, url, body) {
     c.sourceText=body.source?.text??null;c.sourcePaintingId=body.source?.paintingId??null;c.sourceAssetId=body.source?.assetId??null;
     if(c.sourceAssetId){c.sourcePaintingTitle=null;c.sourcePaintingContentUrl=null;c.sourceAssetContentUrl=`/api/v1/assets/${c.sourceAssetId}/content`;}
     if(music)c.steps[0].requestedDurationSeconds=w.graph.nodes[1].parameters.durationSeconds??10;
+    c.sourceModality=body.source.modality;
     if(state.running){c.status='RUNNING';c.steps[0].status='RUNNING';}
     if(state.unknownStatus){c.status='UNRECOGNIZED_NEW_STATE';c.steps[0].status='RUNNING';}
     if(state.mismatchedStep){c.steps[0].operation='TEXT_TO_PAINTING';c.steps[0].inputModality='TEXT_DESCRIPTION';c.steps[0].outputModality='PAINTING';c.steps[0].outputAssetId=imageId;c.steps[0].outputAssetContentUrl=`/api/v1/assets/${imageId}/content`;}
@@ -66,7 +77,7 @@ export function responseFor(state, method, url, body) {
   }
   if(p==='/api/v1/assets/uploads'&&method==='POST'){
     state.uploadCount=(state.uploadCount||0)+1;
-    return json({assetId:id(60),assetType:'IMAGE',semanticType:'PAINTING',sourceType:'USER_UPLOAD',visibility:'PRIVATE',status:'ACTIVE',mimeType:'image/png',fileSize:png.length,width:1,height:1,contentUrl:`/api/v1/assets/${id(60)}/content`,downloadUrl:`/api/v1/assets/${id(60)}/download`,createdAt:at,updatedAt:at});
+    return json({assetId:id(60),assetType:'IMAGE',semanticType:'PAINTING',sourceType:'USER_UPLOAD',visibility:'PRIVATE',status:'ACTIVE',mimeType:'image/png',fileSize:png.length,width:1,height:1,contentUrl:`/api/v1/assets/${id(60)}/content`,downloadUrl:`/api/v1/assets/${id(60)}/download`,createdAt:at,updatedAt:at},200,state.delayUpload||0);
   }
   if(p.startsWith('/api/v1/assets/')){
     if(state.mediaStatus)return json({message:'合成媒体故障'},state.mediaStatus,state.delayMedia||0);

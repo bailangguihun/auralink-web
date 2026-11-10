@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assistantMarkdownLink, assistantVisibleMarkdown, assertAssistantSources } from '../lib/assistant-presentation.ts';
+import { assistantMarkdownLink, assistantVisibleMarkdown, assistantIllustratedSections, assertAssistantSources } from '../lib/assistant-presentation.ts';
 import type { Run } from '../lib/assistant-contracts.ts';
 
 test('Markdown permits only explicit public HTTP links, never executable, private or relative URLs', () => {
@@ -27,4 +27,28 @@ test('Sources require the exact persisted message run and session, not a model c
   assert.throws(() => assertAssistantSources(message, { ...run, id: 'run-b' }, [citation]), /身份/);
   assert.throws(() => assertAssistantSources(message, { ...run, sessionId: 'session-b' }, [citation]), /身份/);
   for (const invalid of [null, '[1]', [1], [{ ...citation, provenance: null }], [{ ...citation, sourceType: 'MODEL_SAID_SO' }]]) assert.throws(() => assertAssistantSources(message, run, invalid), /格式/);
+});
+
+test('Historical choice fences and pretty printed cards stay out of the visible answer', () => {
+  const cards = JSON.stringify([{ id: 'one', title: '确认作者', options: [{id:'a',label:'题款'}, {id:'b',label:'收藏'}] },
+    { id: 'two', title: '深入意象', options: [{id:'a',label:'古树'}, {id:'b',label:'飞鸟'}] }], null, 2).replace('  {\n    "id": "two"', '\n  {\n    "id": "two"');
+  for (const suffix of [cards, `\`\`\`assistant-choices\n${cards}\n\`\`\``, '\`\`\`assistant-choices\n[{"id":"partial"']) {
+    assert.equal(assistantVisibleMarkdown(`画面分析。\n\n${suffix}`), '画面分析。');
+  }
+  assert.match(assistantVisibleMarkdown('题款转录\n\n\`\`\`json\n{"year":1690}\n\`\`\`'), /1690/);
+});
+
+test('Illustrated analysis resolves only bounded crops of the current question attachments', () => {
+  const text = '整体感受。\n\n### 古树与岁月\n![古树](assistant-crop:1,0.1,0.2,0.4,0.5)\n枝干向上伸展。';
+  const sections = assistantIllustratedSections(text, ['private-current-image']);
+  assert.equal(sections[1].image?.id, 'private-current-image');
+  assert.deepEqual(sections[1].image?.crop, { x: 0.1, y: 0.2, width: 0.4, height: 0.5 });
+  assert.match(sections[1].markdown, /枝干/);
+  assert.doesNotMatch(sections[1].markdown, /assistant-crop/);
+  assert.equal(assistantIllustratedSections(text, [])[1].image, undefined);
+  for (const coordinates of ['2,0,0,1,1', '1,0.9,0,0.4,1', '1,-1,0,1,1', '1,0,0,0,1', '1,NaN,0,1,1', 'https://example.com/private']) {
+    assert.equal(assistantIllustratedSections(text.replace('1,0.1,0.2,0.4,0.5', coordinates), ['private-current-image'])[1].image, undefined);
+  }
+  const code = '\`\`\`text\n### heading in code\n\`\`\`';
+  assert.deepEqual(assistantIllustratedSections(code, []), [{ markdown: code }]);
 });

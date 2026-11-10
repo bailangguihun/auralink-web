@@ -87,6 +87,55 @@ try {
       await writeFile(resolve(output, 'RESULT.json'), JSON.stringify(report, null, 2));
     }
   }
+  for (const width of [1440, 390]) await scenario('original-image-navigation-' + width, width, async ({ page, record, shot, overflow }) => {
+    let browserDetailReads = 0;
+    page.on('request', request => { if (request.url() === f.coreUrl + '/api/v1/paintings/' + paintingId) browserDetailReads++; });
+    await page.goto(web + '/community');
+    await page.getByRole('heading', { name: '画里相逢' }).waitFor();
+    assert((await page.title()).includes('社区'));
+    await shot('first-viewport');
+    const reference = page.getByTestId('community-post').locator('.community-reference').first();
+    const image = reference.locator('img');
+    await reference.scrollIntoViewIfNeeded();
+    await image.evaluate(img => img.decode());
+    assert.equal(await image.evaluate(img => img.naturalWidth), 640);
+    assert.equal(await image.evaluate(img => getComputedStyle(img).objectFit), 'contain', 'original is not cropped');
+    assert.equal(browserDetailReads, 0, 'feed images require no extra per-card detail request');
+    record.originalSource = await image.getAttribute('src');
+    await overflow(); await shot('reference');
+    const targets = width === 1440 ? ['.community-reference-media', '.community-reference-title', '.community-reference-open'] : ['.community-reference-open'];
+    for (const selector of targets) {
+      const link = page.getByTestId('community-post').locator('.community-reference').first().locator(selector);
+      assert.equal(await link.getAttribute('href'), '/gallery/' + paintingId);
+      if (width === 390) { await link.focus(); await page.keyboard.press('Enter'); } else await link.click();
+      await page.waitForURL(web + '/gallery/' + paintingId);
+      await page.locator('.detail-info h1').filter({ hasText: '山水清音' }).waitFor();
+      const original = page.locator('[data-artwork-target] img');
+      await original.evaluate(img => img.decode());
+      assert.equal(await original.getAttribute('src'), record.originalSource);
+      await page.locator('[data-artwork-transition-overlay]').waitFor({ state: 'detached' });
+      await page.evaluate(async () => {
+        await Promise.allSettled(document.getAnimations().filter(animation => {
+          const timing = animation.effect?.getComputedTiming();
+          return timing && Number.isFinite(timing.endTime) && timing.endTime < 2000;
+        }).map(animation => animation.finished));
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      });
+      await overflow(); await shot('gallery-' + selector.slice(1));
+      await page.goBack();
+      await page.getByTestId('community-post').locator('.community-reference').first().waitFor();
+    }
+    assert.equal(record.writes.length, 0, 'viewing originals never creates a post');
+  });
+  await scenario('original-image-load-failure', 390, async ({ page, shot, overflow }) => {
+    await page.route('**/api/v1/assets/*/content', route => route.abort('failed'));
+    await page.goto(web + '/community');
+    const reference = page.getByTestId('community-post').locator('.community-reference').first();
+    await reference.scrollIntoViewIfNeeded();
+    await reference.getByText('图像暂不可用', { exact: true }).waitFor();
+    assert.equal(await reference.getByRole('link', { name: '查看画廊原作' }).getAttribute('href'), '/gallery/' + paintingId);
+    await overflow(); await shot('fallback');
+  });
   await scenario('desktop-post-comment-recovery', 1440, async ({ page, record, shot, overflow }) => {
     await page.goto(web + '/community');
     await page.getByRole('heading', { name: '画里相逢' }).waitFor();
@@ -95,10 +144,13 @@ try {
     await page.getByRole('button', { name: '选择画廊国画', exact: true }).click();
     await page.getByRole('button', { name: /山水清音.*隔离测试作者/ }).click();
     await page.getByRole('link', { name: '山水清音', exact: true }).first().waitFor();
+    await page.locator('.community-source img').scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => { const image = document.querySelector('.community-source img'); return image?.complete && image.naturalWidth > 0; });
     await page.getByLabel('分享你的观画感受').fill('第一轮真实页面交互：山水、留白与远处的回声。');
     await page.getByRole('button', { name: '发布帖子', exact: true }).evaluate(button => { button.click(); button.click(); });
     await page.waitForURL('**/community/posts/*');
     await page.getByText('第一轮真实页面交互：山水、留白与远处的回声。', { exact: true }).waitFor();
+    await page.getByTestId('community-post').locator('.community-reference img').evaluate(img => img.decode());
     await page.getByLabel('写下评论').fill('清浅的笔墨，也能让人慢下来。');
     await page.getByRole('button', { name: '发表评论', exact: true }).click();
     await page.getByText('清浅的笔墨，也能让人慢下来。', { exact: true }).waitFor();
@@ -195,6 +247,7 @@ try {
     await page.goto(web + '/community/posts/' + made.data.result.postId);
     await page.getByText('原作已不可查看，引用关系保留。', { exact: true }).waitFor();
     assert.equal(await page.getByRole('link', { name: '山水清音', exact: true }).count(), 0);
+    assert.equal(await page.locator('.community-reference img, .community-reference a').count(), 0);
     await overflow(); await shot('revoked');
     f.state.available = true;
   });

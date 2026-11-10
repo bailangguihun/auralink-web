@@ -36,6 +36,21 @@ test("restricted references discard stale metadata and URL fields", () => {
     { state: "UNAVAILABLE", paintingId: id });
   assert.throws(() => parsePost({ id, content: "incomplete" }));
 });
+test("gallery references accept only the matching logical original image and tolerate old services", () => {
+  const reference = { state: "AVAILABLE", paintingId: id, title: "山水", authorName: "作者", period: "清代" };
+  const image = { assetId: id, contentUrl: `/api/v1/assets/${id}/content`, downloadUrl: `/api/v1/assets/${id}/download`,
+    mimeType: "image/jpeg", width: 600, height: 1200, fileSize: null };
+  assert.deepEqual(parseReference({ ...reference, image }).image, image);
+  assert.equal(parseReference(reference).image, null);
+  for (const contentUrl of ["https://untrusted.invalid/image.jpg", "/root/private.jpg", image.contentUrl + "?token=private", `/api/v1/assets/${id}/download`]) {
+    assert.equal(parseReference({ ...reference, image: { ...image, contentUrl } }).image, null);
+  }
+  for (const state of ["UNAVAILABLE", "UNVERIFIED"]) {
+    assert.deepEqual(parseReference({ ...reference, state, image }), { state, paintingId: id });
+  }
+  assert.deepEqual(parseReference({ ...reference, image: { ...image, width: -1, height: "1200", downloadUrl: "https://untrusted.invalid" } }).image,
+    { ...image, width: null, height: null });
+});
 test("only owner-scoped operation handles survive reload", () => {
   const value = JSON.stringify({ actorId: "101", kind: "post", requestId: id, token: "must not survive parsing", content: "private" });
   assert.deepEqual(readOperation(value, "101"), { actorId: "101", kind: "post", requestId: id });

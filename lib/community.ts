@@ -1,6 +1,7 @@
 import { ApiError, toApiError } from "./api.ts";
+import type { PaintingImage } from "./types.ts";
 
-export type GalleryReference = { state: "AVAILABLE" | "UNAVAILABLE" | "UNVERIFIED"; paintingId: string; title?: string; authorName?: string; period?: string };
+export type GalleryReference = { state: "AVAILABLE" | "UNAVAILABLE" | "UNVERIFIED"; paintingId: string; title?: string; authorName?: string; period?: string; image?: PaintingImage | null };
 export type CommunityPost = {
   id: string; content: string; author: { id: string; displayName: string }; createdAt: string;
   commentCount: number; likeCount: number; liked: boolean; favorited: boolean; galleryReference: GalleryReference | null;
@@ -46,7 +47,21 @@ export function parseReference(value: unknown): GalleryReference {
   const row = object(value), paintingId = id(row.paintingId);
   if (row.state === "UNAVAILABLE" || row.state === "UNVERIFIED") return { state: row.state, paintingId };
   if (row.state !== "AVAILABLE") throw new Error("作品来源尚未确认。");
-  return { state: "AVAILABLE", paintingId, title: string(row.title), authorName: string(row.authorName), period: string(row.period) };
+  let image: PaintingImage | null = null;
+  if (row.image && typeof row.image === "object" && !Array.isArray(row.image)) {
+    const source = row.image as Record<string, unknown>;
+    if (typeof source.assetId === "string" && uuidPattern.test(source.assetId)
+      && source.contentUrl === `/api/v1/assets/${source.assetId}/content`) {
+      const positive = (value: unknown) => Number.isSafeInteger(value) && (value as number) > 0 ? value as number : null;
+      image = {
+        assetId: source.assetId, contentUrl: source.contentUrl,
+        downloadUrl: `/api/v1/assets/${source.assetId}/download`,
+        mimeType: typeof source.mimeType === "string" && /^image\/[a-z0-9.+-]+$/i.test(source.mimeType) ? source.mimeType : "",
+        width: positive(source.width), height: positive(source.height), fileSize: positive(source.fileSize),
+      };
+    }
+  }
+  return { state: "AVAILABLE", paintingId, title: string(row.title), authorName: string(row.authorName), period: string(row.period), image };
 }
 export function parsePost(value: unknown): CommunityPost {
   const row = object(value), author = object(row.author);

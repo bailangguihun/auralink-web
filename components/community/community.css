@@ -26,7 +26,15 @@
 .community-content { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .98rem; line-height: 2; margin: 20px 0; }
 .community-reference { border-left: 2px solid var(--accent); padding: 14px 18px; background: var(--accent-soft); border-radius: 0 8px 8px 0; overflow-wrap: anywhere; }
 .community-reference > span { display: block; color: var(--text-soft); font-size: .7rem; letter-spacing: .1em; margin-bottom: 6px; }
-.community-reference a { color: var(--accent-strong); font-family: var(--font-serif); font-size: 1.15rem; }
+.community-reference a { color: var(--accent-strong); }
+.community-reference-media { display: flex; justify-content: center; align-items: center; min-height: 140px; margin: 12px 0 16px; overflow: hidden; border-radius: 6px; background: rgba(255,255,255,.35); }
+.community-reference-media img { display: block; width: 100%; height: auto; max-height: 380px; object-fit: contain; }
+.community-reference-media .media-fallback { width: 100%; min-height: 160px; }
+.community-reference-caption { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; }
+.community-reference-caption > div { min-width: 0; }
+.community-reference-title { font-family: var(--font-serif); font-size: 1.15rem; }
+.community-reference-open { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; text-decoration: underline; text-underline-offset: 4px; }
+.community-reference a:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 4px; }
 .community-reference p { margin: 6px 0 0; line-height: 1.8; font-size: .8rem; color: var(--text-soft); }
 .community-actions { display: flex; flex-wrap: wrap; gap: 22px; align-items: center; border-top: 1px solid var(--line); margin-top: 22px; padding-top: 16px; font-size: .8rem; color: var(--text-soft); }
 .community-actions [aria-pressed="true"] { color: var(--accent-strong); font-weight: 600; }

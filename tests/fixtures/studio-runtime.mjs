@@ -40,6 +40,7 @@ export function responseFor(state, method, url, body) {
     if(!w){w=workflow(state.nextId++);state.workflows.push(w);}
     Object.assign(w,body,{sourceModality:body.graph.nodes[0].outputModality,terminalModality:body.graph.nodes.at(-1).outputModality,nodeCount:body.graph.nodes.length,edgeCount:body.graph.edges.length,operationSequence:body.graph.nodes.filter(n=>n.kind==='TRANSFORM').map(n=>n.operation),updatedAt:'2026-10-02T00:00:00Z'});
     if(state.failListAfterSave)state.failWorkflowList=true;
+    if(state.loseSaveAcknowledgement)return {abort:true,delayMs:state.delaySave||0};
     return json(structuredClone(w),200,state.delaySave||0);
   }
   if(p==='/api/v1/me/creations')return state.listFailure?json({message:'合成作品列表故障'},503,state.delayList||0):json(pageOf(state.creations),200,state.delayList||0);
@@ -53,7 +54,7 @@ export function responseFor(state, method, url, body) {
     if(state.rejectSubmit)return json({message:'合成请求明确拒绝',code:state.rejectSubmit.code},state.rejectSubmit.status);
     if(state.failSubmit)return {abort:true,delayMs:state.delaySubmit||0};
     const w=state.workflows.find(x=>x.workflowId===body.workflowId),music=w.operationSequence.includes('PAINTING_TO_MUSIC');
-    const c=creation(state.nextId++,music); c.workflowId=w.workflowId;c.workflowName='合成已确认执行';
+    const c=creation(state.nextId++,music); c.workflowId=w.workflowId;c.workflowName=w.name;
     c.sourceText=body.source?.text??null;c.sourcePaintingId=body.source?.paintingId??null;c.sourceAssetId=body.source?.assetId??null;
     if(c.sourceAssetId){c.sourcePaintingTitle=null;c.sourcePaintingContentUrl=null;c.sourceAssetContentUrl=`/api/v1/assets/${c.sourceAssetId}/content`;}
     if(music)c.steps[0].requestedDurationSeconds=w.graph.nodes[1].parameters.durationSeconds??10;

@@ -55,14 +55,11 @@ type Props = {
   value: WorkflowEditorState;
   disabled?: boolean;
   editingDisabled?: boolean;
-  dirty: boolean;
-  saving: boolean;
+  executing?: boolean;
   executionDisabledReason: string | null;
   sourceBody: ReactNode;
   operationBody: (operation: WorkflowOperationCapability, index: number) => ReactNode;
   onChange: (value: WorkflowEditorState) => void;
-  onSave: () => void;
-  onOpen: () => void;
   onExecute: () => void;
   onClear: () => void;
 };
@@ -83,14 +80,11 @@ export function WorkflowDesigner({
   value,
   disabled = false,
   editingDisabled = false,
-  dirty,
-  saving,
+  executing = false,
   executionDisabledReason,
   sourceBody,
   operationBody,
   onChange,
-  onSave,
-  onOpen,
   onExecute,
   onClear,
 }: Props) {
@@ -146,14 +140,14 @@ export function WorkflowDesigner({
     if (item.id === "AUDIO") {
       if (source && current === "PAINTING" && appendable("PAINTING_TO_MUSIC") && hasRoom) {
         const available = next.find((operation) => operation.code === "PAINTING_TO_MUSIC")?.executionAvailable;
-        return { enabled: true, hint: available === true ? "追加音乐节点" : "追加音乐草稿节点；当前执行能力不可用", run: () => append("PAINTING_TO_MUSIC") };
+        return { enabled: true, hint: available === true ? "追加音乐节点" : "追加音乐节点；当前暂不能执行", run: () => append("PAINTING_TO_MUSIC") };
       }
       return { enabled: false, hint: outputUnavailableHint("AUDIO", "PAINTING_TO_MUSIC"), run: () => undefined };
     }
 
     if (item.id === "VIDEO") {
       if (source && current === "PAINTING" && appendable("PAINTING_TO_VIDEO") && hasRoom) {
-        return { enabled: true, hint: "追加视频草稿节点", run: () => append("PAINTING_TO_VIDEO") };
+        return { enabled: true, hint: "追加视频节点；当前暂不能执行", run: () => append("PAINTING_TO_VIDEO") };
       }
       return { enabled: false, hint: outputUnavailableHint("VIDEO", "PAINTING_TO_VIDEO"), run: () => undefined };
     }
@@ -178,7 +172,7 @@ export function WorkflowDesigner({
     }
     if ((last?.outputModality ?? value.sourceModality) !== "PAINTING") return `${label}节点需要前一步国画。`;
     const operation = capabilities.operations.find((candidate) => candidate.code === code);
-    if (!operation || operation.draftEnabled !== true) return `当前能力未开放${label}节点的草稿定义。`;
+    if (!operation || operation.draftEnabled !== true) return `当前暂不能添加${label}节点。`;
     return `当前链路不能追加${label}节点，请检查输入与已用节点。`;
   };
 
@@ -186,31 +180,25 @@ export function WorkflowDesigner({
     <section className="workflow-designer glass-panel" aria-labelledby="workflow-designer-title">
       <header className="workflow-designer-header">
         <div>
-          <span className="studio-eyebrow">创作路径</span>
           <h2 id="workflow-designer-title">工作流设计器</h2>
           <p>{value.sourceModality ? "按顺序组合输入与创作步骤。" : "先从下方选择一种输入开始。"}</p>
         </div>
         <div className="workflow-designer-actions">
-          <button className="button button-quiet" type="button" disabled={disabled} onClick={onOpen}>打开流程</button>
-          <button className="button" type="button" disabled={disabled || editingDisabled || !value.sourceModality} onClick={onSave}>
-            {saving ? <><PendingIndicator /> 正在保存…</> : "保存流程"}
-          </button>
           <button
             className="button button-clear"
             type="button"
             disabled={disabled || !value.sourceModality}
             onClick={onClear}
-          >清空工作流</button>
+          >清空流程</button>
           <button
             className="button button-primary"
             type="button"
             disabled={disabled || !value.sourceModality || Boolean(executionDisabledReason)}
             onClick={onExecute}
-          >执行全流程</button>
+          >{executing ? <><PendingIndicator /> 正在提交…</> : "执行流程"}</button>
         </div>
       </header>
 
-      {dirty ? <p className="workflow-unsaved" role="status">当前编辑尚未保存。</p> : null}
       {executionDisabledReason ? <p className="workflow-context-note" role="status">{executionDisabledReason}</p> : null}
       {value.sourceModality && value.operations.at(-1)?.outputModality === "PAINTING"
         && usedNodeTypes.has("POEM") ? (
@@ -230,7 +218,7 @@ export function WorkflowDesigner({
                   type="button"
                   disabled={disabled || editingDisabled}
                   onClick={() => onChange(setEditorSource(null))}
-                  aria-label="删除输入节点并清空工作流"
+                  aria-label="删除输入节点并清空流程"
                 >×</button>
               </header>
               <h3>{SOURCE_LABELS[value.sourceModality]}</h3>
@@ -253,7 +241,7 @@ export function WorkflowDesigner({
                   <h3>{OUTPUT_LABELS[operation.code] || operation.displayName}</h3>
                   <div className="workflow-node-body">{operationBody(operation, index)}</div>
                   {operation.executionAvailable !== true ? (
-                    <p className="workflow-node-unavailable">此步骤可保存为流程，当前暂不能执行。</p>
+                    <p className="workflow-node-unavailable">此步骤当前暂不能执行，可调整创作步骤。</p>
                   ) : null}
                 </article>
               </div>

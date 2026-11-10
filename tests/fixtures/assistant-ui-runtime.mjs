@@ -23,6 +23,8 @@ export function responseFor(s,method,u,body) {
  const p=u.pathname, q=u.searchParams;
  s.requests.push({method,path:p,query:u.search,body});if(method!=='GET')s.writes.push({method,path:p,body});
  const json=(body,status=200,delayMs=0)=>({status,body,contentType:'application/json',delayMs});
+ // The shared shell prefetches these routes without opening their pages.
+ if(method==='GET'&&['/api/v1/paintings','/api/v1/paintings/daily','/api/v1/knowledge/painting-statistics','/api/v1/knowledge/poetry-graph'].includes(p))return json({});
  if(p==='/api/user/profile')return json({success:true,data:{id:s.otherAccount?900002:900001,username:'isolated-assistant',fullName:s.otherAccount?'隔离账号乙':'隔离测试',email:'fixture@example.invalid',createdAt:null,updatedAt:null}});
  if(p==='/api/v1/me/favorites')return json({items:[],page:0,size:12,totalElements:0,totalPages:0,first:true,last:true,hasNext:false});
  const a='/api/v1/assistant';
@@ -61,7 +63,12 @@ export function responseFor(s,method,u,body) {
  }
  if(p.endsWith('/cancel')) {const r=s.runs.find(r=>r.id===p.split('/').at(-2));r.status='CANCELLED';return json(r);}
  if(p.match(/\/runs\/[^/]+$/)&&method==='GET'){const r=s.runs.find(r=>r.id===p.split('/').at(-1));return json(s.badSourceIdentity?{...r,sessionId:id(999)}:r);}
- if(p.endsWith('/runs')&&method==='POST') {if(s.rejectNextChat){s.rejectNextChat=false;return json({message:'隔离：发送失败'},503);}const r=run(150,body.branchId,'EXECUTING');s.runs.push(r);return s.uncertainSubmit?{abort:true}:json({run:r,replay:false});}
+ if(p.endsWith('/runs')&&method==='POST') {
+  if(s.rejectNextChat){s.rejectNextChat=false;return json({message:'隔离：发送失败'},503,s.submitDelay||0);}
+  const r=run(150,body.branchId,'EXECUTING');s.runs.push(r);
+  if(s.persistSubmittedMessage){s.messages[body.branchId].push({...message(50,'USER',body.text,r.id),attachmentIds:body.attachmentIds});s.attachments=[];}
+  return s.uncertainSubmit?{abort:true}:json({run:r,replay:false},200,s.submitDelay||0);
+ }
  if(p.endsWith('/requests/resolve'))return json(s.uncertainSubmit?{status:'FOUND',resultType:'RUN',resultId:id(150)}:{status:body.closeIfMissing?'CLOSED':'NOT_FOUND'});
  if(p.endsWith('/artworks/page'))return json({items:[{artworkId:id(70),batchId:id(75),revision:3,projectionVersion:'public-v1',sourceRecordId:'fixture-only',fields:[{key:'core.title',value:'隔离山水作品',rawValue:null,valueStatus:'PRESENT',assertionStatus:'UNSPECIFIED'}]}],page:0,size:10,totalPages:1,totalElements:1});
  s.unknown.push({method,path:p});return json({message:'Unimplemented isolated fixture endpoint'},404);

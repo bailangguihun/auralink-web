@@ -94,7 +94,14 @@
 .markdown a { color:var(--red); text-decoration:underline; text-underline-offset:3px; }
 .markdown pre { max-width:100%; overflow:auto; background:#eee7db; border-radius:9px; padding:14px; font:12px/1.7 ui-monospace,monospace; }
 .markdown code { font-family:ui-monospace,monospace; font-size:.85em; background:#eee7db; padding:2px 4px; border-radius:3px; }
-.tableScroll { overflow:auto; max-width:100%; }.tableScroll table { border-collapse:collapse; width:100%; }.tableScroll :is(th,td) { border:1px solid var(--edge); padding:8px 12px; text-align:left; }
+  .imageryCard { display:grid; grid-template-columns:minmax(110px,170px) minmax(0,1fr); gap:22px; padding:20px 0; border-bottom:1px solid var(--edge); align-items:start; }
+  .imageryCard > .attachment { margin:0; min-width:0; max-width:170px; }
+  .imageryCard .imageButton { border-radius:18px; }
+  .imageryCard > div { min-width:0; }
+  .imageryCard h3 { margin-top:0; }
+  .imageryCard figcaption { font-size:11px; }
+  @media(max-width:600px) { .imageryCard { grid-template-columns:90px minmax(0,1fr); gap:12px; }.imageryCard > .attachment { max-width:90px; } }
+  .tableScroll { overflow:auto; max-width:100%; }.tableScroll table { border-collapse:collapse; width:100%; }.tableScroll :is(th,td) { border:1px solid var(--edge); padding:8px 12px; text-align:left; }
 .composer { flex-shrink:0; padding:12px 24px 16px; margin:0; border-top:1px solid #e7dfd2; background:var(--paper); max-height:58%; display:flex; flex-direction:column; gap:8px; }
 .inputRow { display:flex; align-items:flex-end; gap:10px; border:1px solid #cdbfac; border-radius:14px; padding:7px 8px 7px 13px; background:#fffdf8; flex-shrink:0; }
 .composer textarea { min-height:36px; max-height:124px; width:100%; resize:none; border:0; outline-offset:0; margin:0; border-radius:6px; padding:6px 0; font-size:.92rem; line-height:1.65; background:transparent; overflow-y:auto; }

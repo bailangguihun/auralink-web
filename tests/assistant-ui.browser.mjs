@@ -113,6 +113,25 @@ try {
   assert.equal(await page.getByTestId('outgoing-message').count(),0);
   assert.equal(await page.getByRole('form',{name:'发送消息'}).getByRole('img').count(),1);
  },{draft:true,submitDelay:2000,rejectNextChat:true});
+ for (const mobile of [false,true]) await scenario(`illustrated-analysis-uses-the-question-image${mobile?'-mobile':''}`,async({page,state,noOverflow,shot})=>{
+  const rows=state.messages[id(2)];
+  rows[0].attachmentIds=[id(80)];
+  rows[1].parentMessageId=rows[0].id;
+  rows[1].body='整体感受。\n\n### 1. 古树与岁月\n![古树](assistant-crop:1,0.1,0.2,0.4,0.5)\n枝干向上伸展，可让人联想到生命的延续。\n\n\`\`\`assistant-choices\n[{"id":"one","title":"继续","options":[]}]\n\`\`\`';
+  await page.reload({waitUntil:'networkidle'});
+  const reply=page.getByTestId('assistant-message').filter({hasText:'古树与岁月'});
+  const crop=reply.getByRole('img',{name:'古树（原图局部）',exact:true});
+  await crop.waitFor();
+  await reply.scrollIntoViewIfNeeded();
+  assert.doesNotMatch(await reply.innerText(),/assistant-crop|assistant-choices|"options"/);
+  const imageBox=await crop.boundingBox();
+  const titleBox=await reply.getByRole('heading',{name:'1. 古树与岁月',exact:true}).boundingBox();
+  assert(imageBox.x<titleBox.x,'Crop is placed to the left of the analysis');
+  await noOverflow();
+  await shot('cards');
+  await reply.getByRole('button',{name:/查看原图/}).click();
+  await page.getByRole('dialog',{name:/原图/}).waitFor();
+ },{mobile});
  await scenario('branch-pagination-and-source-association',async({page,state,dialog,open,close})=>{
   await open('输入历史','↳ 输入历史');await dialog('输入历史').getByRole('button',{name:'加载更早输入记录'}).click();await dialog('输入历史').getByText('更早的真实用户输入（隔离记录）',{exact:true}).waitFor();await close();
   await open('会话与分支');await dialog('会话与分支').getByLabel('分支',{exact:true}).selectOption(id(3));await close();await page.getByText('这是保留的历史分支回复。',{exact:true}).waitFor();

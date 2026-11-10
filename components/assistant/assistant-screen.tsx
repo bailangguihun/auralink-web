@@ -190,6 +190,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const [live, setLive] = useState<Run | null>(null); const [editing, setEditing] = useState<Message | null>(null); const [editText, setEditText] = useState(''); const [notice, setNotice] = useState(''); const [timelineOpen, setTimelineOpen] = useState(false); const [summaryOpen, setSummaryOpen] = useState(false);
   const chatScope = `CHAT_EXECUTION:${id}`;
   const [unconfirmedChat, setUnconfirmedChat] = useState(false);
+  const [outgoing, setOutgoing] = useState<{ text: string; attachmentIds: string[]; inputMessageId?: string } | null>(null);
   const draft = useAssistantAttachments(id, revision, ledger, access); const attachments = draft.attachments;
   const messages = usePage<Message>(`/sessions/${enc(id)}/messages/page?branchId=${enc(branchId)}`, access, row => row.id, revision, true);
   const runs = usePage<Run>(status.executionAvailable ? `/sessions/${enc(id)}/runs/page?branchId=${enc(branchId)}` : null, access, row => row.id, revision);
@@ -237,7 +238,9 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     });
     return () => { alive = false; };
   }, [activityTick, id, request, session.version, reload]);
-  const running = active.items.find(item => !terminal(item.status)); const pendingChat = active.items.find(item => item.kind === 'CHAT' && !terminal(item.status)); const runningId = running?.id;
+  const running = live && !terminal(live.status) ? live : active.items.find(item => !terminal(item.status));
+  const pendingChat = running?.kind === 'CHAT' ? running : active.items.find(item => item.kind === 'CHAT' && !terminal(item.status));
+  const runningId = running?.id;
   useEffect(() => {
     if (!runningId || !token) return;
     const controller = new AbortController(); const identity = sessionIdentity; let current: Run | null = null;
@@ -299,8 +302,27 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     }
   };
   const submit = async (event?: React.FormEvent) => {
-    event?.preventDefault(); if (!generationAvailable || (!text.trim() && !attachments.length) || !branch || !selectedModel || pendingChat || busyRef.current || messages.loading || messages.error || draft.loading || draft.error || draft.hasMore || attachments.length > 4) return;
-    await act(async () => { const payload = command(text, attachments.map(image => image.id)); const scope = `CHAT_EXECUTION:${id}`; const result = await submitCommand(`/sessions/${enc(id)}/runs`, payload, scope, 'CHAT_EXECUTION'); ledger.resolved(scope); setLive(result.run); setText(''); setSelectedArtworks([]); reload(); });
+    event?.preventDefault(); if (!generationAvailable || (!text.trim() && !attachments.length) || !branch || !selectedModel || pendingChat || busyRef.current || messages.loading || messages.error || draft.loading || draft.error || draft.hasMore || attachments.length > 4 || (attachments.length > 0 && !selectedModel.capabilities.images)) return;
+    const sent = { text, attachmentIds: attachments.map(image => image.id) };
+    const payload = command(sent.text, sent.attachmentIds);
+    await act(async () => {
+      followBottom.current = true;
+      setOutgoing(sent);
+      setText('');
+      try {
+        const scope = `CHAT_EXECUTION:${id}`;
+        const result = await submitCommand(`/sessions/${enc(id)}/runs`, payload, scope, 'CHAT_EXECUTION');
+        ledger.resolved(scope);
+        setOutgoing({ ...sent, inputMessageId: result.run.inputMessageId });
+        setLive(result.run);
+        setSelectedArtworks([]);
+        reload();
+      } catch (failure) {
+        setOutgoing(null);
+        setText(current => current ? `${sent.text}\n${current}` : sent.text);
+        throw failure;
+      }
+    });
   };
   const uploadDisabled = busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat;
   const upload = async (file: File | undefined) => { if (file) await act(() => draft.upload(file)); };
@@ -348,7 +370,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     if (old.first && old.first !== first && old.last === last) area.scrollTop = old.top + area.scrollHeight - old.height;
     else if (followBottom.current) area.scrollTop = area.scrollHeight;
     priorScroll.current = { first, last, height: area.scrollHeight, top: area.scrollTop };
-  }, [messages.items, currentLive?.checkpoint]);
+  }, [messages.items, currentLive?.checkpoint, outgoing]);
   useEffect(() => {
     const area = messageScroll.current; if (!area) return;
     const observer = new ResizeObserver(() => { if (followBottom.current) area.scrollTop = area.scrollHeight; });
@@ -371,7 +393,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     <section ref={messageScroll} data-page-scroll tabIndex={0} aria-label="对话历史" className={styles.messages} onScroll={event => { const area = event.currentTarget; followBottom.current = area.scrollHeight - area.scrollTop - area.clientHeight < 80; priorScroll.current = { ...priorScroll.current, height: area.scrollHeight, top: area.scrollTop }; }}>
       <div className={styles.messageColumn}>
       <LoadMore page={messages} label="加载更早消息" />
-      {messages.error ? <StatePanel compact kind="error" title="历史暂未读取成功" description="这不表示会话为空，已保存的消息和图片尚未核对。" actionLabel="重新读取历史" onAction={messages.retry} /> : messages.loading && !messages.items.length ? <LoadingSection label="正在读取历史" onRetry={messages.retry}><SkeletonRows lines={5} /></LoadingSection> : !messages.items.length ? <EmptyConversation /> : null}
+      {messages.error ? <StatePanel compact kind="error" title="历史暂未读取成功" description="这不表示会话为空，已保存的消息和图片尚未核对。" actionLabel="重新读取历史" onAction={messages.retry} /> : messages.loading && !messages.items.length ? <LoadingSection label="正在读取历史" onRetry={messages.retry}><SkeletonRows lines={5} /></LoadingSection> : !messages.items.length && !outgoing ? <EmptyConversation /> : null}
       {messages.items.map(message => <article className={styles.message} data-role={message.role} data-testid="assistant-message" data-message-id={message.id} key={message.id}>
         <header><strong>{message.role === 'USER' ? '我' : '国画助手'}</strong><span>{stateLabel(message.state)} · {assistantDate(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span></header>
         {message.role === 'ASSISTANT' ? <AssistantMarkdown>{message.body}</AssistantMarkdown> : <p className={styles.body}>{message.body}</p>}
@@ -379,7 +401,13 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
         <div className={styles.messageActions}>{message.role === 'USER' && status.executionAvailable ? <button disabled={busy || !!running} onClick={() => { setEditing(message); setEditText(message.body); }}>编辑为新分支</button> : null}{speech.readable && message.body ? <button onClick={() => speech.read(message.body)}>朗读消息</button> : null}{message.runId && message.role === 'ASSISTANT' ? <button onClick={() => showSources(message.runId!)}>查看本条来源</button> : null}</div>
         {message.runId && message.role === 'ASSISTANT' && status.executionAvailable ? <RunDetails key={`${message.runId}:${revision}`} id={message.runId} known={runs.items.find(run => run.id === message.runId)} access={access} choose={choose} retry={retry} disabled={busy || !!pendingChat || !model || !generationAvailable} /> : null}
       </article>)}
-      {currentLive && !messages.items.some(message => message.role === 'ASSISTANT' && message.runId === currentLive.id) ? <article className={styles.message} data-testid="assistant-live"><header><strong>{currentLive.kind === 'SUMMARY' ? '摘要' : '国画助手'}</strong><span role="status" data-testid="run-status">{stateLabel(currentLive.status)}</span></header><AssistantMarkdown>{currentLive.checkpoint || '请求已保存，等待回复…'}</AssistantMarkdown><p className={styles.meta} role="status">{connection}</p>{currentLive.executionUncertain ? <p>已保存部分内容；上游结果不确定，不会自动重新收费执行。</p> : null}</article> : null}
+      {outgoing && !messages.items.some(message => message.id === outgoing.inputMessageId) ? <article className={styles.message} data-role="USER" data-testid="outgoing-message">
+        <header><strong>我</strong>{!outgoing.inputMessageId ? <span role="status">正在发送…</span> : null}</header>
+        {outgoing.attachmentIds.map(image => <PrivateAttachment key={image} id={image} />)}
+        {outgoing.text ? <p className={styles.body}>{outgoing.text}</p> : null}
+      </article> : null}
+      {outgoing && !outgoing.inputMessageId ? <article className={styles.message}><header><strong>国画助手</strong></header><LoadingStatus label="正在发送，等待确认…" /></article> : null}
+      {(!outgoing || outgoing.inputMessageId) && currentLive && !messages.items.some(message => message.role === 'ASSISTANT' && message.runId === currentLive.id) ? <article className={styles.message} data-testid="assistant-live"><header><strong>{currentLive.kind === 'SUMMARY' ? '摘要' : '国画助手'}</strong><span role="status" data-testid="run-status">{stateLabel(currentLive.status)}</span></header><AssistantMarkdown>{currentLive.checkpoint || '正在准备回复…'}</AssistantMarkdown><p className={styles.meta} role="status">{connection}</p>{currentLive.executionUncertain ? <p>已保存部分内容；上游结果不确定，不会自动重新收费执行。</p> : null}</article> : null}
       </div>
     </section>
     {status.executionAvailable ? <form className={styles.composer} onSubmit={event => void submit(event)} aria-label="发送消息">
@@ -388,7 +416,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       {draft.notice ? <p role="status">{draft.notice}</p> : null}
       {draft.pending.map(item => <p key={item.scope} role="status">{item.state === 'uploading' ? '上次上传仍未完成。可核对状态，或明确移除后重新选择图片。' : '上次图片尚未获服务器确认。请重新选择原文件；若文件从未被接受，刷新后无法恢复本地字节。'}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void draft.refresh()}>核对上传状态</button>{item.id ? <button type="button" className={styles.small} disabled={busy} onClick={() => void act(() => draft.remove(item.id!, item.scope))}>移除未完成上传</button> : null}</p>)}
 
-      {attachments.map(image => <div className={styles.draftImage} key={image.id}><PrivateAttachment id={image.id} />{image.draftExpiresAt ? <small className={styles.meta}>未发送草稿有效期至 {assistantDate(image.draftExpiresAt).toLocaleString('zh-CN')}</small> : null}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void act(() => draft.remove(image.id))}>移除待发送图片</button></div>)}
+      {attachments.filter(image => !outgoing?.attachmentIds.includes(image.id)).map(image => <div className={styles.draftImage} key={image.id}><PrivateAttachment id={image.id} />{image.draftExpiresAt ? <small className={styles.meta}>未发送草稿有效期至 {assistantDate(image.draftExpiresAt).toLocaleString('zh-CN')}</small> : null}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void act(() => draft.remove(image.id))}>移除待发送图片</button></div>)}
       {draft.hasMore ? <button type="button" className="button" disabled={draft.loading} onClick={() => void draft.more()}>加载更多待发送图片</button> : null}
       {attachments.length > 4 || draft.hasMore ? <p role="alert">当前会话有超过四张待发送图片。请读取并移除多余图片后再发送；不会静默遗漏或自动删除。</p> : null}
       {attachments.length && !selectedModel?.capabilities.images ? <p role="alert">所选模型不支持图片，请明确选择支持图片的模型；不会丢弃图片或自动切换模型。</p> : null}

@@ -2,9 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ApiError } from "../lib/api.ts";
 import { parseOutcome, parsePost, parseReference, readOperation, operationStorageKey, definiteWriteFailure } from "../lib/community.ts";
-import { communityOrigin, communityPath } from "../lib/community-proxy.ts";
+import { communityOrigin, communityPath, communityUpstreamFailure } from "../lib/community-proxy.ts";
 
 const id = "23c2e7c7-3898-5ecd-9ca0-dc47fc7b2d39";
+test("community read outages are retryable while failed writes keep unknown-outcome guidance", () => {
+  for (const method of ["GET", "HEAD"]) {
+    const error = communityUpstreamFailure(method);
+    assert.equal(error.code, "COMMUNITY_UNAVAILABLE");
+    assert.match(error.message, /稍后重试/);
+    assert.doesNotMatch(error.message, /操作记录|重复提交/);
+  }
+  for (const method of ["POST", "PUT", "DELETE"]) {
+    const error = communityUpstreamFailure(method);
+    assert.equal(error.code, "COMMUNITY_RESULT_UNCERTAIN");
+    assert.match(error.message, /不要重复提交/);
+    assert.equal(definiteWriteFailure(new ApiError(error.message, 503, "server")), false);
+  }
+});
 test("community results distinguish committed and not observed; incomplete successes remain unknown", () => {
   assert.equal(parseOutcome({ state: "NOT_OBSERVED", result: null }).state, "NOT_OBSERVED");
   assert.equal(parseOutcome({ state: "COMMITTED", result: { kind: "post", postId: id } }).result?.postId, id);

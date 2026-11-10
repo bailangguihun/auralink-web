@@ -1099,3 +1099,24 @@ html:has(.gallery-page) { overflow-anchor: none; }
   .skeleton-daily-description { margin-top: 10px; }
   .skeleton-daily-action { margin-top: 12px; }
 }
+
+/* Studio cards keep viewing and deletion as independent keyboard targets. */
+.studio-current-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.studio-current-status strong { overflow-wrap: anywhere; }
+.creation-grid { align-items: start; }
+.creation-card { cursor: default; min-width: 0; }
+.creation-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.creation-delete { border: 0; background: transparent; color: var(--text-soft); font: inherit; font-size: .75rem; min-height: 44px; padding: 6px; cursor: pointer; flex-shrink: 0; }
+.creation-delete:hover:not(:disabled) { color: #9c493b; }
+.creation-delete:disabled { opacity: .5; cursor: not-allowed; }
+.creation-card-open { display: grid; gap: 8px; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.creation-card-open:disabled { cursor: default; opacity: 1; }
+.creation-card-open h3 { overflow-wrap: anywhere; }
+.creation-current { border-color: var(--accent); }
+.creation-input-preview { width: 100%; max-height: 140px; object-fit: contain; border-radius: 8px; }
+.creation-input-preview img { width: 100%; max-height: 140px; object-fit: contain; }
+.creation-input-text { white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.creation-card-step { min-width: 0; padding-top: 8px; border-top: 1px solid var(--glass-border); }
+.creation-card-step audio { width: 100%; }
+.creation-card-step img { max-height: 160px; object-fit: contain; }
+.creation-detail { scroll-margin-top: 100px; }

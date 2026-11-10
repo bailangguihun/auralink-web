@@ -12,3 +12,10 @@ export function communityPath(parts: string[]): string {
   if (!valid) throw new Error("Unknown community endpoint");
   return "/api/v1/community/" + parts.join("/");
 }
+/** Read failures can be retried; a failed write may already have committed. */
+export function communityUpstreamFailure(method: string) {
+  if (method === "GET" || method === "HEAD") {
+    return { code: "COMMUNITY_UNAVAILABLE", message: "暂时无法连接社区，请稍后重试。" };
+  }
+  return { code: "COMMUNITY_RESULT_UNCERTAIN", message: "请求结果尚未确认，请读取操作记录，不要重复提交。" };
+}

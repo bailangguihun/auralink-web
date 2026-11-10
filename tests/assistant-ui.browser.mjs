@@ -86,6 +86,33 @@ try {
   assert.equal(state.writes.length,1);
   assert.match(state.writes[0].path,/\/attachments$/);
  });
+ await scenario('send-immediately-moves-draft-into-conversation',async({page,state})=>{
+  const input=page.getByRole('textbox',{name:'消息',exact:true});
+  await input.fill('分析这张画');
+  await page.getByRole('button',{name:'发送消息',exact:true}).click();
+  const outgoing=page.getByTestId('outgoing-message');
+  await outgoing.waitFor();
+  assert.equal(await input.inputValue(),'');
+  assert.equal(await outgoing.getByRole('img').count(),1);
+  assert.equal(await page.getByRole('form',{name:'发送消息'}).getByRole('img').count(),0);
+  await page.getByText('正在发送，等待确认…',{exact:true}).waitFor();
+  await input.fill('准备追问');
+  await page.getByTestId('assistant-live').waitFor();
+  await until(()=>outgoing.count().then(n=>n===0),'Persisted user message replaces optimistic message');
+  assert.equal(await page.getByTestId('assistant-message').filter({hasText:'分析这张画'}).count(),1);
+  assert.equal(await input.inputValue(),'准备追问');
+  assert.equal(state.writes.filter(x=>x.path.endsWith('/runs')).length,1);
+ },{draft:true,submitDelay:2000,persistSubmittedMessage:true});
+ await scenario('failed-send-restores-draft-and-keeps-new-typing',async({page})=>{
+  const input=page.getByRole('textbox',{name:'消息',exact:true});
+  await input.fill('原问题');
+  await page.getByRole('button',{name:'发送消息',exact:true}).click();
+  await page.getByTestId('outgoing-message').waitFor();
+  await input.fill('新输入');
+  await until(()=>input.inputValue().then(s=>s==='原问题\n新输入'),'Failed question and new typing retained');
+  assert.equal(await page.getByTestId('outgoing-message').count(),0);
+  assert.equal(await page.getByRole('form',{name:'发送消息'}).getByRole('img').count(),1);
+ },{draft:true,submitDelay:2000,rejectNextChat:true});
  await scenario('branch-pagination-and-source-association',async({page,state,dialog,open,close})=>{
   await open('输入历史','↳ 输入历史');await dialog('输入历史').getByRole('button',{name:'加载更早输入记录'}).click();await dialog('输入历史').getByText('更早的真实用户输入（隔离记录）',{exact:true}).waitFor();await close();
   await open('会话与分支');await dialog('会话与分支').getByLabel('分支',{exact:true}).selectOption(id(3));await close();await page.getByText('这是保留的历史分支回复。',{exact:true}).waitFor();

@@ -52,3 +52,18 @@ test('Illustrated analysis resolves only bounded crops of the current question a
   const code = '\`\`\`text\n### heading in code\n\`\`\`';
   assert.deepEqual(assistantIllustratedSections(code, []), [{ markdown: code }]);
 });
+
+test('Qwen3-VL boxes map to source image corners and retain at most four illustrations', () => {
+  const section = (box: string) => `### 古树与岁月\r\n![古树](assistant-crop:${box})\r\n枝干向上伸展。`;
+  const box = '2,bbox_2d, 110, 290, 490, 999';
+  const images = ['first', 'second'];
+  const [entry] = assistantIllustratedSections(section(box), images);
+  assert.deepEqual(entry.image, { id: 'second', label: '古树', crop: { x: 0.11, y: 0.29, width: 0.38, height: 0.709 } });
+  for (const invalid of ['2,bbox_2d,0,0,1000,999', '2,bbox_2d,90,0,40,999', '2,bbox_2d,0,0,49,999', '3,bbox_2d,0,0,999,999']) {
+    const [textOnly] = assistantIllustratedSections(section(invalid), images);
+    assert.equal(textOnly.image, undefined);
+    assert.match(textOnly.markdown, /枝干向上伸展/);
+    assert.doesNotMatch(textOnly.markdown, /assistant-crop/);
+  }
+  assert.equal(assistantIllustratedSections(Array(5).fill(section(box)).join('\n\n'), images).filter(item => item.image).length, 4);
+});

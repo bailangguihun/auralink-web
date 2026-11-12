@@ -351,6 +351,8 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const summary = async () => act(async () => { requireGeneration(); const payload = { branchId }; const scope = `SUMMARY_EXECUTION:${id}`; const key = await ledger.key(scope, payload); const run = await request((token, signal) => assistantRequest<Run>(`/sessions/${enc(id)}/summaries`, token, signal, 'POST', { ...payload, requestKey: key })); ledger.resolved(scope); setLive(run); setSummaryOpen(true); reload(); });
   const classify = async (row: Timeline, label: string) => act(async () => { const payload = { expectedVersion: row.classificationVersion, label }; const scope = `CLASSIFY_MESSAGE:${id}:${row.messageId}`; const key = await ledger.key(scope, payload); await request((token, signal) => assistantRequest(`/sessions/${enc(id)}/messages/${enc(row.messageId)}/classification`, token, signal, 'POST', { ...payload, requestKey: key })); ledger.resolved(scope); reload(); });
   const currentLive = live && live.branchId === branchId ? live : null;
+  const liveImageIds = currentLive && (messages.items.find(item => item.id === currentLive.inputMessageId && item.role === 'USER')?.attachmentIds
+    ?? (outgoing?.inputMessageId === currentLive.inputMessageId ? outgoing.attachmentIds : []));
   const sourceRows = messages.items.flatMap((message, index) => {
     if (message.role !== 'ASSISTANT' || !message.runId) return [];
     const question = messages.items.slice(0, index).reverse().find(item => item.role === 'USER')?.body || '助手回复';
@@ -407,7 +409,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
         {outgoing.text ? <p className={styles.body}>{outgoing.text}</p> : null}
       </article> : null}
       {outgoing && !outgoing.inputMessageId ? <article className={styles.message}><header><strong>国画助手</strong></header><LoadingStatus label="正在发送，等待确认…" /></article> : null}
-      {(!outgoing || outgoing.inputMessageId) && currentLive && !messages.items.some(message => message.role === 'ASSISTANT' && message.runId === currentLive.id) ? <article className={styles.message} data-testid="assistant-live"><header><strong>{currentLive.kind === 'SUMMARY' ? '摘要' : '国画助手'}</strong><span role="status" data-testid="run-status">{stateLabel(currentLive.status)}</span></header><AssistantMarkdown imageIds={messages.items.find(item => item.id === currentLive.inputMessageId && item.role === 'USER')?.attachmentIds || []}>{currentLive.checkpoint || '正在准备回复…'}</AssistantMarkdown><p className={styles.meta} role="status">{connection}</p>{currentLive.executionUncertain ? <p>已保存部分内容；上游结果不确定，不会自动重新收费执行。</p> : null}</article> : null}
+      {(!outgoing || outgoing.inputMessageId) && currentLive && !messages.items.some(message => message.role === 'ASSISTANT' && message.runId === currentLive.id) ? <article className={styles.message} data-testid="assistant-live"><header><strong>{currentLive.kind === 'SUMMARY' ? '摘要' : '国画助手'}</strong><span role="status" data-testid="run-status">{stateLabel(currentLive.status)}</span></header><AssistantMarkdown imageIds={liveImageIds ?? []}>{currentLive.checkpoint || '正在准备回复…'}</AssistantMarkdown><p className={styles.meta} role="status">{connection}</p>{currentLive.executionUncertain ? <p>已保存部分内容；上游结果不确定，不会自动重新收费执行。</p> : null}</article> : null}
       </div>
     </section>
     {status.executionAvailable ? <form className={styles.composer} onSubmit={event => void submit(event)} aria-label="发送消息">

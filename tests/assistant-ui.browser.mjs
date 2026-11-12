@@ -115,13 +115,23 @@ try {
  },{draft:true,submitDelay:2000,rejectNextChat:true});
  for (const mobile of [false,true]) await scenario(`illustrated-analysis-uses-the-question-image${mobile?'-mobile':''}`,async({page,state,noOverflow,shot})=>{
   const rows=state.messages[id(2)];
+  if(process.env.ASSISTANT_CROP_TEST_PNG){
+   const image=await readFile(process.env.ASSISTANT_CROP_TEST_PNG);
+   assert.equal(image.toString('ascii',12,16),'IHDR');
+   state.attachmentPng=image;
+   Object.assign(state.attachment,{filename:'赏析原图.png',byteSize:image.length,width:image.readUInt32BE(16),height:image.readUInt32BE(20)});
+   state.session.title='国画意象赏析';
+   rows[0].body='分析一下这幅国画的意象';
+   rows.splice(2);
+  }
   rows[0].attachmentIds=[id(80)];
   rows[1].parentMessageId=rows[0].id;
-  rows[1].body='整体感受。\n\n### 1. 古树与岁月\n![古树](assistant-crop:1,0.1,0.2,0.4,0.5)\n枝干向上伸展，可让人联想到生命的延续。\n\n\`\`\`assistant-choices\n[{"id":"one","title":"继续","options":[]}]\n\`\`\`';
+  rows[1].body='右下的树石稳住了画面，斜向的鸟群把视线带进大幅留白。枝干与飞鸟一静一动，让画面在清寂中仍有生气。\n\n### 1. 古树与岁月\n![古树](assistant-crop:1,bbox_2d,280,495,999,999)\n枝干从右下的石间向上伸展。细枝疏落，树干仍有曲折向上的力道，让人联想到岁月的痕迹和生命的延续。\n\n### 2. 飞鸟与留白\n![飞鸟](assistant-crop:1,bbox_2d,40,235,565,502)\n鸟影沿着斜线疏密相间地排开，把视线从树石的浓重处引向疏空处，也让画面有了远近和流动感。\n\n\`\`\`assistant-choices\n[{"id":"one","title":"继续","options":[]}]\n\`\`\`';
   await page.reload({waitUntil:'networkidle'});
   const reply=page.getByTestId('assistant-message').filter({hasText:'古树与岁月'});
   const crop=reply.getByRole('img',{name:'古树（原图局部）',exact:true});
   await crop.waitFor();
+  await reply.getByRole('img',{name:'飞鸟（原图局部）',exact:true}).waitFor();
   await reply.scrollIntoViewIfNeeded();
   assert.doesNotMatch(await reply.innerText(),/assistant-crop|assistant-choices|"options"/);
   const imageBox=await crop.boundingBox();
@@ -129,7 +139,7 @@ try {
   assert(imageBox.x<titleBox.x,'Crop is placed to the left of the analysis');
   await noOverflow();
   await shot('cards');
-  await reply.getByRole('button',{name:/查看原图/}).click();
+  await crop.locator('..').click();
   await page.getByRole('dialog',{name:/原图/}).waitFor();
  },{mobile});
  await scenario('branch-pagination-and-source-association',async({page,state,dialog,open,close})=>{

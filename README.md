@@ -13,7 +13,8 @@
 | 账户 | 已接入 | 注册、登录、资料读取与会话恢复 |
 | 收藏 | 已接入 | 登录用户的作品收藏与个人收藏页 |
 | 创作工坊 | 接入中 | 按后端能力开放创作与工作流功能 |
-| 知识库、社区、助手 | 待开放 | 等待相应后端接口完成后接入 |
+| 社区 | 已接入，按能力开放 | 登录交流、图文作品、点评与成长；[能力与验证](docs/community-learning.md) |
+| 知识库、助手 | 待开放 | 等待相应后端接口完成后接入 |
 | 小程序登录桥接 | 可用 | 通过 `/mobile-auth` 安全接收小程序会话 |
 
 ## 技术栈
@@ -55,6 +56,8 @@ npm run dev
 打开 [http://localhost:3000](http://localhost:3000) 即可访问。未设置 `NEXT_PUBLIC_API_BASE_URL` 时，前端默认连接 `http://localhost:5000`。
 
 `NEXT_PUBLIC_API_BASE_URL` 必须是后端的 HTTP(S) 源地址，不能包含用户名、密码、模型服务地址或任何第三方服务凭据。
+
+社区另需匹配的独立 Node 服务及[服务端连接配置](docs/COMMUNITY_HOST_CONFIGURATION.md)。[schema 1 基础合同](docs/community-foundation.md)继续兼容；图文与成长需显式 002 迁移和私有媒体配置，本轮代码尚未部署生产。助手互导只填草稿，由用户主动发送或发布。
 
 ## 常用命令
 

@@ -9,21 +9,35 @@ function failure(status: number, code: string, message: string) {
 async function proxy(request: Request, context: { params: Promise<{ path: string[] }> }) {
   let destination: string;
   let origin: string | null;
+  const parts = (await context.params).path;
+  const upload = parts.length === 1 && parts[0] === "uploads";
+  const media = parts.length === 2 && parts[0] === "media";
   try { origin = await configuredCommunityOrigin(); }
   catch { return failure(503, "COMMUNITY_CONFIGURATION_INVALID", "社区配置暂不可用，请稍后再来。"); }
   if (!origin) return failure(503, "COMMUNITY_NOT_CONFIGURED", "社区暂未开放，请稍后再来。");
   try {
-    destination = origin + communityPath((await context.params).path) + new URL(request.url).search;
+    destination = origin + communityPath(parts) + new URL(request.url).search;
   } catch { return failure(404, "NOT_FOUND", "接口不存在。"); }
   const authorization = request.headers.get("authorization");
   if (!authorization || !/^Bearer [^\s,]{1,8192}$/.test(authorization)) return failure(401, "UNAUTHORIZED", "请先登录。");
   const forwarded: Record<string, string> = { authorization, accept: "application/json" };
+  if (media && request.headers.has("range")) forwarded.range = request.headers.get("range")!;
   const browserOrigin = request.headers.get("origin");
   if (browserOrigin) forwarded.origin = browserOrigin;
   let payload: Uint8Array | undefined;
   if (!["GET", "HEAD"].includes(request.method)) {
-    if (!request.headers.get("content-type")?.startsWith("application/json")) return failure(415, "JSON_REQUIRED", "请提交 JSON。");
-    forwarded["content-type"] = "application/json";
+    const contentType = request.headers.get("content-type") || "";
+    if (upload) {
+      if (request.method !== "POST" || !["image/jpeg", "image/png", "image/webp"].includes(contentType)) return failure(415, "IMAGE_FORMAT_UNSUPPORTED", "请选择 JPG、PNG 或 WebP 图片。");
+      const requestId = request.headers.get("x-request-id");
+      if (!requestId || !/^[0-9a-f-]{36}$/.test(requestId)) return failure(400, "INVALID_REQUEST_ID", "上传操作标识无效。");
+      forwarded["content-type"] = contentType;
+      forwarded["x-request-id"] = requestId;
+      forwarded["x-file-name"] = request.headers.get("x-file-name") || "image";
+    } else {
+      if (!contentType.startsWith("application/json")) return failure(415, "JSON_REQUIRED", "请提交 JSON。");
+      forwarded["content-type"] = "application/json";
+    }
     const reader = request.body?.getReader(), chunks: Uint8Array[] = [];
     let length = 0;
     if (!reader) return failure(400, "INVALID_BODY", "请求内容为空。");
@@ -32,7 +46,7 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
         const next = await reader.read();
         if (next.done) break;
         length += next.value.length;
-        if (length > 32768) { await reader.cancel(); return failure(413, "REQUEST_TOO_LARGE", "请求内容过大。"); }
+        if (length > (upload ? 10 * 1024 * 1024 : 32768)) { await reader.cancel(); return failure(413, "REQUEST_TOO_LARGE", "请求内容过大。"); }
         chunks.push(next.value);
       }
     } finally { reader.releaseLock(); }
@@ -43,13 +57,19 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
       method: request.method, headers: forwarded, body: payload,
       redirect: "error", cache: "no-store", signal: AbortSignal.timeout(20000),
     });
-    return new Response(upstream.body, { status: upstream.status, headers });
+    const responseHeaders = new Headers(headers);
+    for (const key of ["content-type", "content-length", "content-range", "accept-ranges"]) {
+      const value = upstream.headers.get(key); if (value) responseHeaders.set(key, value);
+    }
+    responseHeaders.set("x-content-type-options", "nosniff");
+    return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch {
     const error = communityUpstreamFailure(request.method);
     return failure(503, error.code, error.message);
   }
 }
 export const GET = proxy;
+export const HEAD = proxy;
 export const POST = proxy;
 export const PUT = proxy;
 export const DELETE = proxy;

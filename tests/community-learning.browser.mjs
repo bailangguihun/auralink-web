@@ -216,6 +216,7 @@ try {
   const made = await write('/posts', 'POST', { content: '用于助手导入恢复的隔离作品', title: '四张图片的交接', kind: 'artwork', imageIds: transferImages });
   const transferPath = '/community/posts/' + made.data.result.postId;
   const assistant = assistantState(), attachmentBytes = new Map();
+  assistant.messages[assistantId(2)].find(message => message.role === 'ASSISTANT').state = 'COMPLETED';
   let uploadAttempts = 0, refuseNextSecond = true;
   await owner.route(f.coreUrl + '/api/v1/assistant/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
@@ -268,6 +269,13 @@ try {
   assert.equal(assistant.writes.filter(item => item.path.endsWith('/runs')).length,0);
   await owner.screenshot({ path:resolve(output,'assistant-import.png'),fullPage:false });
   checked('four-image assistant import resumes after partial failure and rechecks explicitly removed attachments; zero model calls');
+  const communityPostsBeforeShare = report.writes.filter(item => item.method === 'POST' && item.path === '/api/community/posts').length;
+  await owner.getByRole('button', { name:'整理为社区草稿',exact:false }).click();
+  await owner.waitForURL(/\/community\?from=assistant$/);
+  await owner.getByRole('button', { name:'载入助手草稿',exact:false }).click();
+  assert.equal(await owner.getByLabel('分享你的观画感受', { exact:true }).inputValue(), assistant.messages[assistantId(2)].find(message => message.role === 'ASSISTANT').body);
+  assert.equal(report.writes.filter(item => item.method === 'POST' && item.path === '/api/community/posts').length, communityPostsBeforeShare);
+  checked('completed assistant reply returns to editable community draft without automatic publication');
   assert.equal(f.state.writes, 0, 'No Core writes or model calls'); assert.deepEqual(report.errors, []);
   report.pass = true;
 } catch (error) {

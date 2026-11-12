@@ -390,6 +390,69 @@ with sync_playwright() as playwright:
             }''')
             expect(fixture.page.locator('#runtime-host #view-home')).to_be_visible()
 
+        def composer_attachment_controls(fixture):
+            fixture.prepare()
+            fixture.mount()
+            fixture.compose()
+            with fixture.page.expect_file_chooser() as chooser:
+                fixture.page.locator('#runtime-host label[for="post-image-files"]').click()
+            chooser.value.set_files([
+                {'name': 'first.png', 'mimeType': 'image/png', 'buffer': PNG},
+                {'name': 'second.png', 'mimeType': 'image/png', 'buffer': PNG}])
+            fixture.page.locator('#runtime-host #post-audio-file').set_input_files(
+                {'name': 'sound.wav', 'mimeType': 'audio/wav', 'buffer': buffer.getvalue()})
+            expect(fixture.page.locator('#runtime-host #upload-selection img')).to_have_count(2)
+            expect(fixture.page.locator('#runtime-host label[for="post-image-files"]')).to_contain_text('已选 2 项')
+            fixture.page.locator('#runtime-host [data-clear-upload="post-image-files"]').click()
+            assert fixture.page.locator('#runtime-host #post-image-files').evaluate('(input)=>input.files.length') == 0
+            expect(fixture.page.locator('#runtime-host #post-image-files')).to_be_focused()
+            expect(fixture.page.locator('#runtime-host #upload-selection')).to_contain_text('sound.wav')
+            assert fixture.writes('/api/uploads') == [] and fixture.writes('/api/posts') == []
+            fixture.page.locator('#runtime-host [data-clear-upload="post-audio-file"]').click()
+            expect(fixture.page.locator('#runtime-host #upload-selection')).to_be_hidden()
+            expect(fixture.page.locator('#runtime-host label[for="post-image-files"]')).to_contain_text('选择图片')
+            expect(fixture.page.locator('#runtime-host #post-form textarea[name="content"]')).to_have_value('隔离发布，不连接真实服务器')
+
+        def composer_hidden_invalid_url(fixture):
+            fixture.prepare()
+            fixture.mount()
+            fixture.compose()
+            details = fixture.page.locator('#runtime-host #post-link-options')
+            expect(details).not_to_have_attribute('open', '')
+            details.locator('summary').click()
+            fixture.page.locator('#runtime-host input[name="audio"]').fill('invalid-url')
+            details.locator('summary').click()
+            fixture.page.locator('#runtime-host #publish-button').click()
+            expect(details).to_have_attribute('open', '')
+            expect(fixture.page.locator('#runtime-host input[name="audio"]')).to_be_focused()
+            assert fixture.writes('/api/posts') == []
+
+        def composer_restores_links_and_quote(fixture):
+            fixture.prepare('?view=create')
+            fixture.page.evaluate('''()=>sessionStorage.setItem('artlive.community.reference.draft.v1:42',JSON.stringify({actorId:'42',savedAt:Date.now(),draft:{
+              content:'保留的创作心得',images:'/uploads/linked.png',audio:'https://media.example.test/sound.wav',video:'',tags:'山水,写意',
+              quote:{id:8,available:true,content:'原帖内容',author:{id:99,nickname:'原帖作者'},createTime:'2026-11-12 00:00:00'}
+            }}))''')
+            fixture.mount()
+            expect(fixture.page.locator('#runtime-host #view-create')).to_be_visible()
+            expect(fixture.page.locator('#runtime-host #post-link-options')).to_have_attribute('open', '')
+            expect(fixture.page.locator('#runtime-host input[name="images"]')).to_have_value('/uploads/linked.png')
+            expect(fixture.page.locator('#runtime-host input[name="audio"]')).to_have_value('https://media.example.test/sound.wav')
+            expect(fixture.page.locator('#runtime-host #quote-compose-panel')).to_contain_text('原帖作者')
+            fixture.page.locator('#runtime-host #cancel-quote-draft').click()
+            expect(fixture.page.locator('#runtime-host #quote-compose-panel')).to_be_hidden()
+            expect(fixture.page.locator('#runtime-host #post-form textarea[name="content"]')).to_have_value('保留的创作心得')
+            assert fixture.writes('/api/uploads') == [] and fixture.writes('/api/posts') == []
+            fixture.page.locator('#runtime-host #publish-button').click()
+            expect(fixture.page.locator('#runtime-host #view-detail')).to_be_visible()
+            fixture.page.locator('#runtime-host .nav-link[data-view="create"]').click()
+            expect(fixture.page.locator('#runtime-host #post-link-options')).not_to_have_attribute('open', '')
+            expect(fixture.page.locator('#runtime-host #post-form textarea[name="content"]')).to_have_value('')
+            expect(fixture.page.locator('#runtime-host input[name="images"]')).to_have_value('')
+
+        scenario('composer-attachment-chooser-and-independent-removal', composer_attachment_controls)
+        scenario('composer-hidden-invalid-url-opens-before-validation', composer_hidden_invalid_url)
+        scenario('composer-restores-links-and-quote-and-resets-after-publish', composer_restores_links_and_quote)
         scenario('incomplete-keyboard-events-do-not-crash-community', incomplete_keyboard_events)
         scenario('retired-poet-link-opens-discovery-without-poet-requests', retired_poet_link)
         scenario('section-navigation-returns-to-top', navigation_returns_to_top)

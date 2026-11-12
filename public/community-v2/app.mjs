@@ -70,7 +70,33 @@ const uploadLimits = { image:10 * 1024 * 1024, audio:30 * 1024 * 1024, video:100
 let uploadPreviewUrls = [];
 function fileMimeType(file) { if (file.type) return file.type; const extension = file.name.split('.').pop().toLowerCase(); return ({ jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', webp:'image/webp', mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', m4a:'audio/mp4', mp4:'video/mp4', webm:'video/webm', mov:'video/quicktime' })[extension] || 'application/octet-stream'; }
 async function uploadFile(file, type) { if (file.size > uploadLimits[type]) throw new Error(`${file.name} 超过大小限制`); const headers = { 'Content-Type':fileMimeType(file) }; if (token) headers.Authorization = `Bearer ${token}`; const response = await fetch(`/api/uploads?type=${type}`, { method:'POST', headers, body:file }); const result = await response.json(); if (response.status === 401) { localStorage.removeItem('guohua_token'); token = null; current = null; showAuth(); } if (!response.ok) throw new Error(result.message || `${file.name} 上传失败`); return result.data.url; }
-function renderUploadSelection() { uploadPreviewUrls.forEach(URL.revokeObjectURL); uploadPreviewUrls = []; const images = [...$('#post-image-files').files]; const audio = $('#post-audio-file').files[0]; const video = $('#post-video-file').files[0]; const target = $('#upload-selection'); if (!images.length && !audio && !video) { target.innerHTML = ''; target.classList.add('hidden'); return; } const imageHtml = images.map(file => { const url = URL.createObjectURL(file); uploadPreviewUrls.push(url); return `<article><img src="${url}" alt="" /><span>${escapeHtml(file.name)}</span></article>`; }).join(''); const mediaHtml = [audio ? `<p><strong>音频</strong> ${escapeHtml(audio.name)}</p>` : '', video ? `<p><strong>视频</strong> ${escapeHtml(video.name)}</p>` : ''].join(''); target.innerHTML = `<div>${imageHtml}</div>${mediaHtml}`; target.classList.remove('hidden'); }
+const uploadPickers = [
+  { id:'post-image-files', label:'图片' },
+  { id:'post-audio-file', label:'音频' },
+  { id:'post-video-file', label:'视频' }
+];
+function renderUploadSelection() {
+  uploadPreviewUrls.forEach(URL.revokeObjectURL); uploadPreviewUrls = [];
+  const selections = uploadPickers.map(picker => ({ ...picker, files:[...$('#'+picker.id).files] }));
+  for (const {id,label,files} of selections) {
+    const tile = $('#'+id).closest('.file-picker');
+    tile.classList.toggle('is-selected', files.length > 0);
+    tile.querySelector('[data-picker-action]').textContent = files.length ? `已选 ${files.length} 项 · 重新选择` : `选择${label} ＋`;
+  }
+  const target = $('#upload-selection');
+  target.classList.toggle('hidden', !selections.some(picker => picker.files.length));
+  target.innerHTML = selections.filter(picker => picker.files.length).map(({id,label,files}) => {
+    const previews = id === 'post-image-files' ? `<div class="composer-image-previews">${files.map(file => {
+      const url = URL.createObjectURL(file); uploadPreviewUrls.push(url);
+      return `<article><img src="${url}" alt="" /><span title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span></article>`;
+    }).join('')}</div>` : `<p class="composer-selected-name">${escapeHtml(files[0].name)}</p>`;
+    return `<div class="composer-selection-group"><div class="composer-selection-heading"><strong>${label}${id==='post-image-files'?` · ${files.length} 张`:''}</strong><button type="button" class="text-button" data-clear-upload="${id}">移除${label}</button></div>${previews}</div>`;
+  }).join('');
+}
+function revealMediaLinks() {
+  const form = $('#post-form');
+  if (['images','audio','video'].some(name => form.elements[name].value.trim())) $('#post-link-options').open = true;
+}
 
 function postCard(post) {
   const images = (post.images || []).slice(0, 3).map(src => `<img src="${escapeHtml(src)}" alt="作品图片" loading="lazy" />`).join('');
@@ -265,11 +291,21 @@ $('#post-form').addEventListener('submit', context.guardEvent(async event => {
     if (videoFile) { status.textContent = '正在上传视频…'; data.video = await uploadFile(videoFile, 'video'); }
     status.textContent = '正在发布帖子…';
     const result = await api('/api/posts', { method:'POST', body:JSON.stringify(data) });
-    context.onPublished?.();showNotice(result.message); form.reset();quotedPostDraft=null;renderQuoteCompose(); renderUploadSelection(); status.textContent = '图片 10MB/张，音频 30MB，视频 100MB。'; renderDetail({ post:result.data, comments:[] }); go('detail');
+    context.onPublished?.();showNotice(result.message); form.reset();$('#post-link-options').open=false;quotedPostDraft=null;renderQuoteCompose(); renderUploadSelection(); status.textContent = '写下此刻的灵感，与同好分享。'; renderDetail({ post:result.data, comments:[] }); go('detail');
   } catch (error) { showNotice(error.message, 'error'); status.textContent = '上传或发布失败，请检查文件后重试。'; }
   finally { button.disabled = false; button.textContent = '发布帖子'; }
 }));
 ['#post-image-files','#post-audio-file','#post-video-file'].forEach(selector => $(selector).addEventListener('change', renderUploadSelection));
+$('#upload-selection').addEventListener('click', event => {
+  const button = event.target.closest('[data-clear-upload]');
+  if (!button) return;
+  const input = $('#'+button.dataset.clearUpload);
+  input.value = ''; renderUploadSelection(); input.focus();
+});
+$('#post-form').addEventListener('invalid', event => {
+  const details = event.target.closest('details');
+  if (details) details.open = true;
+}, true);
 document.querySelectorAll('[data-view]').forEach(element => element.addEventListener('click', () => go(element.dataset.view)));
 document.querySelectorAll('[data-admin-tab]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-admin-tab]').forEach(tab => tab.classList.toggle('active', tab === button)); ['users','posts','ai'].forEach(tab => $(`#admin-${tab}`).classList.toggle('hidden', tab !== button.dataset.adminTab)); }));
 $('#profile-entry').addEventListener('click', () => go('profile'));
@@ -295,6 +331,7 @@ window.communityApp = {
   openDetail,
   getQuote:()=>quotedPostDraft,
   setQuote:value=>{quotedPostDraft=value&&Number.isSafeInteger(value.id)&&value.id>0?value:null;renderQuoteCompose();},
+  revealMediaLinks,
   getToken: () => token
 };
 

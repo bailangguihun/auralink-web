@@ -98,6 +98,58 @@ input:disabled { background:var(--bg-strong,#ece3d5); }
 .notification-badge { background:var(--accent-strong,#5c3a26); }
 .community-menu { border-color:var(--community-line); background:var(--bg,#f5f0e7); }
 .app-screen.menu-open .community-menu-backdrop { background:rgba(44,34,24,.35); }
+/* Publishing uses the whole page until an actual quoted post needs its own column. */
+#view-create .post-editor-layout { grid-template-columns:minmax(0,1fr); gap:24px; }
+#view-create .post-editor-layout:has(#quote-compose-panel:not(.hidden)) { grid-template-columns:minmax(0,1fr) 300px; }
+#view-create .post-editor { min-width:0; gap:22px; }
+#view-create .composer-field { min-width:0; gap:9px; font-size:.875rem; }
+#view-create .composer-field input,#view-create .composer-field textarea { font-weight:400; }
+#view-create .composer-field-heading,.composer-section-heading { font-size:.875rem; font-weight:600; }
+#view-create .composer-section-heading { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:4px 16px; }
+#view-create .composer-hint { color:var(--muted); font-size:.75rem; font-weight:400; }
+#view-create textarea { min-height:156px; padding:16px; font-size:1rem; line-height:1.8; }
+#view-create .composer-media { display:grid; gap:12px; min-width:0; }
+#view-create .upload-pickers { gap:12px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+#view-create .file-picker {
+  position:relative; display:grid; grid-template-columns:36px minmax(0,1fr); align-content:start; gap:8px 12px;
+  padding:16px; border-style:solid; background:var(--surface-soft,rgba(255,252,245,.42));
+  transition:background-color .2s,border-color .2s;
+}
+#view-create .file-picker:hover,#view-create .file-picker.is-selected { border-color:var(--accent,#8b6b52); background:var(--accent-soft,rgba(139,107,82,.12)); }
+#view-create .file-picker:focus-within { outline:2px solid var(--accent-strong,#5c3a26); outline-offset:3px; }
+#view-create .composer-file-input { position:absolute; width:1px; height:1px; padding:0; border:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+#view-create .composer-upload-icon { display:grid; place-items:center; width:36px; height:36px; border-radius:8px; color:var(--accent-strong,#5c3a26); background:var(--accent-soft,rgba(139,107,82,.12)); }
+#view-create .composer-upload-icon svg { width:22px; height:22px; }
+#view-create .composer-upload-copy strong { font-size:.9375rem; line-height:1.5; }
+#view-create .composer-upload-copy small { min-height:0; margin:5px 0 0; font-size:.75rem; line-height:1.65; }
+#view-create .composer-picker-action { grid-column:2; color:var(--accent-strong,#5c3a26); font-size:.8125rem; font-weight:600; }
+#view-create .upload-selection { padding:0 14px; min-width:0; }
+#view-create .composer-selection-group { display:block; padding:12px 0; overflow:visible; }
+#view-create .composer-selection-group+.composer-selection-group { border-top:1px solid var(--community-line); }
+#view-create .composer-selection-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:.8125rem; }
+#view-create .composer-selection-heading button { padding:4px 0; color:var(--accent-strong,#5c3a26); font-size:.75rem; white-space:nowrap; }
+#view-create .composer-selection-heading button:hover { text-decoration:underline; }
+#view-create .composer-image-previews { display:flex; gap:10px; padding-top:9px; overflow:auto; }
+#view-create .upload-selection article,#view-create .upload-selection img { width:84px; }
+#view-create .upload-selection img { height:70px; }
+#view-create .composer-selected-name { margin:5px 0 0; overflow-wrap:anywhere; color:var(--muted); }
+#view-create .composer-links { min-width:0; border-top:1px solid var(--community-line); border-bottom:1px solid var(--community-line); }
+#view-create .composer-links summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 0; list-style:none; cursor:pointer; font-size:.875rem; }
+#view-create .composer-links summary::-webkit-details-marker { display:none; }
+#view-create .composer-links summary .composer-hint { margin-left:8px; }
+#view-create .composer-links summary>svg { width:18px; height:18px; flex-shrink:0; color:var(--muted); }
+#view-create .composer-links[open] summary>svg { transform:rotate(180deg); }
+#view-create .composer-link-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; padding:2px 0 20px; }
+#view-create .composer-link-fields>label:first-child { grid-column:1/-1; }
+#view-create .composer-link-fields label { font-size:.8125rem; color:var(--muted); }
+#view-create .composer-link-fields input { font-size:.875rem; }
+#view-create .editor-actions { gap:16px; }
+#view-create #publish-status { font-size:.8125rem; }
+#view-create #publish-button { flex-shrink:0; min-width:132px; }
+@media(max-width:1200px) {
+  #view-create .post-editor-layout:has(#quote-compose-panel:not(.hidden)) { grid-template-columns:minmax(0,1fr); }
+  #view-create .quote-compose-panel { position:static; order:-1; }
+}
 @media(max-width:1100px) {
   .page-heading .filters { width:min(480px,100%); }
 }
@@ -110,5 +162,16 @@ input:disabled { background:var(--bg-strong,#ece3d5); }
   .post-card { padding:18px; }
   .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .topbar { background:var(--bg,#f5f0e7); }
+  #view-create .upload-pickers { grid-template-columns:minmax(0,1fr); gap:10px; }
+  #view-create .file-picker { grid-template-columns:32px minmax(0,1fr) auto; align-items:center; gap:8px 12px; padding:12px; }
+  #view-create .composer-upload-icon { width:32px; height:36px; }
+  #view-create .composer-picker-action { grid-column:3; grid-row:1; max-width:88px; text-align:right; font-size:.75rem; }
+  #view-create textarea { min-height:168px; }
+  #view-create .composer-link-fields { grid-template-columns:minmax(0,1fr); }
 }
-@media(prefers-reduced-motion:reduce) { button { transition:none; } }
+@media(max-width:380px) {
+  #view-create .file-picker { grid-template-columns:32px minmax(0,1fr); }
+  #view-create .composer-upload-icon { grid-row:1/3; }
+  #view-create .composer-picker-action { grid-column:2; grid-row:2; max-width:none; text-align:left; }
+}
+@media(prefers-reduced-motion:reduce) { button,#view-create .file-picker { transition:none; } }

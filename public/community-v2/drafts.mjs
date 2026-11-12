@@ -58,7 +58,7 @@ export function installDrafts(body,context,options){
    restoring=true;
    for(const name of ['content','images','audio','video','tags'])if(typeof draft[name]==='string')form.elements[name].value=draft[name];
    galleryId=typeof draft.galleryArtworkId==='string'?draft.galleryArtworkId:null;
-   app.setQuote?.(draft.quote||null);restoring=false;
+   app.setQuote?.(draft.quote||null);app.revealMediaLinks?.();restoring=false;
   }
   hydrated=true;
   if(params.get('legacyPost')){const result=await app.api('/api/legacy-posts/'+encodeURIComponent(params.get('legacyPost')));if(!context.disposed())await app.openDetail(result.data.id);return;}

@@ -58,6 +58,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const replaceSession = useCallback((nextToken: string | null) => {
     const previous = identities.current.capture();
     const next = identities.current.replace(nextToken);
+    if(previous.token && previous.token !== nextToken) {
+      void fetch("/api/community/v2/api/media-session", {method:"DELETE",headers:{authorization:"Bearer "+previous.token,"content-type":"application/json"},body:"{}",keepalive:true}).catch(()=>{});
+    }
     // Clear synchronously, before any new account can render or issue reads.
     readCache.reset(next.generation);
     clearGalleryFeedSnapshot(previous.generation);

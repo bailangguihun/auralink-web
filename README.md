@@ -13,7 +13,7 @@
 | 账户 | 已接入 | 注册、登录、资料读取与会话恢复 |
 | 收藏 | 已接入 | 登录用户的作品收藏与个人收藏页 |
 | 创作工坊 | 接入中 | 按后端能力开放创作与工作流功能 |
-| 社区 | 已接入，按能力开放 | 登录交流、图文作品、点评与成长；[能力与验证](docs/community-learning.md) |
+| 社区 | 本地集成，待发布验收 | 原版帖子/房间、墨币与 AI 入口；[2.0 移植与边界](docs/community-v2-reference.md) |
 | 知识库、助手 | 待开放 | 等待相应后端接口完成后接入 |
 | 小程序登录桥接 | 可用 | 通过 `/mobile-auth` 安全接收小程序会话 |
 
@@ -57,7 +57,7 @@ npm run dev
 
 `NEXT_PUBLIC_API_BASE_URL` 必须是后端的 HTTP(S) 源地址，不能包含用户名、密码、模型服务地址或任何第三方服务凭据。
 
-社区另需匹配的独立 Node 服务及[服务端连接配置](docs/COMMUNITY_HOST_CONFIGURATION.md)。[schema 1 基础合同](docs/community-foundation.md)继续兼容；图文与成长需显式 002 迁移和私有媒体配置，本轮代码尚未部署生产。助手互导只填草稿，由用户主动发送或发布。
+社区另需匹配的独立 Node 服务及[服务端连接配置](docs/COMMUNITY_HOST_CONFIGURATION.md)。当前 `/community` 的[原版 2.0 移植](docs/community-v2-reference.md)需 Core 身份接口、显式 003 迁移、私有媒体和同源 WebSocket；须先验收后端再切换 Web，本轮未部署生产。[schema 1 基础合同](docs/community-foundation.md)与[图文成长数据/API](docs/community-learning.md)保留，旧成长、画廊来源和助手草稿入口已接入，最终实测状态以本轮验收记录为准。
 
 ## 常用命令
 

@@ -1,0 +1,68 @@
+# 原版国画社区 2.0 的 Web 移植
+
+本轮以用户提供的本地 `国画社区系统2.0/国画社区系统2.0` 为页面和功能基线，直接移植帖子、房间及语音的 DOM、CSS 和 JavaScript。布局调整是把原社区顶栏改成侧栏，手机使用抽屉；ArtLIVE 平台顶栏、登录入口与统一账号继续由平台提供。以下区分源码移植、本地实测和仍待验收的部分，不代表生产已经部署。
+
+## 原版来源与可核对变化
+
+下表 SHA-256 已与本轮工作区的 `stages/community-v2-20261112T1612+0800/BASELINE.json` 核对。源目录、源 SQLite 数据和媒体未修改，也没有把原版账号、默认管理员、密码或演示互动导入 ArtLIVE。
+
+| 原文件 | SHA-256 |
+| --- | --- |
+| `public/index.html` | `48473d17eec6f7691d5fb2b1f55d0d55c0132dc250fdb27376fd80cf0e1b251b` |
+| `public/style.css` | `03ba341af3a9d76e37632d22c4f5f92ef0608f6730a548a124e5642b771aa855` |
+| `public/app.js` | `51af4c6172e8c9144d12a0854b607ca5a1a7734ec7eb64b13b90e59aed4042ea` |
+| `public/rooms.js` | `e5c99f19d692e9a8795313921891baa7d6bb872e2f1bbdb7f1bdc03ed288de6f` |
+| `public/room-voice.js` | `b12de85b05c4cb52c2751dd91bfa64cd297352c57eb600ac5521cae7dc1d53c9` |
+| `server.js` | `8ff41c583e8edcaa0c2620c5bf9b2e3c3d4514aab4003bfb48aa446dabbc3164` |
+| `room-feature.js` | `167a7bdc373297c128b3e3217cf9d4f6c6121f5df5defc54d2ddc78ba8613604` |
+
+`public/community-v2/template.html` 保留原版页面的 145 个 DOM ID 和原有表单、导航目标，另增手机菜单及遮罩两个 ID。`reference.css` 保留原样式，根选择器从 `:root/body` 改为 `:host/.reference-body`，侧栏和平台顶栏让位规则独立放在 `sidebar.css`。原交互分别封装为 `app.mjs`、`rooms.mjs`、`room-voice.mjs` 的实例挂载函数，由 `runtime.mjs` 注入 DOM、请求、计时器和会话上下文；`drafts.mjs` 衔接既有账号草稿、画廊来源和成长入口。
+
+平台身份接入、PostgreSQL 事务适配、媒体权限修正、未知请求结果核对和房间切换竞态修正属于集成与安全修正，不是重新设计原版帖子或房间布局。原版 README、早期房间需求和后续源码存在功能阶段差异，本轮以随附的实际源码及最新用户要求核对能力。
+
+## 页面功能范围
+
+| 区域 | 移植的功能 | 验证边界 |
+| --- | --- | --- |
+| 社区首页 | 原版帖子卡、公开房间入口、搜索、标签、最新/最多点赞及分页 | 本地双账号帖子与收藏流程已实测；未对全部筛选组合做穷举 |
+| 发布与详情 | 图片/音频/视频上传或 URL 引用、标签、删除、点赞、收藏、评论回复及评论点赞、引用帖快照 | 本地发帖、收藏和评论已实测；原版无帖子编辑按钮，后端 PUT 保留 |
+| 我的内容与通知 | 我的帖子、收藏、标签和通知、社区展示资料 | 入口与原交互保留，不把入口存在当作所有分支通过 |
+| 房间 | 公开/私有、邀请码、访客/成员/房主、成员管理、转让、结束/重开、历史作品 | 已实测创建、加入、成员升级和聊天；其余管理及恢复路径需独立覆盖 |
+| 画布 | 多作品会话、缩放/平移、矩形/椭圆/套索标注、绘制组、共享视角及撤销/清空 | 服务端和客户端已移植；不能由基础入房测试推定完整画布验收 |
+| 语音 | 入房询问、默认关麦、角色约束、最多六人开麦、权限改变停止语音 | 同源 WebSocket 和虚拟麦克风已实测；真实跨网络音频未验 |
+| 墨币与付费房间 | 钱包、流水、任务、投币、专家资格、门票、七天待结算与退款管理 | 接口夹具测试覆盖部分规则；不是现实支付或生产运营验收 |
+| AI 与后台 | AI 诗人/BYOK、主题和人格管理、经同意的房间 AI 点评草稿、管理员内容治理 | 合同测试使用模拟模型；真实付费调用未验 |
+
+作品编辑沿用已接入的原成长对话框，不把后端存在 PUT 接口写成原版页面已有编辑入口。全部媒体格式、引用、成员治理和后台分支仍需按具体验收记录判断，不能由入口存在推定全部通过。
+
+## 平台会话、HTTP 与实时连接
+
+`/community` 由 `ProtectedRoute` 和 [CommunityV2Screen](../components/community/community-v2-screen.tsx) 接管。挂载只读取平台已有 token 和用户身份，不另建社区登录。原登录表单 DOM 保留在模板中但不开放第二套认证；失效会话和退出登录回到平台会话处理。
+
+ShadowRoot 将原版 CSS 和 DOM 限制在社区内部。每个会话代次独立持有请求、事件、计时器、WebSocket 和麦克风；卸载或换账号时关闭房间/语音并取消待处理读取。token 不写入原版的 `guohua_token` 存储键。
+
+浏览器 HTTP 统一从 `/api/community/v2` 代理到 Node 的 `/api/v2/community`。原版路径继续附在该前缀之后，例如浏览器的 `/api/community/v2/api/posts` 和 `/api/community/v2/api/v2/rooms`。`COMMUNITY_INTERNAL_ORIGIN` 仍是仅服务端可见的 loopback 配置，见 [主机配置](COMMUNITY_HOST_CONFIGURATION.md)。
+
+浏览器先通过认证 POST 获取 30 秒、一次使用的 WebSocket ticket，再连接同源 `/api/community-ws?ticket=…`；Node middleware 将升级转给 loopback Node `/ws`。URL 不携带平台 JWT，Node 核对来源与成员权限。HTTP API 可访问不代表反向代理已经支持 WebSocket 升级。
+
+私有媒体使用短期、HttpOnly、SameSite=Strict 的不透明访问 cookie，服务端读取时重新核对平台身份与资源权限。该 cookie 不等于公开静态挂载。BYOK Key 只在当前页面内存和当前模型请求中使用，不写入 token 存储或发布资料。
+
+## 写入、回执与旧功能
+
+`runtime.mjs` 给写入分配 `x-request-id`，把账号范围内的未确认操作保存在当前标签页。连接中断或 5xx 后通过 GET `/api/operations/{requestId}` 核对，不自动重发原 POST。`UNKNOWN/RUNNING` 不能当作未提交；服务器保留 `COMMITTED/FAILED` 的结果。一次复合发布可能含多次独立上传，不能据此宣称所有文件和发帖在一个数据库事务内完成。
+
+原版钱包读取可能首次创建钱包和初始墨币，钱包/房间收入读取还可能触发到期结算。打开社区会刷新钱包，因此本地浏览器功能验证含本地写入，不能称为只读验收。
+
+旧 [图文与作品成长](community-learning.md) 的 UUID、成长数据和基础 API 保留。旧帖链接、画廊来源带入、按账号隔离的 24 小时草稿、助手到社区的手动草稿，以及原成长对话框与其中的社区到助手交接均已接入代码；成长对话框保留作品编辑、点评采纳、任务和版本功能。交接只填草稿，用户主动发送或发布。最终浏览器实测状态由本轮验收记录更新，代码接入不等于所有交接分支均已实测。
+
+新 `/community` 不静默切换到旧 schema 页面：必须先满足下述后端前置条件，再验收匹配 Web。
+
+## 本地验证与发布前置条件
+
+本轮本地启动使用原本地真实数据副本的独立克隆，源副本保持。启动记录为 11067 幅画作、15 个平台账号；这是该快照的本地计数，不是生产现状。工作区入口为 `http://localhost:3000/community`，Core 为 5000，Community 为 3178；端口属于本地配置，不是发布默认值。平台登录/注册仍为 `/login`、`/register`，新注册只写入本地克隆。
+
+阶段 `BROWSER_RESULT.json` 记录 `same_origin_ws=true`、`synthetic_microphone=true`、`mobile_no_overflow=true`、`errors=[]`，同时明确 `real_remote_voice=false`。本地双账号已验证发帖、收藏、评论、建房/入房、上传作品、升级成员、实时聊天、同源 WS 语音收听及虚拟麦克风开关；真实数据和截图只保留在仓库外阶段目录。
+
+最终 Web 隔离生产构建、Lint 和 265 项测试通过；旧链接、画廊/助手交接、草稿和成长对话框的最终浏览器结果由本轮验收记录更新。Core 已有原生 PostgreSQL 最小角色的七组合同测试；这不把前端结果外推为全部原版功能、真实设备、跨网络语音、付费模型或生产性能通过。
+
+发布前须先具备匹配的 Core `/api/user/community-identity`、显式 schema 3 迁移、私有媒体目录、受管 Community 服务及同源 WebSocket 升级，并验证旧记录与成长数据保留，之后才切换 Web。schema 3、媒体和生产激活需 Deploy 的有限 successor；本地服务、代码合并或打包均不能替代正式上线证明。

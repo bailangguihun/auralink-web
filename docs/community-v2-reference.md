@@ -1,6 +1,6 @@
 # 原版国画社区 2.0 的 Web 移植
 
-本轮以用户提供的本地 `国画社区系统2.0/国画社区系统2.0` 为页面和功能基线，直接移植帖子、房间及语音的 DOM、CSS 和 JavaScript。布局调整是把原社区顶栏改成侧栏，手机使用抽屉；ArtLIVE 平台顶栏、登录入口与统一账号继续由平台提供。以下区分源码移植、本地实测和仍待验收的部分，不代表生产已经部署。
+本轮以用户提供的本地 `国画社区系统2.0/国画社区系统2.0` 为页面和功能基线，移植帖子、房间及语音的布局和交互。按最新要求移除 AI 诗人，视觉使用 ArtLIVE 共用字体、纸色/棕色设计变量及半透明面板；社区保留侧栏，手机使用抽屉。平台顶栏、登录入口与统一账号继续由 ArtLIVE 提供。以下区分源码移植、本地实测和仍待验收的部分，不代表生产已经部署。
 
 ## 原版来源与可核对变化
 
@@ -16,9 +16,11 @@
 | `server.js` | `8ff41c583e8edcaa0c2620c5bf9b2e3c3d4514aab4003bfb48aa446dabbc3164` |
 | `room-feature.js` | `167a7bdc373297c128b3e3217cf9d4f6c6121f5df5defc54d2ddc78ba8613604` |
 
-`public/community-v2/template.html` 保留原版页面的 145 个 DOM ID 和原有表单、导航目标，另增手机菜单及遮罩两个 ID。`reference.css` 保留原样式，根选择器从 `:root/body` 改为 `:host/.reference-body`，侧栏和平台顶栏让位规则独立放在 `sidebar.css`。原交互分别封装为 `app.mjs`、`rooms.mjs`、`room-voice.mjs` 的实例挂载函数，由 `runtime.mjs` 注入 DOM、请求、计时器和会话上下文；`drafts.mjs` 衔接既有账号草稿、画廊来源和成长入口。
+`public/community-v2/template.html` 保留帖子与房间的结构和表单，移除 AI 诗人页面、导航和 AI 运营面板。`reference.css` 提供原版布局及交互结构，根选择器从 `:root/body` 改为 `:host/.reference-body`，字体和语义配色引用平台变量；`sidebar.css` 负责侧栏及平台顶栏让位，`artlive-theme.css` 用 Gallery、Knowledge、Studio 共用的设计变量统一面板、标题、按钮、表单、标签、房间和弹窗。社区不再使用独立“墨韵”品牌或绿色渐变背景。原交互分别封装为 `app.mjs`、`rooms.mjs`、`room-voice.mjs` 的实例挂载函数，由 `runtime.mjs` 注入 DOM、请求、计时器和会话上下文；`drafts.mjs` 衔接既有账号草稿、画廊来源和成长入口。
 
 平台身份接入、PostgreSQL 事务适配、媒体权限修正、未知请求结果核对和房间切换竞态修正属于集成与安全修正，不是重新设计原版帖子或房间布局。原版 README、早期房间需求和后续源码存在功能阶段差异，本轮以随附的实际源码及最新用户要求核对能力。
+
+AI 诗人的旧 `?view=ai` 链接回到发现页，页面不渲染诗人 Key、聊天或运营表单；Web BFF 不再开放 `/api/ai`，Node 的诗人和 AI 运营接口均返回 404。房间的 AI 辅助点评及其显式同意流程继续保留。
 
 ## 页面功能范围
 
@@ -31,7 +33,7 @@
 | 画布 | 多作品会话、缩放/平移、矩形/椭圆/套索标注、绘制组、共享视角及撤销/清空 | 服务端和客户端已移植；不能由基础入房测试推定完整画布验收 |
 | 语音 | 入房询问、默认关麦、角色约束、最多六人开麦、权限改变停止语音 | 同源 WebSocket 和虚拟麦克风已实测；真实跨网络音频未验 |
 | 墨币与付费房间 | 钱包、流水、任务、投币、专家资格、门票、七天待结算与退款管理 | 接口夹具测试覆盖部分规则；不是现实支付或生产运营验收 |
-| AI 与后台 | AI 诗人/BYOK、主题和人格管理、经同意的房间 AI 点评草稿、管理员内容治理 | 合同测试使用模拟模型；真实付费调用未验 |
+| 房间 AI 与后台 | 经同意的房间 AI 点评草稿、管理员内容治理；AI 诗人及其运营已移除 | 合同测试使用模拟模型；真实付费调用未验 |
 
 作品编辑沿用已接入的原成长对话框，不把后端存在 PUT 接口写成原版页面已有编辑入口。全部媒体格式、引用、成员治理和后台分支仍需按具体验收记录判断，不能由入口存在推定全部通过。
 
@@ -39,7 +41,7 @@
 
 `/community` 由 `ProtectedRoute` 和 [CommunityV2Screen](../components/community/community-v2-screen.tsx) 接管。挂载只读取平台已有 token 和用户身份，不另建社区登录。原登录表单 DOM 保留在模板中但不开放第二套认证；失效会话和退出登录回到平台会话处理。
 
-ShadowRoot 将原版 CSS 和 DOM 限制在社区内部。每个会话代次独立持有请求、事件、计时器、WebSocket 和麦克风；卸载或换账号时关闭房间/语音并取消待处理读取。token 不写入原版的 `guohua_token` 存储键。
+ShadowRoot 将社区样式和 DOM 限制在内部，并继承平台的共用设计变量。每个会话代次独立持有请求、事件、计时器、WebSocket 和麦克风；卸载或换账号时关闭房间/语音并取消待处理读取。token 不写入原版的 `guohua_token` 存储键。
 
 浏览器 HTTP 统一从 `/api/community/v2` 代理到 Node 的 `/api/v2/community`。原版路径继续附在该前缀之后，例如浏览器的 `/api/community/v2/api/posts` 和 `/api/community/v2/api/v2/rooms`。`COMMUNITY_INTERNAL_ORIGIN` 仍是仅服务端可见的 loopback 配置，见 [主机配置](COMMUNITY_HOST_CONFIGURATION.md)。
 

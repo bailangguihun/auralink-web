@@ -1,7 +1,7 @@
 import {configuredCommunityOrigin} from "@/lib/community-host-origin";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
-const apiRoots=new Set(["user","uploads","search","ai","admin","coins","notifications","posts","comments","tags","v2","media-session","ws-ticket","operations","legacy-posts","gallery-references"]);
+const apiRoots=new Set(["user","uploads","search","admin","coins","notifications","posts","comments","tags","v2","media-session","ws-ticket","operations","legacy-posts","gallery-references"]);
 function failure(status:number,message:string){return Response.json({code:status,message},{status,headers:{"cache-control":"private, no-store"}});}
 async function proxy(request:Request,context:{params:Promise<{path:string[]}>}){
  const parts=(await context.params).path;

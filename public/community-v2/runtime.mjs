@@ -20,13 +20,13 @@ export async function mountCommunity(host, options) {
  const runTask=task=>Promise.resolve(task).catch(error=>{if(!isCancelled(error))throw error;});
  const guardEvent=handler=>function(...args){if(inactive())return;try{return runTask(handler.apply(this,args));}catch(error){if(!isCancelled(error))throw error;}};
  const root=host.shadowRoot || host.attachShadow({mode:'open'});
- const assets=await Promise.all(['template.html','reference.css','sidebar.css'].map(async file=>{
+ const assets=await Promise.all(['template.html','reference.css','sidebar.css','artlive-theme.css'].map(async file=>{
   const response=await globalThis.fetch('/community-v2/'+file,{signal:controller.signal});
   if(!response.ok)throw new Error('社区页面资源加载失败');return response.text();
  }));
  if(!host.isConnected||!options.isCurrent())return ()=>{};
  root.innerHTML='';
- const style=globalThis.document.createElement('style');style.textContent=assets[1]+'\n'+assets[2];
+ const style=globalThis.document.createElement('style');style.textContent=assets[1]+'\n'+assets[2]+'\n'+assets[3];
  const body=globalThis.document.createElement('div');body.className='reference-body';body.innerHTML=assets[0];root.append(style,body);
  const document=new Proxy(globalThis.document,{get(target,key){
   if(key==='body')return body;
@@ -130,7 +130,7 @@ export async function mountCommunity(host, options) {
  backdrop.addEventListener('click',closeMenu);
  body.addEventListener('keydown',event=>{if(event.key==='Escape')closeMenu();});
  const params=new URLSearchParams(globalThis.location.search);
- const views=['home','rooms','create','mine','favorites','coins','notifications','tags','ai','profile','admin'];
+ const views=['home','rooms','create','mine','favorites','coins','notifications','tags','profile','admin'];
  const initialView=views.includes(params.get('view'))?params.get('view'):'home';
  const context={document,window:instanceWindow,fetch,location:globalThis.location,setTimeout,clearTimeout,setInterval,clearInterval,requestAnimationFrame,cancelAnimationFrame,
   disposed:inactive,isCancelled,runTask,guardEvent,assertCurrent,

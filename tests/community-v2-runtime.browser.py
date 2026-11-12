@@ -356,6 +356,26 @@ with sync_playwright() as playwright:
             expect(fixture.page.locator('#runtime-host #profile-entry')).to_have_text('乙')
             expect(fixture.page.locator('#runtime-host #app-screen')).to_be_visible()
 
+        def retired_poet_link(fixture):
+            fixture.prepare('?view=ai')
+            fixture.mount()
+            expect(fixture.page.locator('#runtime-host #view-home')).to_be_visible()
+            assert fixture.page.locator('#runtime-host [data-view="ai"], #runtime-host #view-ai, #runtime-host #admin-ai, #runtime-host #deepseek-key').count() == 0
+            assert fixture.page.locator('#runtime-host #room-deepseek-key').count() == 1
+            assert 'view=home' in fixture.page.url
+            assert not any(call['path'].startswith(('/api/ai/', '/api/admin/ai/')) for call in fixture.calls)
+
+        def navigation_returns_to_top(fixture):
+            fixture.prepare()
+            fixture.mount()
+            fixture.page.evaluate('()=>{document.querySelector("#runtime-host").style.minHeight="3000px";window.scrollTo(0,500);}')
+            assert fixture.page.evaluate('()=>window.scrollY') == 500
+            fixture.page.locator('#runtime-host .nav-link[data-view="create"]').dispatch_event('click')
+            expect(fixture.page.locator('#runtime-host #view-create')).to_be_visible()
+            fixture.page.wait_for_function('()=>window.scrollY===0')
+
+        scenario('retired-poet-link-opens-discovery-without-poet-requests', retired_poet_link)
+        scenario('section-navigation-returns-to-top', navigation_returns_to_top)
         scenario('truncated-200-reconciles-with-one-post', truncated_success)
         scenario('storage-write-refusal-before-post', lambda fixture: storage_refusal(fixture, 'setItem'))
         scenario('storage-read-refusal-before-post', lambda fixture: storage_refusal(fixture, 'getItem'))

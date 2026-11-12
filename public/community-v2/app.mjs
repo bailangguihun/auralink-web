@@ -9,8 +9,7 @@ let token = localStorage.getItem('guohua_token');
 let current = null;
 let feedPage = 1;
 let feedMode = 'home';
-let activeAgentId = null;
-let sessionDeepSeekKey = '';
+
 let coinWallet = null;
 let activeCoinPostId = null;
 let quotedPostDraft = null;
@@ -66,7 +65,7 @@ function quoteCard(quote,{expanded=false}={}){if(!quote)return '';if(!quote.avai
 function renderQuoteCompose(){const panel=$('#quote-compose-panel');if(!quotedPostDraft){panel.innerHTML='';panel.classList.add('hidden');return;}panel.classList.remove('hidden');panel.innerHTML=`<header><div><span class="eyebrow">QUOTED POST</span><h3>正在引用这篇帖子</h3></div><button id="cancel-quote-draft" class="text-button" type="button">取消引用</button></header>${quoteCard(quotedPostDraft,{expanded:true})}<p class="muted">请至少写下 1 个字的自己的观点。引用内容不会复制媒体文件。</p>`;$('#cancel-quote-draft').addEventListener('click',()=>{quotedPostDraft=null;renderQuoteCompose();});}
 async function startQuote(postId){try{const result=await api(`/api/posts/${postId}`);const post=result.data.post;if(post.author?.id===current?.id)return showNotice('不能引用自己的帖子','error');quotedPostDraft={id:post.id,available:true,content:post.content,firstImage:post.images?.[0]||null,author:post.author,createTime:post.createTime,edited:false};renderQuoteCompose();go('create');$('#post-form textarea[name="content"]').focus();}catch(error){showNotice(error.message,'error');}}
 async function refreshNotificationBadge(){if(!current)return;try{const result=await api('/api/notifications');const badge=$('#notification-badge');badge.textContent=result.data.unread;badge.classList.toggle('hidden',!result.data.unread);}catch{}}
-function aiCredentialHeaders() { const headers = {}; const key = $('#deepseek-key')?.value.trim() || sessionDeepSeekKey; const model = $('#deepseek-model')?.value.trim() || 'deepseek-chat'; if (key) { sessionDeepSeekKey = key; headers['X-DeepSeek-Key'] = key; headers['X-DeepSeek-Model'] = model; } return headers; }
+
 const uploadLimits = { image:10 * 1024 * 1024, audio:30 * 1024 * 1024, video:100 * 1024 * 1024 };
 let uploadPreviewUrls = [];
 function fileMimeType(file) { if (file.type) return file.type; const extension = file.name.split('.').pop().toLowerCase(); return ({ jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', webp:'image/webp', mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', m4a:'audio/mp4', mp4:'video/mp4', webm:'video/webm', mov:'video/quicktime' })[extension] || 'application/octet-stream'; }
@@ -174,35 +173,17 @@ function renderDetail(data) {
   $('#detail-delete')?.addEventListener('click', context.guardEvent(async () => { if (!confirm('确定删除这篇帖子吗？')) return; const url = current.role === 'admin' ? `/api/admin/posts/${post.id}` : `/api/posts/${post.id}`; await api(url, { method:'DELETE' }); showNotice('帖子已删除'); detailOriginView=null; go('home'); }));
 }
 
-async function loadAi() {
-  try {
-    const result = await api('/api/ai/agents');
-    $('#ai-agents').innerHTML = result.data.map(agent => `<button class="agent-card ${agent.id === activeAgentId ? 'active' : ''}" data-agent="${agent.id}">${agent.avatar ? `<img src="${escapeHtml(agent.avatar)}" alt="" />` : '<span>诗</span>'}<strong>${escapeHtml(agent.name)}</strong><small>${escapeHtml(agent.persona)}</small></button>`).join('');
-    $('#ai-agents').querySelectorAll('[data-agent]').forEach(button => button.addEventListener('click', () => selectAgent(Number(button.dataset.agent))));
-    if (!activeAgentId && result.data[0]) selectAgent(result.data[0].id);
-  } catch (error) { $('#ai-agents').innerHTML = `<p class="empty">${escapeHtml(error.message)}</p>`; }
-}
 async function loadCoins(){const summary=$('#coin-wallet-summary'),tasks=$('#coin-task-list'),ledger=$('#coin-ledger-list');summary.innerHTML='<p class="empty">正在读取钱包…</p>';try{const [taskResult,ledgerResult]=await Promise.all([api('/api/coins/tasks'),api('/api/coins/ledger?limit=50')]);coinWallet=taskResult.data.wallet;$('#coin-balance-entry').textContent=`墨币 ${coinWallet.balance}`;summary.innerHTML=`<article><span>当前余额</span><strong>${coinWallet.balance}</strong><small>枚墨币</small></article><article><span>累计获得</span><strong>${coinWallet.lifetimeEarned}</strong><small>不可充值或提现</small></article><article><span>累计使用</span><strong>${coinWallet.lifetimeSpent}</strong><small>用于支持作品</small></article>`;tasks.innerHTML=taskResult.data.items.map(task=>{const percent=Math.min(100,Math.round(task.progress/task.target*100));const state=task.claimable?`<button class="primary compact" data-claim-task="${task.code}">领取 ${task.reward} 枚</button>`:task.completed?'<span class="task-state">已领取</span>':'<span class="task-state">未完成</span>';return `<article class="coin-task"><div><strong>${escapeHtml(task.name)}</strong><p>${escapeHtml(task.description)}</p>${task.limitText?`<small>${escapeHtml(task.limitText)}</small>`:''}</div><div class="task-progress"><span style="width:${percent}%"></span></div><small>${task.progress}/${task.target}</small>${state}</article>`;}).join('');tasks.querySelectorAll('[data-claim-task]').forEach(button=>button.addEventListener('click',context.guardEvent(async()=>{button.disabled=true;try{const result=await api(`/api/coins/tasks/${button.dataset.claimTask}/claim`,{method:'POST',body:'{}'});showNotice(result.message);await loadCoins();}catch(error){showNotice(error.message,'error');button.disabled=false;}})));const items=ledgerResult.data.items;ledger.innerHTML=items.length?items.map(item=>`<article class="coin-ledger-row"><span class="${item.amount>0?'coin-in':'coin-out'}">${item.amount>0?'+':''}${item.amount}</span><div><strong>${escapeHtml(item.description)}</strong><small>${formatTime(item.createdAt)} · 余额 ${item.balanceAfter}</small></div></article>`).join(''):'<p class="empty">暂无墨币流水。</p>';}catch(error){summary.innerHTML=`<p class="empty">${escapeHtml(error.message)}</p>`;tasks.innerHTML='';ledger.innerHTML='';}}
 async function loadRoomIncome(){try{const [wallet,income]=await Promise.all([api('/api/coins/wallet'),api('/api/coins/room-income')]);$('#room-income-summary').textContent=`可支付房间门票的任务墨币：${wallet.data.roomSpendable} 枚（初始赠币不可用于门票） · 待结算房费：${income.data.pending} 枚 · 已结算房费：${income.data.settled} 枚${income.data.refundDebt?` · 待抵扣退款：${income.data.refundDebt} 枚`:''}。房费满 7 天后，在认证有效且房间开放时结算。`;}catch(error){$('#room-income-summary').textContent=error.message;}}
 async function loadNotifications(){const target=$('#notification-list');target.innerHTML='<p class="empty">正在加载通知…</p>';try{const result=await api('/api/notifications');const items=result.data.items;target.innerHTML=items.length?items.map(item=>`<article class="notification-row ${item.readAt?'':'unread'}"><div>${avatar(item.actor,'mini')}</div><button data-notification-post="${item.targetId}"><strong>${escapeHtml(item.message)}</strong><small>${formatTime(item.createTime)}</small></button></article>`).join(''):'<p class="empty">还没有通知。</p>';target.querySelectorAll('[data-notification-post]').forEach(button=>button.addEventListener('click',()=>openDetail(Number(button.dataset.notificationPost))));await api('/api/notifications/read',{method:'POST',body:'{}'});refreshNotificationBadge();}catch(error){target.innerHTML=`<p class="empty">${escapeHtml(error.message)}</p>`;}}
-async function selectAgent(id) {
-  try {
-  activeAgentId = id; await loadAi();
-  const result = await api(`/api/ai/agents/${id}/messages`); const agent = result.data.agent;
-  $('#chat-header').innerHTML = `<div>${agent.avatar ? `<img src="${escapeHtml(agent.avatar)}" alt="" />` : ''}<span><strong>${escapeHtml(agent.name)}</strong><small>${escapeHtml(agent.persona)}</small></span></div>`;
-  renderMessages(result.data.messages);
-
-  } catch(error) { if(!context.isCancelled(error))throw error; }
-}
-function renderMessages(messages) { const target = $('#chat-messages'); target.innerHTML = messages.length ? messages.map(message => `<div class="chat-message ${message.role}"><p>${escapeHtml(message.content)}</p><small>${formatTime(message.createTime)}</small></div>`).join('') : '<p class="empty">从一句诗、一幅画或一个历史问题开始。</p>'; target.scrollTop = target.scrollHeight; }
 
 async function loadAdmin() {
   try {
   if (current?.role !== 'admin') return;
   const result = await api('/api/admin/overview');
-  const labels = { users:'用户总数', activeUsers:'正常用户', posts:'在线帖子', comments:'评论总数', aiMessages:'AI对话' };
+  const labels = { users:'用户总数', activeUsers:'正常用户', posts:'在线帖子', comments:'评论总数' };
   $('#admin-overview').innerHTML = Object.entries(result.data).map(([key, value]) => `<article><strong>${value}</strong><span>${labels[key]}</span></article>`).join('');
-  await Promise.all([loadAdminUsers(), loadAdminPosts(), loadAdminAi(),loadAdminRoomPayments()]);
+  await Promise.all([loadAdminUsers(), loadAdminPosts(),loadAdminRoomPayments()]);
 
   } catch(error) { if(!context.isCancelled(error))throw error; }
 }
@@ -226,18 +207,9 @@ async function loadAdminPosts() {
 
   } catch(error) { if(!context.isCancelled(error))throw error; }
 }
-async function loadAdminAi() {
-  try {
-  const result = await api('/api/admin/ai/settings');
-  $('#admin-theme-form [name="holidayTheme"]').value = result.data.holidayTheme || '';
-  $('#admin-agent-select').innerHTML = result.data.agents.map(agent => `<option value="${agent.id}">${escapeHtml(agent.name)}</option>`).join('');
-  $('#admin-agent-editor').innerHTML = result.data.agents.map(agent => `<form class="settings-form agent-editor" data-agent-editor="${agent.id}"><h3>${escapeHtml(agent.name)}资料</h3><textarea name="persona" rows="3">${escapeHtml(agent.persona)}</textarea><input name="avatar" value="${escapeHtml(agent.avatar || '')}" placeholder="头像链接" /><button class="secondary inline">保存智能体</button></form>`).join('');
-  $('#admin-agent-editor').querySelectorAll('[data-agent-editor]').forEach(form => form.addEventListener('submit', context.guardEvent(async event => { event.preventDefault(); const result = await api(`/api/admin/ai/agents/${form.dataset.agentEditor}`, { method:'PUT', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); showNotice(result.message); loadAdminAi(); })));
-
-  } catch(error) { if(!context.isCancelled(error))throw error; }
-}
 
 function go(view) {
+  if(view==='ai')view='home';
   if(context.disposed())return;
   if (view === 'admin' && current?.role !== 'admin') return showNotice('仅管理员可访问', 'error');
   const previousView = activeView;
@@ -249,6 +221,7 @@ function go(view) {
   document.querySelectorAll('.view').forEach(element => element.classList.toggle('hidden', element.id !== `view-${view}`));
   document.querySelectorAll('.nav-link').forEach(element => element.classList.toggle('active', element.dataset.view === view));
   activeView = view; context.onView(view);
+  if(view!==previousView&&!restoreHome)window.scrollTo(0,0);
   if (view === 'home') {
     feedMode = 'home';
     if (restoreHome) requestAnimationFrame(() => window.scrollTo(0, homeScrollY));
@@ -261,7 +234,6 @@ function go(view) {
   if (view === 'notifications') loadNotifications();
   if (view === 'tags') loadTags();
   if (view === 'profile') fillProfile();
-  if (view === 'ai') loadAi();
   if (view === 'admin') loadAdmin();
   if (view !== 'detail') detailOriginView = null;
 }
@@ -298,11 +270,6 @@ $('#post-form').addEventListener('submit', context.guardEvent(async event => {
   finally { button.disabled = false; button.textContent = '发布帖子'; }
 }));
 ['#post-image-files','#post-audio-file','#post-video-file'].forEach(selector => $(selector).addEventListener('change', renderUploadSelection));
-$('#chat-form').addEventListener('submit', context.guardEvent(async event => { event.preventDefault(); if (!activeAgentId) return showNotice('请先选择诗人', 'error'); const data = Object.fromEntries(new FormData(event.target)); const button = event.target.querySelector('button'); button.disabled = true; button.textContent = '诗人思索中…'; try { const result = await api(`/api/ai/agents/${activeAgentId}/chat`, { method:'POST', headers:aiCredentialHeaders(), body:JSON.stringify(data) }); event.target.reset(); if (result.data.fallback) showNotice(result.message, 'error'); await selectAgent(activeAgentId); } catch (error) { showNotice(error.message, 'error'); } finally { button.disabled = false; button.textContent = '发送'; } }));
-$('#ai-test-connection').addEventListener('click', context.guardEvent(async () => { const status = $('#ai-connection-status'); const button = $('#ai-test-connection'); const headers = aiCredentialHeaders(); if (!headers['X-DeepSeek-Key']) { status.textContent = '请先输入 API Key'; status.className = 'muted error-text'; return; } button.disabled = true; button.textContent = '测试中…'; status.textContent = ''; try { const result = await api('/api/ai/test', { method:'POST', headers }); status.textContent = `${result.message} · ${result.data.model}`; status.className = 'muted success-text'; } catch (error) { status.textContent = error.message; status.className = 'muted error-text'; } finally { button.disabled = false; button.textContent = '测试连接'; } }));
-$('#ai-clear-key').addEventListener('click', () => { sessionDeepSeekKey = ''; $('#deepseek-key').value = ''; $('#ai-connection-status').textContent = '已清除'; $('#ai-connection-status').className = 'muted'; });
-$('#admin-theme-form').addEventListener('submit', context.guardEvent(async event => { event.preventDefault(); const result = await api('/api/admin/ai/settings', { method:'PUT', body:JSON.stringify(Object.fromEntries(new FormData(event.target))) }); showNotice(result.message); }));
-$('#admin-ai-post-form').addEventListener('submit', context.guardEvent(async event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.target)); data.tags = data.tags.split(/[,，#\s]+/).filter(Boolean); try { const result = await api('/api/admin/ai/publish', { method:'POST', body:JSON.stringify(data) }); showNotice(result.message); event.target.reset(); loadAdminAi(); } catch (error) { showNotice(error.message, 'error'); } }));
 document.querySelectorAll('[data-view]').forEach(element => element.addEventListener('click', () => go(element.dataset.view)));
 document.querySelectorAll('[data-admin-tab]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-admin-tab]').forEach(tab => tab.classList.toggle('active', tab === button)); ['users','posts','ai'].forEach(tab => $(`#admin-${tab}`).classList.toggle('hidden', tab !== button.dataset.adminTab)); }));
 $('#profile-entry').addEventListener('click', () => go('profile'));

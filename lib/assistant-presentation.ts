@@ -40,18 +40,38 @@ export function assistantVisibleMarkdown(value: string): string {
 export type ImageCrop = { x: number; y: number; width: number; height: number };
 export type IllustratedSection = { markdown: string; image?: { id: string; label: string; crop: ImageCrop } };
 
+function parseCrop(parts: string[]): ImageCrop | undefined {
+  if (parts[0] === 'bbox_2d') {
+    const coordinates = parts.slice(1);
+    if (coordinates.length !== 4 || !coordinates.every(part => /^\d{1,3}$/.test(part))) return;
+    const [x1, y1, x2, y2] = coordinates.map(Number);
+    if (x2 - x1 < 50 || y2 - y1 < 50) return;
+    return { x: x1 / 1000, y: y1 / 1000, width: (x2 - x1) / 1000, height: (y2 - y1) / 1000 };
+  }
+  // Replies saved with the earlier fractional origin/size format remain readable.
+  if (parts.length !== 4 || !parts.every(part => /^\d+(?:\.\d+)?$/.test(part))) return;
+  const [x, y, width, height] = parts.map(Number);
+  if (width >= 0.05 && height >= 0.05 && x + width <= 1.000001 && y + height <= 1.000001) {
+    return { x, y, width, height };
+  }
+}
+
 /** Crop references resolve only to the persisted attachments of this reply's user message. */
 export function assistantIllustratedSections(value: string, imageIds: string[]): IllustratedSection[] {
-  const visible = assistantVisibleMarkdown(value).replace(/^!\[[^\]\n]*\]\(assistant-crop:[^\n)]*$/gm, '');
+  const visible = assistantVisibleMarkdown(value.replace(/\r\n/g, '\n')).replace(/^!\[[^\]\n]*\]\(assistant-crop:[^\n)]*$/gm, '');
   if (!/^!\[[^\]\n]+\]\(assistant-crop:/m.test(visible)) return [{ markdown: visible }];
+  let cropCount = 0;
   return visible.split(/(?=^#{2,3} )/m).filter(Boolean).map(markdown => {
     let image: IllustratedSection['image'];
     const cleaned = markdown.replace(/^!\[([^\]\n]{1,120})\]\(assistant-crop:([^\n)]*)\)[ \t]*$/gm, (_, label: string, reference: string) => {
-      const parts = reference.split(',');
-      const [index, x, y, width, height] = parts.map(Number);
-      if (!image && parts.length === 5 && parts.every(part => /^\d+(?:\.\d+)?$/.test(part)) && Number.isInteger(index) && index >= 1 && index <= imageIds.length
-        && x >= 0 && y >= 0 && width >= 0.05 && height >= 0.05 && x + width <= 1.000001 && y + height <= 1.000001) {
-        image = { id: imageIds[index - 1], label, crop: { x, y, width, height } };
+      const [number, ...coordinates] = reference.split(',').map(part => part.trim());
+      const index = Number(number);
+      if (!image && cropCount < 4 && /^[1-4]$/.test(number) && index <= imageIds.length) {
+        const crop = parseCrop(coordinates);
+        if (crop) {
+          image = { id: imageIds[index - 1], label, crop };
+          cropCount += 1;
+        }
       }
       return '';
     }).trim();

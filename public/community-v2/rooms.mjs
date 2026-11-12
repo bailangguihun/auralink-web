@@ -354,6 +354,7 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
   q('#room-chat-form').addEventListener('submit',async event=>{event.preventDefault();const content=new FormData(event.target).get('content');try{await app.api(`/api/v2/rooms/${state.room.id}/messages`,{method:'POST',body:JSON.stringify({content})});event.target.reset();}catch(error){app.showNotice(error.message,'error');}});
   q('#upload-room-artwork').addEventListener('click',uploadArtwork);
   document.addEventListener('keydown',event=>{
+    if(typeof event.key!=='string')return;
     if(event.key==='Escape'&&state.selectedId){state.selectedId=null;renderAnnotations();}
     if(event.key.toLowerCase()!=='z'||!event.ctrlKey||event.shiftKey||event.altKey||event.metaKey||event.repeat||event.isComposing)return;
     if(!state.drawingMode||q('#view-room').classList.contains('hidden')||q('#room-workspace').classList.contains('hidden'))return;

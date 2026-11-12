@@ -374,6 +374,23 @@ with sync_playwright() as playwright:
             expect(fixture.page.locator('#runtime-host #view-create')).to_be_visible()
             fixture.page.wait_for_function('()=>window.scrollY===0')
 
+        def incomplete_keyboard_events(fixture):
+            fixture.prepare()
+            fixture.mount()
+            fixture.page.evaluate('''()=>{
+              const root=document.querySelector('#runtime-host').shadowRoot;
+              const body=root.querySelector('.reference-body'),input=root.querySelector('#search-input');
+              body.dispatchEvent(new Event('keydown',{bubbles:true,composed:true}));
+              for(const key of [null,17,{}]){
+                const event=new Event('keydown',{bubbles:true,composed:true});
+                Object.defineProperty(event,'key',{value:key});input.dispatchEvent(event);
+              }
+              for(const key of ['Escape','z','Z','Unidentified'])
+                input.dispatchEvent(new KeyboardEvent('keydown',{key,ctrlKey:true,bubbles:true,composed:true}));
+            }''')
+            expect(fixture.page.locator('#runtime-host #view-home')).to_be_visible()
+
+        scenario('incomplete-keyboard-events-do-not-crash-community', incomplete_keyboard_events)
         scenario('retired-poet-link-opens-discovery-without-poet-requests', retired_poet_link)
         scenario('section-navigation-returns-to-top', navigation_returns_to_top)
         scenario('truncated-200-reconciles-with-one-post', truncated_success)

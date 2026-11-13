@@ -6,9 +6,14 @@ export function communityOrigin(value: string | undefined): string | null {
   return url.origin;
 }
 export function communityPath(parts: string[]): string {
-  const valid = parts.length === 1 && ["capabilities", "posts"].includes(parts[0]) ||
-    parts.length === 2 && ["posts", "operations", "gallery-references"].includes(parts[0]) && /^[0-9a-f-]{36}$/.test(parts[1]) ||
-    parts.length === 3 && parts[0] === "posts" && /^[0-9a-f-]{36}$/.test(parts[1]) && ["comments", "like", "favorite"].includes(parts[2]);
+  const id = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+  const valid = parts.length === 1 && ["capabilities", "posts", "uploads", "tags", "cases", "notifications"].includes(parts[0]) ||
+    parts.length === 2 && ["posts", "operations", "gallery-references", "media", "tasks", "cases", "comments"].includes(parts[0]) && id(parts[1]) ||
+    parts.length === 3 && id(parts[1]) && (
+      parts[0] === "posts" && ["comments", "like", "favorite", "growth", "workflow", "tasks", "revisions", "case"].includes(parts[2]) ||
+      parts[0] === "comments" && parts[2] === "adopt" || parts[0] === "notifications" && parts[2] === "read" ||
+      parts[0] === "media" && parts[2] === "metadata") ||
+    parts.length === 5 && parts[0] === "posts" && id(parts[1]) && parts[2] === "revisions" && id(parts[3]) && parts[4] === "review";
   if (!valid) throw new Error("Unknown community endpoint");
   return "/api/v1/community/" + parts.join("/");
 }

@@ -48,7 +48,7 @@ export function responseFor(s,method,u,body) {
  if(p===a+'/storage')return json({policyStatus:'VALID',uploadsAvailable:true,historyOnly:false,quotaBytes:104857600,readyBytes:png.length,reservedBytes:0,logicalBytes:png.length,cleanupReservedBytes:0,chargedBytes:png.length,retainedFileBytes:png.length,pendingCleanupBytes:0,availableBytes:104857600-png.length,draftLifetimeSeconds:86400,cleanupEnabled:false});
  if(p.endsWith('/attachments')&&method==='POST'){s.attachments=[s.attachment];return json(s.attachment);}
  if(p===a+'/attachments/'+id(80))return json(s.attachment);
- if(p===s.attachment.contentUrl)return {status:200,body:png,contentType:'image/png'};
+ if(p===s.attachment.contentUrl)return {status:200,body:s.attachmentPng||png,contentType:'image/png'};
  if(p.endsWith('/summaries/page')) {s.summaryReads++;if(s.failSummary)return json({message:'隔离：摘要读取失败'},503);return json(pageOf(s.emptySummary?[]:[{id:id(90),branch_id:q.get('branchId'),current_run_id:id(91),body:'## 当前创作方向\n\n以**雨后山水**为主题，保持画面疏朗。\n\n### 已讨论的要点\n\n- 留白连接远近。\n- 花青与赭石相互衬托。\n- 先笔墨，后设色。\n\n> 这是已经保存的摘要，不是打开面板后新生成。',status:'COMPLETED',model_id:'fixture-vision',stale:false,usage:{}}]),200,s.summaryDelay||0);}
  if(p.endsWith('/timeline/page'))return json(pageOf([]));
  if(p.endsWith('/citations')) {

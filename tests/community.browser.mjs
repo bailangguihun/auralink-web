@@ -39,6 +39,7 @@ try {
     launch = { ...launch, executablePath: process.env.COMMUNITY_CHROMIUM_EXECUTABLE || await bundled.executablePath(),
       args: ['--disable-dev-shm-usage', '--no-zygote', '--disable-gpu'] };
   }
+  if (process.env.COMMUNITY_CHROMIUM_EXECUTABLE) launch.executablePath = process.env.COMMUNITY_CHROMIUM_EXECUTABLE;
   if (process.env.COMMUNITY_FONTCONFIG) launch.env = { ...process.env, FONTCONFIG_FILE: process.env.COMMUNITY_FONTCONFIG };
   for (let i = 0; i < 3; i++) await f.request('/posts', { method: 'POST', payload: {
     requestId: randomUUID(), content: [
@@ -150,7 +151,10 @@ try {
     await page.getByRole('button', { name: '发布帖子', exact: true }).evaluate(button => { button.click(); button.click(); });
     await page.waitForURL('**/community/posts/*');
     await page.getByText('第一轮真实页面交互：山水、留白与远处的回声。', { exact: true }).waitFor();
-    await page.getByTestId('community-post').locator('.community-reference img').evaluate(img => img.decode());
+    const publishedImage = page.getByTestId('community-post').locator('.community-reference img');
+    await publishedImage.scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => { const image = document.querySelector('[data-testid="community-post"] .community-reference img'); return image?.complete && image.naturalWidth > 0; });
+    await publishedImage.evaluate(img => img.decode());
     await page.getByLabel('写下评论').fill('清浅的笔墨，也能让人慢下来。');
     await page.getByRole('button', { name: '发表评论', exact: true }).click();
     await page.getByText('清浅的笔墨，也能让人慢下来。', { exact: true }).waitFor();
@@ -189,7 +193,7 @@ try {
     await page.waitForFunction(() => document.querySelector('#community-draft')?.value === '');
     assert.equal(await page.getByLabel('分享你的观画感受').inputValue(), '');
     await page.getByRole('button', { name: '我的收藏', exact: true }).click();
-    await page.getByRole('heading', { name: '还没有收藏的帖子' }).waitFor();
+    await page.getByRole('heading', { name: '把喜欢的分享，留在这里。' }).waitFor();
     assert.equal(await page.getByTestId('community-post').count(), 0);
     assert.equal(record.writes.length, 2); await overflow(); await shot('account-b');
   });

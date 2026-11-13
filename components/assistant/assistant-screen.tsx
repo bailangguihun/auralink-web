@@ -7,6 +7,7 @@ import { AssistantLoading, ConversationLoading } from './assistant-loading';
 import { StatePanel } from '@/components/state-panel';
 import { ApiError, isAbortError } from '@/lib/api';
 import { assistantPage, assistantRequest, exportAssistant, OperationLedger } from '@/lib/assistant-api';
+import type { Attachment } from '@/lib/assistant-contracts';
 import { terminal, stateLabel, stageLabels, mergeItems, ragflowAvailable, webSearchAvailable, assistantRetrievalRequest, assistantGenerationAvailable, assistantGenerationNotice, type AssistantStatus, type AssistantSession, type Branch, type Message, type Run, type Registry, type Citation, type Choice, type Summary, type Timeline, type Page, type ArtworkReference, assistantDate, platformCitationFields } from '@/lib/assistant-contracts';
 import { subscribeAssistant } from '@/lib/assistant-stream';
 import { useAssistantAccess } from './use-assistant-access';
@@ -18,6 +19,7 @@ import { ArtworkSelection } from './artwork-selection';
 import { selectedArtworkReferences, reconcileRejectedArtworkSubmission, artworkRunFailureNotice } from '@/lib/assistant-artworks';
 import { AssistantPanel, AssistantModelPicker } from './assistant-panels';
 import { AssistantMarkdown } from './assistant-markdown';
+import { CommunityAssistantBanner, CommunityAssistantImport, CommunityShareReply } from '@/components/community/community-assistant-bridge';
 import { assistantMarkdownLink, assertAssistantSources } from '@/lib/assistant-presentation';
 import styles from './assistant.module.css';
 const enc = encodeURIComponent;
@@ -127,6 +129,7 @@ function AssistantAccount() {
     {sessions.loading && !sessions.items.length ? <LoadingSection label="正在读取会话" onRetry={sessions.retry}><SkeletonRows lines={5} /></LoadingSection> : !sessions.error && !sessions.items.length ? <p>还没有对话，从一次提问开始。</p> : null}
     <ul>{sessions.items.map(session => <li key={session.id}><button className={styles.session} data-testid="assistant-session" aria-current={selected === session.id} onClick={() => select(session.id)}><strong>{session.title}</strong><time>{assistantDate(session.createdAt).toLocaleDateString('zh-CN')}</time></button></li>)}</ul><LoadMore page={sessions} label="更多会话" /><p className={styles.sidebarNote}>私有会话 · 随账号保存</p></>;
   return <div ref={pageRef} className={styles.page} data-navigation-page="">
+    <CommunityAssistantBanner onNew={newSession} buttonClassName={styles.small} />
     {process.env.NEXT_PUBLIC_ASSISTANT_SIMULATED === 'true' ? <span className={styles.previewBadge}>隔离预览 · 模拟模型与资料</span> : null}
     {error ? <div className={`${styles.notice} ${styles.error}`} role="alert">{error}<button className={styles.small} onClick={() => { setError(''); setRevision(value => value + 1); }}>刷新记录</button></div> : null}
     {!status && !unavailable ? <AssistantLoading embedded /> : unavailable && !status ? <StatePanel kind="unavailable" title="助手暂不可用" description="其他 ArtLIVE 页面仍可使用。" actionLabel="重新连接" onAction={() => setRevision(value => value + 1)} /> : !status?.enabled ? <StatePanel kind="unavailable" title="助手尚未启用" description="当前服务未开放助手；不会发起模型请求。" /> : <>
@@ -400,7 +403,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
         <header><strong>{message.role === 'USER' ? '我' : '国画助手'}</strong><span>{stateLabel(message.state)} · {assistantDate(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span></header>
         {message.role === 'ASSISTANT' ? <AssistantMarkdown imageIds={messages.items.find(item => item.id === message.parentMessageId && item.role === 'USER')?.attachmentIds || []}>{message.body}</AssistantMarkdown> : <p className={styles.body}>{message.body}</p>}
         {message.attachmentIds.map(image => <PrivateAttachment key={image} id={image} />)}
-        <div className={styles.messageActions}>{message.role === 'USER' && status.executionAvailable ? <button disabled={busy || !!running} onClick={() => { setEditing(message); setEditText(message.body); }}>编辑为新分支</button> : null}{speech.readable && message.body ? <button onClick={() => speech.read(message.body)}>朗读消息</button> : null}{message.runId && message.role === 'ASSISTANT' ? <button onClick={() => showSources(message.runId!)}>查看本条来源</button> : null}</div>
+        <div className={styles.messageActions}>{message.role === 'USER' && status.executionAvailable ? <button disabled={busy || !!running} onClick={() => { setEditing(message); setEditText(message.body); }}>编辑为新分支</button> : null}{speech.readable && message.body ? <button onClick={() => speech.read(message.body)}>朗读消息</button> : null}{message.runId && message.role === 'ASSISTANT' ? <button onClick={() => showSources(message.runId!)}>查看本条来源</button> : null}{message.role === 'ASSISTANT' && message.state === 'COMPLETED' ? <CommunityShareReply text={message.body} className={styles.small} /> : null}</div>
         {message.runId && message.role === 'ASSISTANT' && status.executionAvailable ? <RunDetails key={`${message.runId}:${revision}`} id={message.runId} known={runs.items.find(run => run.id === message.runId)} access={access} choose={choose} retry={retry} disabled={busy || !!pendingChat || !model || !generationAvailable} /> : null}
       </article>)}
       {outgoing && !messages.items.some(message => message.id === outgoing.inputMessageId) ? <article className={styles.message} data-role="USER" data-testid="outgoing-message">
@@ -413,6 +416,16 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       </div>
     </section>
     {status.executionAvailable ? <form className={styles.composer} onSubmit={event => void submit(event)} aria-label="发送消息">
+      <CommunityAssistantImport className={styles.notice} buttonClassName={styles.small} disabled={busy || draft.loading || draft.hasMore || Boolean(pendingChat) || !generationAvailable} textPresent={Boolean(text)} onText={setText} onImage={draft.upload} readImages={async () => {
+        const page = await request((token, signal) => assistantPage<Attachment>(`/sessions/${enc(id)}/attachments/draft`, token, signal));
+        if (page.hasMore) throw new Error('待发送附件仍有下一页，请先核对或移除图片后再导入。');
+        return page.items;
+      }} onReference={async artworkId => {
+        if (selectedArtworks.some(item => item.artworkId === artworkId)) return;
+        if (selectedArtworks.length >= 5) throw new Error('当前已选满五幅平台作品，请先调整参考后再导入。');
+        const artwork = await request((token, signal) => assistantRequest<ArtworkReference>(`/artworks/${enc(artworkId)}`, token, signal));
+        setSelectedArtworks(current => current.some(item => item.artworkId === artworkId) ? current : [...current, artwork]);
+      }} run={act} />
       <div className={styles.composerStatus} aria-label="附件与发送状态">{!generationReady ? <span className={styles.meta}>生成能力尚未确认，草稿保留。</span> : null}      {draft.loading ? <LoadingStatus label="正在核对待发送图片" /> : null}
       {draft.error ? <p role="alert" className={styles.error}>{draft.error}<button type="button" className={styles.small} onClick={() => void draft.refresh()}>核对上传状态</button></p> : null}
       {draft.notice ? <p role="status">{draft.notice}</p> : null}

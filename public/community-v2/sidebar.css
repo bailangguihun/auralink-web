@@ -1,0 +1,43 @@
+/* Reference navigation adapted to the ArtLIVE community sidebar. */
+:host { display:block; font-size:16px; line-height:normal; }
+.reference-body { min-height:calc(100dvh - var(--platform-header-height,80px)); }
+.app-screen { min-height:inherit; display:grid; grid-template-columns:216px minmax(0,1fr); align-items:start; }
+.topbar { position:sticky; top:var(--platform-header-height,80px); height:calc(100dvh - var(--platform-header-height,80px)); padding:28px 20px 22px; display:flex; flex-direction:column; gap:30px; align-items:stretch; border-bottom:0; border-right:1px solid rgba(126,110,85,.18); z-index:10; overflow-y:auto; }
+.topbar .brand-button { padding:0 6px; flex:none; }
+.topbar nav { display:flex; flex-direction:column; gap:3px; flex:1; width:100%; overflow:visible; }
+.topbar .nav-link { text-align:left; padding:12px 14px; border-bottom:0; border-left:2px solid transparent; white-space:nowrap; }
+.topbar .nav-link.active,.topbar .nav-link:hover { border-left-color:var(--red); background:rgba(85,120,102,.055); }
+.topbar .user-menu { display:grid; grid-template-columns:32px 1fr; gap:14px 12px; }
+.topbar .coin-balance { grid-column:1/-1; justify-self:start; }
+.topbar #logout { justify-self:start; }
+.main-content { width:min(1060px,92%); min-width:0; padding-top:48px; }
+.notice { top:calc(var(--platform-header-height,80px) + 16px); z-index:40; }
+.room-workspace { width:100%; margin:0; left:auto; transform:none; height:calc(100dvh - var(--platform-header-height,80px) - 70px); }
+.canvas-toolbar { flex-wrap:wrap; }
+.canvas-toolbar button { flex:0 0 auto; white-space:nowrap; }
+#view-room { width:100%; }
+.main-content:has(#view-room:not(.hidden)) { width:96%; padding-top:24px; }
+.community-menu,.community-menu-backdrop { display:none; }
+.auth-screen { display:none !important; }
+.community-growth-entry { margin-left:auto; white-space:nowrap; }
+.post-author>div { min-width:0; overflow-wrap:anywhere; }
+@media(max-width:1100px) {
+ .app-screen { grid-template-columns:184px minmax(0,1fr); }
+ .topbar { padding:24px 14px; }
+ .page-heading { flex-wrap:wrap; }
+ .filters { width:min(480px,100%); }
+}
+@media(max-width:1050px) { .room-workspace { height:auto; min-height:0; display:block; } }
+@media(max-width:760px) {
+ .app-screen { display:block; }
+ .community-menu { display:block; position:sticky; top:var(--platform-header-height,80px); z-index:11; width:100%; text-align:left; padding:12px 5%; border:0; border-bottom:1px solid var(--community-line); background:var(--paper); color:var(--ink); }
+ .topbar { position:fixed; top:var(--platform-header-height,80px); bottom:0; left:0; width:240px; height:auto; transform:translateX(-100%); transition:transform .2s; background:#fffdf7; z-index:30; }
+ .app-screen.menu-open .topbar { transform:translateX(0); }
+ .app-screen.menu-open .community-menu-backdrop { display:block; position:fixed; inset:var(--platform-header-height,80px) 0 0; z-index:25; background:#24342d55; border:0; }
+ .main-content { padding-top:28px; }
+ .room-workspace { height:auto; min-height:0; }
+ .artwork-panel { min-height:440px; }
+ .canvas-toolbar { flex-wrap:nowrap; }
+ .feed { grid-template-columns:1fr; }
+}
+@media(prefers-reduced-motion:reduce) { .topbar { transition:none; } }

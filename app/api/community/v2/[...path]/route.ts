@@ -16,7 +16,8 @@ async function proxy(request:Request,context:{params:Promise<{path:string[]}>}){
  const forwarded=new Headers();
  for(const name of ["authorization","content-type","content-length","range","x-request-id","x-file-name","x-deepseek-key","x-deepseek-model"]){const value=request.headers.get(name);if(value)forwarded.set(name,value);}
  const browserOrigin=request.headers.get("origin");
- if(browserOrigin&&browserOrigin!==new URL(request.url).origin)return failure(403,"来源不允许");
+ // Next's URL uses the internal listener behind the production proxy. The
+ // Community gateway validates the unchanged Origin against COMMUNITY_WEB_ORIGIN.
  if(browserOrigin)forwarded.set("origin",browserOrigin);
  const cookie=request.headers.get("cookie")?.split(";").map(value=>value.trim()).find(value=>value.startsWith("artlive_community_media="));
  if(cookie)forwarded.set("cookie",cookie);

@@ -22,6 +22,12 @@ export function responseFor(s,method,u,body,account='A') {
  if(p.startsWith('/api/v1/paintings/')&&!p.includes('/guide')&&!p.includes('/critic'))return json({...painting(90,'隔离详情山水'),publicFields:[],sourceSequence:'1'});
  if(p.startsWith('/api/v1/assets/'))return {status:200,body:png,contentType:'image/png'};
  if(p==='/api/v1/knowledge/painting-statistics')return json(statistics());
+ const metric=p.match(/^\/api\/v1\/knowledge\/painting-statistics\/([^/]+)$/)?.[1];
+ if(metric&&statistics().metrics[metric]){
+  const items=statistics().metrics[metric].items.filter(item=>item.name.includes(q.get('q')||''));
+  const size=Number(q.get('size')||12),page=0;
+  return json({schemaVersion:1,metric,items,page,size,totalItems:items.length,totalPages:Math.ceil(items.length/size),hasMore:false,revision:'isolated-loading'});
+ }
  if(p==='/api/v1/knowledge/poetry-graph')return json(graph());
  if(p.startsWith('/api/v1/workflow')||p.startsWith('/api/v1/creations')||p.startsWith('/api/v1/me/workflows')||p.startsWith('/api/v1/me/creations'))return studioResponse(s.studio,method,u,body);
  if(p.endsWith('/guide'))return json({message:'隔离：尚无导览'},404);

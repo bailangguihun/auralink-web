@@ -31,15 +31,18 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
     return `<article class="room-card" data-room-card="${esc(room.id)}"><div class="room-cover">${image ? `<img src="${esc(image)}" alt="" loading="lazy" />` : '<span>山水待入席</span>'}<span class="room-visibility">${room.entryPrice?`${room.entryPrice} 墨币`:(room.visibility === 'public' ? '公开' : '私密')}</span></div><div class="room-card-body"><div><h3>${esc(room.name)}</h3><p>${esc(room.description || '房主还没有填写简介。')}</p></div><div class="room-card-meta"><span>${esc(room.owner?.nickname || '房主')}${room.owner?.expertVerified?' · 专家':''}</span><span>${room.onlineCount} 人在线</span><span>${room.memberCount}/${room.memberLimit}</span></div><button class="primary compact" data-enter-room="${esc(room.id)}">${room.myMembership?.status==='active'?'继续讨论':room.entryPaused?'暂停新加入':room.entryPrice?`支付 ${room.entryPrice} 枚并加入`:'加入房间'}</button></div></article>`;
   }
   async function fetchPublic(limit = 30) { return (await app.api(`/api/v2/rooms/public?limit=${limit}`)).data.items; }
+  let homeRoomsEpoch=0,roomsEpoch=0;
   async function loadHomeRooms() {
     const target=q('#home-room-grid'); if(!target)return;
-    try { const rooms=await fetchPublic(6); target.innerHTML=rooms.length?rooms.map(roomCard).join(''):'<p class="empty">暂时没有公开房间。</p>'; bindRoomCards(target); }
-    catch(error){target.innerHTML=`<p class="empty">${esc(error.message)}</p>`;}
+    const epoch=++homeRoomsEpoch,isCurrent=()=>!context.disposed()&&homeRoomsEpoch===epoch;
+    try { const rooms=await fetchPublic(6); if(!isCurrent())return;target.innerHTML=rooms.length?rooms.map(roomCard).join(''):'<p class="empty">暂时没有公开房间。</p>'; bindRoomCards(target); }
+    catch(error){if(isCurrent())target.innerHTML=`<p class="empty">${esc(error.message)}</p>`;}
   }
   async function loadRooms() {
+    const epoch=++roomsEpoch,isCurrent=()=>!context.disposed()&&roomsEpoch===epoch;
     const target=q('#room-grid'); target.innerHTML='<p class="empty">正在加载公开房间…</p>';
-    try { const rooms=await fetchPublic(); target.innerHTML=rooms.length?rooms.map(roomCard).join(''):'<p class="empty">暂时没有公开房间，来创建第一个吧。</p>'; bindRoomCards(target); }
-    catch(error){target.innerHTML=`<p class="empty">${esc(error.message)}</p>`;}
+    try { const rooms=await fetchPublic(); if(!isCurrent())return;target.innerHTML=rooms.length?rooms.map(roomCard).join(''):'<p class="empty">暂时没有公开房间，来创建第一个吧。</p>'; bindRoomCards(target); }
+    catch(error){if(isCurrent())target.innerHTML=`<p class="empty">${esc(error.message)}</p>`;}
   }
   function bindRoomCards(root) { root.querySelectorAll('[data-enter-room]').forEach(button=>button.addEventListener('click',()=>openRoom(button.dataset.enterRoom))); }
 
@@ -56,12 +59,14 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
 
   async function openRoom(roomId, alreadyJoined = false) {
     const navigation=beginRoomNavigation(roomId),isCurrent=()=>currentRoom(roomId,navigation);
+    let settled=false;
     try {
       if(!alreadyJoined){const room=(await app.api(`/api/v2/rooms/${roomId}`)).data;if(!isCurrent())return;const payment=await paymentConfirmation(room,isCurrent);if(payment===null||!isCurrent())return;await app.api(`/api/v2/rooms/${roomId}/join`,{method:'POST',body:JSON.stringify(payment)});}
       if(!isCurrent())return;
-      app.go('room'); context.onRoom(roomId); q('#room-loading').classList.remove('hidden'); q('#room-workspace').classList.add('hidden');
+      app.go('room',{ready:()=>settled}); context.onRoom(roomId); q('#room-loading').textContent='正在进入房间…';q('#room-loading').classList.remove('hidden'); q('#room-workspace').classList.add('hidden');
       if(await loadSnapshot(roomId,{navigation})&&isCurrent())void connectSocket(roomId,{prompt:true});
-    } catch(error){if(isCurrent())app.showNotice(error.message,'error');}
+    } catch(error){if(isCurrent()){q('#room-loading').textContent=error.message;app.showNotice(error.message,'error');}}
+    finally{settled=true;}
   }
   async function joinPrivate(code) {
     if(!code)return;

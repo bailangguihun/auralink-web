@@ -19,7 +19,7 @@ export function installDrafts(body,context,options){
  context.galleryReferenceId=()=>galleryId;
  context.onPublished=()=>{galleryId=null;for(const item of [key,legacyKey,handoffKey])try{sessionStorage.removeItem(item);}catch{}const url=new URL(location.href);url.searchParams.delete('paintingId');url.searchParams.delete('from');history.replaceState(history.state,'',url);};
  const originalView=context.onView;
- context.onView=view=>{save();originalView(view);};
+ context.onView=(...args)=>{save();originalView(...args);};
  const originalPost=context.onPost;
  let currentPost=null;
  context.onPost=(id,post)=>{

@@ -21,9 +21,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js" strategy="afterInteractive" />
       <Navigation />
       <MiniAppBackButton />
-      <RouteMotion />
       <ArtworkTransition />
-      {requiresAuthentication(pathname) ? <ProtectedRoute>{content}</ProtectedRoute> : content}
+      <RouteMotion>{requiresAuthentication(pathname) ? <ProtectedRoute>{content}</ProtectedRoute> : content}</RouteMotion>
     </>
   );
 }

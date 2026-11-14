@@ -61,7 +61,9 @@ function CanvasChart({ option, label, onClick, className = "", height, graphKey 
           chart.dispatchAction({ type: "graphRoam", seriesIndex: 0, zoom: fit.factor, originX: fit.centerX, originY: fit.centerY });
           chart.dispatchAction({ type: "graphRoam", seriesIndex: 0, dx: fit.dx, dy: fit.dy });
           container.dataset.graphFitted = "true";
+          container.dataset.pageReady = "true";
         } catch { container.dataset.graphFitted = "false"; }
+        finally { container.dataset.pageReady = "true"; }
       }));
     })];
   }, []);
@@ -69,17 +71,24 @@ function CanvasChart({ option, label, onClick, className = "", height, graphKey 
     if (!element.current) return;
     const container = element.current;
     const chart = echarts.init(container, undefined, { renderer: "canvas" });
+    const rendered = () => { if (!isGraph) container.dataset.pageReady = "true"; };
+    chart.on("finished", rendered);
     instance.current = chart;
     const observer = new ResizeObserver(() => {
+      container.dataset.pageReady = "false";
       resizeMeasuredChart(chart, container);
-      if (isGraph && !manualView.current) fitGraph();
+      if (container.clientWidth > 0 && container.clientHeight > 0) {
+        if (isGraph && !manualView.current) fitGraph();
+        else container.dataset.pageReady = "true";
+      }
     });
     observer.observe(container);
-    return () => { frames.current.forEach(cancelAnimationFrame); observer.disconnect(); chart.dispose(); instance.current = null; };
+    return () => { frames.current.forEach(cancelAnimationFrame); observer.disconnect(); chart.off("finished", rendered); chart.dispose(); instance.current = null; };
   }, [fitGraph, isGraph]);
   useEffect(() => {
     if (!instance.current) return;
     try {
+      if (element.current) element.current.dataset.pageReady = "false";
       instance.current.setOption(option, { notMerge: !isGraph });
       setFailed(false);
       if (graphKey !== undefined && previousGraph.current !== graphKey) {
@@ -89,7 +98,7 @@ function CanvasChart({ option, label, onClick, className = "", height, graphKey 
         fitGraph();
       }
     }
-    catch { setFailed(true); }
+    catch { if (element.current) element.current.dataset.pageReady = "true"; setFailed(true); }
   }, [option, graphKey, isGraph, fitGraph]);
   useEffect(() => {
     const chart = instance.current;
@@ -104,7 +113,7 @@ function CanvasChart({ option, label, onClick, className = "", height, graphKey 
     manualView.current = true;
     chart.dispatchAction({ type: "graphRoam", seriesIndex: 0, zoom: factor, originX: chart.getWidth() / 2, originY: chart.getHeight() / 2 });
   };
-  const canvas = <div className={`knowledge-chart ${className}`} style={height === undefined ? undefined : { height }} ref={element} role="img" aria-label={label}
+  const canvas = <div className={`knowledge-chart ${className}`} data-page-ready="false" style={height === undefined ? undefined : { height }} ref={element} role="img" aria-label={label}
     onPointerDown={isGraph ? () => { manualView.current = true; } : undefined} onWheelCapture={isGraph ? () => { manualView.current = true; } : undefined} />;
   return <>
     {isGraph ? <div className={`knowledge-graph-view${expanded ? " is-expanded" : ""}`}>

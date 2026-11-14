@@ -9,6 +9,10 @@ let token = localStorage.getItem('guohua_token');
 let current = null;
 let feedPage = 1;
 let feedMode = 'home';
+let feedEpoch = 0;
+let viewEpoch = 0;
+let tagsEpoch = 0;
+const listEpochs = new Map();
 
 let coinWallet = null;
 let activeCoinPostId = null;
@@ -141,41 +145,65 @@ function renderSearchUsers(users, query) {
 }
 async function loadFeed(reset = false) {
   if (reset) feedPage = 1;
+  const epoch=++feedEpoch,target=$('#feed'),oldNodes=new Set(target.children);
+  $('#load-more').disabled=true;
+  let settled=false;
+  if(reset)context.present?.(target,()=>settled,[target,$('#search-users')]);
   const query = $('#search-input').value.trim();
   try {
     let items; let hasMore;
     if (query) {
       const result = await api(`/api/search?q=${encodeURIComponent(query)}&page=${feedPage}`);
+      if(epoch!==feedEpoch||context.disposed())return;
       items = result.data.posts; hasMore = result.data.hasMore; renderSearchUsers(result.data.users, query);
     } else {
       renderSearchUsers([], '');
       const result = await api(`/api/posts?page=${feedPage}&sort=${$('#sort-select').value}`);
+      if(epoch!==feedEpoch||context.disposed())return;
       items = result.data.items; hasMore = result.data.hasMore;
     }
     const html = items.map(postCard).join('');
-    $('#feed').innerHTML = reset || feedPage === 1 ? (html || '<p class="empty">没有找到相关内容。</p>') : $('#feed').innerHTML + html;
+    if(reset||feedPage===1){target.innerHTML=html||'<p class="empty">没有找到相关内容。</p>';bindPostEvents(target);}
+    else{
+      target.insertAdjacentHTML('beforeend',html);
+      const added=Array.from(target.children).filter(node=>!oldNodes.has(node));
+      added.forEach(bindPostEvents);
+      if(added.length)context.present?.(target,()=>settled,added);
+    }
     $('#load-more').classList.toggle('hidden', !hasMore);
-    bindPostEvents($('#feed'));
-  } catch (error) { $('#feed').innerHTML = `<p class="empty">${escapeHtml(error.message)}</p>`; }
+  } catch (error) { if(epoch===feedEpoch&&!context.disposed())target.innerHTML = `<p class="empty">${escapeHtml(error.message)}</p>`; }
+  finally{settled=true;if(epoch===feedEpoch)$('#load-more').disabled=false;}
 }
 async function loadList(mode) {
   feedMode = mode;
   const target = mode === 'mine' ? $('#mine-feed') : $('#favorite-feed');
+  const epoch=(listEpochs.get(mode)||0)+1;listEpochs.set(mode,epoch);
+  const isCurrent=()=>!context.disposed()&&listEpochs.get(mode)===epoch;
   target.innerHTML = '<p class="empty">正在加载…</p>';
-  try { const result = await api(`/api/posts?page=1&pageSize=30&${mode}=1`); target.innerHTML = result.data.items.length ? result.data.items.map(postCard).join('') : '<p class="empty">这里还没有内容。</p>'; bindPostEvents(target); }
-  catch (error) { target.innerHTML = `<p class="empty">${escapeHtml(error.message)}</p>`; }
+  try { const result = await api(`/api/posts?page=1&pageSize=30&${mode}=1`); if(!isCurrent())return; target.innerHTML = result.data.items.length ? result.data.items.map(postCard).join('') : '<p class="empty">这里还没有内容。</p>'; bindPostEvents(target); }
+  catch (error) { if(isCurrent())target.innerHTML = `<p class="empty">${escapeHtml(error.message)}</p>`; }
 }
 async function loadTags() {
+  const epoch=++tagsEpoch,isCurrent=()=>!context.disposed()&&tagsEpoch===epoch;
   try {
   const result = await api('/api/tags');
+  if(!isCurrent())return;
   const tags = result.data;
   $('#all-tags').innerHTML = tags.length ? tags.map(tag => `<button class="tag large" data-tag="${escapeHtml(tag.name)}">#${escapeHtml(tag.name)} <small>${tag.postCount}</small></button>`).join('') : '<p class="empty">还没有标签。</p>';
   $('#tag-strip').innerHTML = tags.slice(0, 12).map(tag => `<button class="tag" data-tag="${escapeHtml(tag.name)}">#${escapeHtml(tag.name)}</button>`).join('');
   document.querySelectorAll('#all-tags [data-tag], #tag-strip [data-tag]').forEach(element => element.addEventListener('click', () => { $('#search-input').value = `#${element.dataset.tag}`; go('home'); }));
 
-  } catch(error) { if(!context.isCancelled(error))throw error; }
+  } catch(error) { if(isCurrent()&&!context.isCancelled(error))throw error; }
 }
-async function openDetail(id,{preserveScroll=false}={}) { const scrollY=preserveScroll&&activeView==='detail'&&activeDetailPostId===id?window.scrollY:null;activeDetailPostId=id;go('detail');$('#detail').innerHTML='<p class="empty">正在加载…</p>';try{const result=await api(`/api/posts/${id}`);renderDetail(result.data);if(scrollY!==null)requestAnimationFrame(()=>window.scrollTo(0,scrollY));}catch(error){$('#detail').innerHTML=`<p class="empty">${escapeHtml(error.message)}</p>`;} }
+async function openDetail(id,{preserveScroll=false}={}) {
+  const scrollY=preserveScroll&&activeView==='detail'&&activeDetailPostId===id?window.scrollY:null;
+  let settled=false;activeDetailPostId=id;go('detail',{ready:()=>settled});
+  const epoch=viewEpoch,isCurrent=()=>!context.disposed()&&viewEpoch===epoch&&activeDetailPostId===id;
+  $('#detail').innerHTML='<p class="empty">正在加载…</p>';
+  try{const result=await api(`/api/posts/${id}`);if(!isCurrent())return;renderDetail(result.data);if(scrollY!==null)requestAnimationFrame(()=>{if(isCurrent())window.scrollTo(0,scrollY);});}
+  catch(error){if(isCurrent())$('#detail').innerHTML=`<p class="empty">${escapeHtml(error.message)}</p>`;}
+  finally{settled=true;}
+}
 function renderDetail(data) {
   context.onPost(data.post.id,data.post);
   const post = data.post; const comments = data.comments || [];
@@ -234,11 +262,15 @@ async function loadAdminPosts() {
   } catch(error) { if(!context.isCancelled(error))throw error; }
 }
 
-function go(view) {
+function go(view,{ready=()=>true}={}) {
   if(view==='ai')view='home';
   if(context.disposed())return;
   if (view === 'admin' && current?.role !== 'admin') return showNotice('仅管理员可访问', 'error');
   const previousView = activeView;
+  const epoch=++viewEpoch;
+  const isCurrent=()=>!context.disposed()&&epoch===viewEpoch;
+  let settled=false;
+  const reads=[];
   const restoreHome = view === 'home' && previousView === 'detail' && detailOriginView === 'home' && $('#feed').childElementCount > 0;
   if (previousView === 'home' && view !== 'home') homeScrollY = window.scrollY;
   if (view === 'detail' && previousView !== 'detail') detailOriginView = previousView;
@@ -246,21 +278,27 @@ function go(view) {
   if (view !== 'room') window.roomFeature?.leaveRoom();
   document.querySelectorAll('.view').forEach(element => element.classList.toggle('hidden', element.id !== `view-${view}`));
   document.querySelectorAll('.nav-link').forEach(element => element.classList.toggle('active', element.dataset.view === view));
-  activeView = view; context.onView(view);
+  activeView = view; context.onView(view,previousView,()=>settled&&ready());
   if(view!==previousView&&!restoreHome)window.scrollTo(0,0);
   if (view === 'home') {
     feedMode = 'home';
     if (restoreHome) requestAnimationFrame(() => window.scrollTo(0, homeScrollY));
-    else { loadTags(); loadFeed(true); window.roomFeature?.loadHomeRooms(); }
+    else { reads.push(loadTags(),loadFeed(true),window.roomFeature?.loadHomeRooms()); }
   }
-  if (view === 'rooms') window.roomFeature?.loadRooms();
-  if (view === 'mine') loadList('mine');
-  if (view === 'favorites') loadList('favorite');
-  if (view === 'coins'){loadCoins();loadRoomIncome();}
-  if (view === 'notifications') loadNotifications();
-  if (view === 'tags') loadTags();
-  if (view === 'profile') fillProfile();
-  if (view === 'admin') loadAdmin();
+  if (view === 'rooms') reads.push(window.roomFeature?.loadRooms());
+  if (view === 'mine') reads.push(loadList('mine'));
+  if (view === 'favorites') reads.push(loadList('favorite'));
+  if (view === 'coins')reads.push(loadCoins(),loadRoomIncome());
+  if (view === 'notifications') reads.push(loadNotifications());
+  if (view === 'tags') reads.push(loadTags());
+  if (view === 'profile') reads.push(fillProfile());
+  if (view === 'admin') reads.push(loadAdmin());
+  void Promise.allSettled(reads).then(results=>{
+    settled=true;
+    if(!isCurrent())return;
+    const failure=results.find(result=>result.status==='rejected'&&!context.isCancelled(result.reason));
+    if(failure){showNotice(failure.reason.message,'error');throw failure.reason;}
+  });
   if (view !== 'detail') detailOriginView = null;
 }
 async function fillProfile() {

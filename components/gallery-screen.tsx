@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useState } from "react";
 
 import { DailyPainting } from "@/components/daily-painting";
 import { ModuleHeader } from "@/components/module-header";
+import { ContentReveal } from "@/components/content-reveal";
 import { LoadingSection, LoadingStatus, PaintingGridSkeleton, PendingIndicator } from "@/components/loading";
 import { useReadResource } from "@/components/use-read-resource";
 import { SearchIcon } from "@/components/icons";
@@ -111,6 +112,7 @@ function GalleryContent() {
       </form>
 
       {actionError ? <p className="inline-error" role="alert">收藏操作未完成：{actionError} <button className="text-button" onClick={() => setError(null)}>关闭提示</button></p> : null}
+      <ContentReveal entryKey={viewKey} ready={!loading && !preparing} label="画廊结果">
       {loading ? page ? <LoadingStatus label="正在更新当前目录，暂保留已读取的结果" /> : <LoadingSection label="正在读取画作目录" onRetry={catalog.retry}><PaintingGridSkeleton count={6} rows /></LoadingSection> : null}
       {!loading && error ? <StatePanel kind="error" title="画作目录加载失败" description={`${error}${page ? " 当前保留同一查询上次成功读取的结果。" : ""}`} actionLabel="重新加载" onAction={() => { setError(null); catalog.retry(); }} /> : null}
       {!loading && !error && page && fetchedCount === 0 ? <StatePanel kind="empty" title="暂未找到匹配的作品" description="请尝试减少筛选条件或使用其他关键词。" /> : null}
@@ -122,6 +124,7 @@ function GalleryContent() {
               return <PaintingCard painting={renderedPainting} authenticated={authenticated} favoriteBusy={isFavoriteBusy(painting.paintingId)} onFavorite={toggleFavorite} masonry priority={priority} />;
             }} />
       ) : null}
+      </ContentReveal>
       {page && fetchedCount > 0 ? <section className="gallery-load-more" aria-label="画作加载" aria-busy={busy}>
         <p className="gallery-progress" role="status">已展示 {displayedCount} / {page.totalElements} 幅</p>
         {catalog.moreError ? <p className="inline-error" role="alert">{catalog.moreError} 已展示的画作仍保留。</p> : null}

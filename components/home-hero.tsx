@@ -13,6 +13,15 @@ const slides = [
 
 export function HomeHero() {
   const [active, setActive] = useState(0);
+  const [prepared, setPrepared] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    const image = new Image();
+    image.src = slides[0];
+    void image.decode().catch(() => {}).then(() => { if (!disposed) setPrepared(true); });
+    return () => { disposed = true; };
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -24,7 +33,7 @@ export function HomeHero() {
   }, []);
 
   return (
-    <section className="home-hero" id="home-welcome" aria-label="ArtLIVE 画智体欢迎页">
+    <section className="home-hero" id="home-welcome" aria-label="ArtLIVE 画智体欢迎页" data-page-ready={prepared}>
       <div className="hero-slides" aria-hidden="true">
         {slides.map((source, index) => (
           <div

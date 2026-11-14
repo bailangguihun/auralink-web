@@ -58,7 +58,10 @@ try {
  await scenario('gallery-independent-query-race',async({page,state,go,shot,noOverflow})=>{
   state.delays['/api/v1/paintings/daily']=1700;await go('/gallery');await page.locator('.painting-card h3').first().waitFor({state:'attached'});assert.equal(await page.locator('.route-content').evaluate(el=>getComputedStyle(el).opacity),'0');await shot('preparing');await page.locator('.route-content[data-route-phase="ready"]').waitFor();
   state.delay=u=>u.searchParams.get('keyword')==='旧查询'?1600:u.searchParams.get('keyword')==='新查询'?500:0;
-  const input=page.getByRole('searchbox',{name:'关键词',exact:true});await input.fill('旧查询');await page.getByRole('button',{name:'检索画作'}).click();await input.fill('新查询');await page.getByRole('button',{name:'检索画作'}).click();
+  const input=page.getByRole('searchbox',{name:'关键词',exact:true});await input.fill('旧查询');await page.getByRole('button',{name:'检索画作'}).click();
+  // Filters remount when the committed query changes; type into that new form.
+  await page.waitForFunction(()=>document.querySelector('.gallery-filters input[name="keyword"]')?.defaultValue==='旧查询');
+  await input.fill('新查询');await page.getByRole('button',{name:'检索画作'}).click();
   assert.equal(await page.locator('.painting-card h3').count(),0,'Old query hidden immediately');await page.getByRole('heading',{name:'新查询 1',exact:true}).waitFor();await sleep(1800);assert.equal(await page.getByRole('heading',{name:/旧查询/}).count(),0);assert.equal(await input.inputValue(),'新查询');
   state.delays['/api/v1/paintings']=900;state.delay=null;await page.getByRole('button',{name:'加载更多画作',exact:true}).click();assert(await page.getByRole('region',{name:'画作加载'}).isVisible());await page.getByRole('heading',{name:'新查询 13',exact:true}).waitFor();await page.getByRole('heading',{name:'新查询 1',exact:true}).waitFor();await noOverflow();await shot('append');
  },{ignoreAbort:true});

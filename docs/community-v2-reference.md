@@ -66,6 +66,8 @@ ShadowRoot 将社区样式和 DOM 限制在内部，并继承平台的共用设�
 
 浏览器 HTTP 统一从 `/api/community/v2` 代理到 Node 的 `/api/v2/community`。原版路径继续附在该前缀之后，例如浏览器的 `/api/community/v2/api/posts` 和 `/api/community/v2/api/v2/rooms`。`COMMUNITY_INTERNAL_ORIGIN` 仍是仅服务端可见的 loopback 配置，见 [主机配置](COMMUNITY_HOST_CONFIGURATION.md)。
 
+RTC 配置的完整浏览器路径为 `GET /api/community/v2/api/rtc-config`，经代理允许列表转发至 Node 的 `/api/v2/community/api/rtc-config`。代理保留 Bearer 和浏览器 Origin，由网关核对来源；语音回退到默认 STUN 不能证明该配置接口已连通。
+
 浏览器先通过认证 POST 获取 30 秒、一次使用的 WebSocket ticket，再连接同源 `/api/community-ws?ticket=…`；Node middleware 将升级转给 loopback Node `/ws`。URL 不携带平台 JWT，Node 核对来源与成员权限。HTTP API 可访问不代表反向代理已经支持 WebSocket 升级。
 
 私有媒体使用短期、HttpOnly、SameSite=Strict 的不透明访问 cookie，服务端读取时重新核对平台身份与资源权限。该 cookie 不等于公开静态挂载。BYOK Key 只在当前页面内存和当前模型请求中使用，不写入 token 存储或发布资料。

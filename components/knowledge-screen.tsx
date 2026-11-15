@@ -1,4 +1,5 @@
 "use client";
+import { ContentReveal } from "@/components/content-reveal";
 
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
@@ -128,7 +129,9 @@ export function KnowledgeScreen() {
   return <main className="page-shell module-page knowledge-page">
     <ModuleHeader module="knowledge" />
     <div className="knowledge-tabs" role="tablist" aria-label="知识库视图">{([['paintings', '国画统计'], ['poetry', '诗词图谱']] as const).map(([key, title]) => <button type="button" key={key} id={`knowledge-tab-${key}`} role="tab" aria-selected={view === key} aria-controls={`knowledge-${key}`} tabIndex={view === key ? 0 : -1} onKeyDown={(event) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) { event.preventDefault(); const next = event.key === "Home" ? "paintings" : event.key === "End" ? "poetry" : view === "paintings" ? "poetry" : "paintings"; selectView(next); document.getElementById(`knowledge-tab-${next}`)?.focus(); } }} onClick={() => selectView(key)}><strong>{title}</strong></button>)}</div>
-    <div hidden={view !== "paintings"}><PaintingView /></div>
-    {poetryVisited ? <div hidden={view !== "poetry"}><PoetryView /></div> : null}
+    <ContentReveal entryKey={view} label="知识库模块">
+      <div hidden={view !== "paintings"}><PaintingView /></div>
+      {poetryVisited ? <div hidden={view !== "poetry"}><PoetryView /></div> : null}
+    </ContentReveal>
   </main>;
 }

@@ -224,6 +224,11 @@ async function scenario(name, options, run) {
   await context.route('**/*', async route => {
     const request = route.request(), url = new URL(request.url()), method = request.method();
     if (url.origin === web) {
+      // Account changes clear the synthetic community media cookie. Keep this
+      // session cleanup inside the fixture; never send it to the real proxy.
+      if (url.pathname === '/api/community/v2/api/media-session' && method === 'DELETE') {
+        await route.fulfill({ status: 204 }); return;
+      }
       if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
         record.forbidden.push({ method, path: url.pathname }); await route.abort(); return;
       }
@@ -389,18 +394,19 @@ async function scenario(name, options, run) {
   };
   const previewVisible = async () => {
     const preview = page.locator('.detail-page [data-artwork-preview="true"]');
-    await preview.locator('.detail-info [aria-label="正在读取作品资料"]').waitFor();
+    await preview.locator('.detail-info [aria-label="正在读取作品资料"]').waitFor({ state: 'attached' });
     await page.waitForFunction(paintingId => {
       const image = document.querySelector(`.detail-page [data-artwork-preview="true"] [data-artwork-target="${paintingId}"] img`);
-      return image?.complete && image.naturalWidth > 0 && getComputedStyle(image).visibility === 'visible';
+      return image?.complete && image.naturalWidth > 0;
     }, paintingId);
-    assert(await preview.getByRole('button', { name: '引用作品发帖', exact: true }).isDisabled());
-    assert(await preview.getByRole('button', { name: '收藏', exact: true }).isDisabled());
+    assert(await preview.getByRole('button', { name: '引用作品发帖', exact: true, includeHidden: true }).isDisabled());
+    assert(await preview.getByRole('button', { name: '收藏', exact: true, includeHidden: true }).isDisabled());
+    assert.equal(await page.locator('.route-content').evaluate(element => getComputedStyle(element).opacity), '0', 'Pending detail stays concealed until all current content is ready');
     const header = preview.locator('.detail-info > header');
-    await header.locator('h1').waitFor({ state: 'visible' });
-    assert.equal((await header.locator('h1').innerText()).trim(), record.previewMetadata.title, 'Known title is shown while detail data is pending');
-    assert.equal((await header.locator('p').innerText()).trim(), record.previewMetadata.author, 'Known author is shown while detail data is pending');
-    assert.equal((await header.locator('span').innerText()).trim(), record.previewMetadata.period, 'Known period is shown while detail data is pending');
+    await header.locator('h1').waitFor({ state: 'attached' });
+    assert.equal((await header.locator('h1').textContent()).trim(), record.previewMetadata.title, 'Known title is prepared while detail data is pending');
+    assert.equal((await header.locator('p').textContent()).trim(), record.previewMetadata.author, 'Known author is prepared while detail data is pending');
+    assert.equal((await header.locator('span').textContent()).trim(), record.previewMetadata.period, 'Known period is prepared while detail data is pending');
     const geometry = await page.evaluate(async () => {
       const sample = () => {
         const rect = document.querySelector('main.detail-page .detail-info').getBoundingClientRect();
@@ -612,10 +618,16 @@ try {
     assert(record.entryGeometry.titleTop >= record.entryGeometry.topbarBottom && record.entryGeometry.titleBottom <= record.entryGeometry.viewportHeight, 'The card title is a visible click target');
     await openPainting(); await completedFlight('open'); await detailVisible(); await cleared();
   });
-  await scenario('undecoded-image-navigation', {}, async ({ openGallery, openPainting, detailVisible, gate, release, cleared, animations }) => {
+  await scenario('undecoded-image-navigation', {}, async ({ page, openGallery, openPainting, detailVisible, gate, release, cleared, animations }) => {
     const assetPath = painting(90).image.contentUrl;
+    await openGallery();
     const image = gate(assetPath), detail = gate(detailApi);
-    await openGallery({ decoded: false }); await observed(image); await openPainting(); await observed(detail);
+    // A fresh page waits for its images before enabling interaction. Change an
+    // already visible source to exercise an undecoded image after that entrance.
+    await page.locator(`.gallery-row-item [data-artwork-source="${paintingId}"] img`).evaluate(image => {
+      image.src += '?undecoded-source=1';
+    });
+    await observed(image); await openPainting(); await observed(detail);
     assert.deepEqual(await animations(), [], 'An undecoded source uses normal navigation without inventing an image flight');
     release(assetPath, image); release(detailApi, detail); await detailVisible(); await cleared();
     assert.deepEqual(await animations(), [], 'Late image data does not start a surprise animation');

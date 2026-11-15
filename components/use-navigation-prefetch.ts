@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef } from "react";
 import { useSession } from "@/components/session-provider";
+import { presentationRoots, participating } from "@/lib/route-presentation";
 import { api, ApiError } from "@/lib/api";
 import { getGalleryFeedSnapshot } from "@/lib/gallery-feed";
 import { INITIAL_GALLERY_QUERY } from "@/lib/gallery-order";
@@ -23,9 +24,12 @@ function canPrefetch() {
 
 /** Wait for real content, including visible images, but not off-screen lazy media. */
 function currentPageReady() {
+  const entrance = document.querySelector<HTMLElement>(".route-content");
+  if (entrance && entrance.dataset.routePhase !== "ready") return false;
   if (document.readyState !== "complete") return false;
   const main = document.querySelector("[data-navigation-page]") || document.querySelector("main");
   if (!main) return false;
+  if (presentationRoots(main as HTMLElement).some(scope => Array.from(scope.querySelectorAll<HTMLElement>('[data-content-phase="preparing"], [data-content-phase="entering"]')).some(participating))) return false;
   const loadingSelector = '[aria-busy="true"], .paper-skeleton, .loading-status';
   if ((main.matches(loadingSelector) && main.getClientRects().length > 0)
     || Array.from(main.querySelectorAll(loadingSelector))
@@ -156,7 +160,7 @@ export function useNavigationPrefetch(pathname: string) {
     };
     const observer = new MutationObserver(schedule);
     observer.observe(document.body, { subtree: true, childList: true, attributes: true,
-      attributeFilter: ["aria-busy", "class", "src", "style", "hidden"] });
+      attributeFilter: ["aria-busy", "class", "src", "style", "hidden", "data-route-phase", "data-content-phase", "data-content-ready", "data-page-ready"] });
     document.addEventListener("load", schedule, true);
     document.addEventListener("error", schedule, true);
     document.addEventListener("visibilitychange", schedule);

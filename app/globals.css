@@ -249,6 +249,19 @@ h1, h2, h3 { font-family: var(--font-serif); line-height: 1.2; }
   background: #f7f2ea;
   backdrop-filter: none;
 }
+.route-content[data-route-phase="preparing"],
+.route-content[data-route-phase="error"],
+.content-reveal-region[data-content-phase="preparing"],
+.content-reveal-region[data-content-phase="error"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.route-content:not([data-route-phase="ready"]) .painting-card { content-visibility: visible; }
+.route-content[data-route-phase="preparing"] .content-reveal,
+.content-reveal-region[data-content-phase="preparing"] .content-reveal,
+.route-content .content-reveal[data-route-settled] { animation: none; }
+.route-content[data-route-phase="error"] { height: 0; overflow: hidden; }
 .page-shell {
   position: relative;
   z-index: 1;

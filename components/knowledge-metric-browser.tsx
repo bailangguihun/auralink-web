@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChartSkeleton, LoadingSection } from "@/components/loading";
 import { StatePanel } from "@/components/state-panel";
+import { ContentReveal } from "@/components/content-reveal";
 import { useSession } from "@/components/session-provider";
 import { api } from "@/lib/api";
 import { chronologicalItems, type CountItem, type MetricName, type MetricSort } from "@/lib/knowledge-contracts";
@@ -75,7 +76,9 @@ function RemoteMetricContent({ metric, title, unit, display = "bars", searchable
   const [attempt, setAttempt] = useState(0);
   const revision = useRef<string | undefined>(undefined);
   const resolvedQuery = useRef<string | null>(null);
-  const [state, setState] = useState<MetricReadState>({ data: null, loading: true, error: null });
+  const [state, setState] = useState<MetricReadState & { key: string }>({ key: "", data: null, loading: true, error: null });
+  const displayKey = JSON.stringify([query, attempt]);
+  const busy = state.key !== displayKey || state.loading;
   const size = metric === "style" || metric === "imagery" ? 100 : 200;
   useEffect(() => {
     if (!token) return;
@@ -89,13 +92,15 @@ function RemoteMetricContent({ metric, title, unit, display = "bars", searchable
       (params, signal) => api.paintingMetric(metric, params, token, signal),
       () => isCurrentSession(identity),
       next => {
+        let responseKey = requestKey;
         if (next.data) {
           revision.current = next.data.revision;
           const resolved = { ...query, page: next.data.page };
           resolvedQuery.current = JSON.stringify([resolved, attempt]);
+          responseKey = resolvedQuery.current;
           if (resolved.page !== query.page) setQuery(resolved);
         }
-        setState(next);
+        setState({ ...next, key: responseKey });
       },
       () => { signOutIfCurrent(identity); },
     );
@@ -105,13 +110,15 @@ function RemoteMetricContent({ metric, title, unit, display = "bars", searchable
   const search = (q: string) => { revision.current = undefined; resolvedQuery.current = null; setQuery(old => ({ ...old, q, page: 0 })); };
   const sort = (value: MetricSort) => { revision.current = undefined; resolvedQuery.current = null; setQuery(old => ({ ...old, sort: value, page: 0 })); };
   const retry = () => { revision.current = undefined; setAttempt(value => value + 1); };
-  return <div className="knowledge-metric-browser" aria-busy={state.loading || undefined}>
+  return <div className="knowledge-metric-browser" aria-busy={busy || undefined}>
     {searchable ? <SearchControls title={title} query={query.q} sort={query.sort} chronological={chronological} onQuery={search} onSort={sort} /> : null}
-    {state.error ? <StatePanel compact kind="error" title="统计读取失败" description={state.error} actionLabel="重新加载" onAction={retry} />
-      : state.loading || !state.data ? <LoadingSection label={`正在读取${title}`} onRetry={retry}><ChartSkeleton compact /></LoadingSection>
+    <ContentReveal entryKey={displayKey} ready={!busy} label={title}>
+    {!busy && state.error ? <StatePanel compact kind="error" title="统计读取失败" description={state.error} actionLabel="重新加载" onAction={retry} />
+      : busy || !state.data ? <LoadingSection label={`正在读取${title}`} onRetry={retry}><ChartSkeleton compact /></LoadingSection>
       : <><PageControls title={title} page={state.data.page} pages={state.data.totalPages} total={state.data.totalItems} onPage={page => setQuery(old => ({ ...old, page }))} />
         <MetricValues title={title} items={state.data.items} unit={unit} display={display} />
       </>}
+    </ContentReveal>
   </div>;
 }
 
@@ -129,7 +136,9 @@ export function LocalMetricBrowser({ title, items, unit }: { title: string; item
   const currentPage = Math.max(0, Math.min(page, pages - 1));
   return <div className="knowledge-metric-browser">
     <SearchControls title={title} query={query} sort={sort} chronological={false} onQuery={value => { setQuery(value); setPage(0); }} onSort={value => { setSort(value); setPage(0); }} />
-    <PageControls title={title} page={currentPage} pages={pages} total={filtered.length} onPage={setPage} />
-    <MetricValues title={title} items={filtered.slice(currentPage * size, (currentPage + 1) * size)} unit={unit} display="bars" />
+    <ContentReveal entryKey={JSON.stringify([query, sort, currentPage])} label={title}>
+      <PageControls title={title} page={currentPage} pages={pages} total={filtered.length} onPage={setPage} />
+      <MetricValues title={title} items={filtered.slice(currentPage * size, (currentPage + 1) * size)} unit={unit} display="bars" />
+    </ContentReveal>
   </div>;
 }

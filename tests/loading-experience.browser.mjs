@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {newState,responseFor,id} from './fixtures/loading-runtime.mjs';
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright');
-const origin=k=>{const u=new URL(process.env[k]);assert.equal(u.protocol,'http:');assert.equal(u.hostname,'127.0.0.1');return u.origin;};
+const origin=k=>{const u=new URL(process.env[k]);assert.equal(u.protocol,'http:');assert(['localhost','127.0.0.1'].includes(u.hostname));return u.origin;};
 const web=origin('LOADING_WEB_URL'),api=origin('LOADING_API_URL'),out=process.env.LOADING_BROWSER_OUTPUT;assert(out);await mkdir(out,{recursive:true});
 const buildId=(await readFile(new URL('../.next/BUILD_ID',import.meta.url),'utf8')).trim();assert.equal((await fetch(`${web}/_next/static/${buildId}/_buildManifest.js`)).status,200);
 const browser=await chromium.launch({headless:true});const report={buildId,browser:browser.version(),boundary:'Isolated synthetic read-only API; no production I/O or paid requests. Delays are controlled fixtures, not network performance measurements.',cases:[],errors:[],blocked:[]};
@@ -16,6 +16,7 @@ async function scenario(name,fn,options={}) {
  if(options.ignoreAbort)await context.addInitScript(()=>{const real=window.fetch;window.fetch=(u,o)=>real(u,o?{...o,signal:undefined}:o);});
  await context.route('**/*',async route=>{
   const req=route.request(),u=new URL(req.url()),method=req.method();
+  if(u.origin===web&&u.pathname==='/api/community/v2/api/media-session'&&method==='DELETE')return route.fulfill({status:204});
   if(u.origin===api){
    const headers={'access-control-allow-origin':web,'access-control-allow-methods':'GET,HEAD,OPTIONS','access-control-allow-headers':'authorization,content-type','cache-control':'no-store'};
    if(method==='OPTIONS')return route.fulfill({status:204,headers});
@@ -40,13 +41,13 @@ async function scenario(name,fn,options={}) {
 try {
  for(const mobile of [false,true])for(const route of ['gallery','knowledge','studio','assistant','me'])await scenario(`${mobile?'mobile':'desktop'}-${route}`,async({page,state,record,go,shot,noOverflow})=>{
   state.delays={'/api/user/profile':400,'/api/v1/paintings':1900,'/api/v1/paintings/daily':1100,'/api/v1/knowledge/painting-statistics':1800,'/api/v1/workflow/node-types':1700,'/api/v1/me/workflows':2600,'/api/v1/me/creations':2100,'/api/v1/assistant/status':1300,'/api/v1/me/favorites/paintings':1800};
-  await go('/'+route+(route==='assistant'?`?session=${id(1)}`:''));await page.locator('.paper-skeleton:visible').first().waitFor();await noOverflow();await shot('loading');
+  await go('/'+route+(route==='assistant'?`?session=${id(1)}`:''));await page.locator('.paper-skeleton').first().waitFor({state:'attached'});assert.equal(await page.locator('.route-content').evaluate(el=>getComputedStyle(el).opacity),'0');await noOverflow();await shot('loading');
   record.loadingGeometry=await page.evaluate(()=>Object.fromEntries(['.page-header','.gallery-filters','.daily-media','.knowledge-tabs'].flatMap(selector=>{const el=[...document.querySelectorAll(selector)].find(node=>node.getBoundingClientRect().height>0);if(!el)return [];const b=el.getBoundingClientRect();return [[selector,{x:b.x,y:b.y,width:b.width,height:b.height}]];})));
   assert(mobile ? await page.getByRole('button',{name:'打开导航'}).isVisible() : await page.getByRole('navigation',{name:'主导航'}).isVisible());
-  if(route==='studio')assert(await page.getByRole('button',{name:'执行流程',exact:true}).isDisabled());
-  if(route==='assistant')assert(await page.getByRole('button',{name:'发送',exact:true}).isDisabled());
+  if(route==='studio')assert(await page.getByRole('button',{name:'执行流程',exact:true,includeHidden:true}).isDisabled());
+  if(route==='assistant')assert(await page.getByRole('button',{name:'发送',exact:true,includeHidden:true}).isDisabled());
   const selectors={gallery:'[aria-label="画作目录"] .painting-card h3',knowledge:'.knowledge-count strong',studio:'.creation-card h3',assistant:'[data-testid="assistant-message"]',me:'.profile-facts dd'};
-  await page.locator(selectors[route]).first().waitFor();await sleep(2300);await noOverflow();await shot('ready');
+  await page.locator(selectors[route]).first().waitFor();await page.locator('.route-content[data-route-phase="ready"]').waitFor();await noOverflow();await shot('ready');
   record.readyGeometry=await page.evaluate(()=>Object.fromEntries(['.page-header','.gallery-filters','.daily-media','.knowledge-tabs'].flatMap(selector=>{const el=[...document.querySelectorAll(selector)].find(node=>node.getBoundingClientRect().height>0);if(!el)return [];const b=el.getBoundingClientRect();return [[selector,{x:b.x,y:b.y,width:b.width,height:b.height}]];})));
   if(route==='gallery')assert(Math.abs(record.loadingGeometry['.daily-media'].height-record.readyGeometry['.daily-media'].height)<=1,'Image container remains stable');
   assert.equal(await page.locator('.paper-skeleton').count(),0,'No remaining decorative placeholders after ready');
@@ -55,9 +56,12 @@ try {
   record.reducedMotion=await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches);assert(record.reducedMotion);
  },{mobile});
  await scenario('gallery-independent-query-race',async({page,state,go,shot,noOverflow})=>{
-  state.delays['/api/v1/paintings/daily']=1700;await go('/gallery');await page.locator('.painting-card h3').first().waitFor();assert(await page.getByRole('status').filter({hasText:'正在选择今日画作'}).isVisible());await shot('partial');
+  state.delays['/api/v1/paintings/daily']=1700;await go('/gallery');await page.locator('.painting-card h3').first().waitFor({state:'attached'});assert.equal(await page.locator('.route-content').evaluate(el=>getComputedStyle(el).opacity),'0');await shot('preparing');await page.locator('.route-content[data-route-phase="ready"]').waitFor();
   state.delay=u=>u.searchParams.get('keyword')==='旧查询'?1600:u.searchParams.get('keyword')==='新查询'?500:0;
-  const input=page.getByRole('searchbox',{name:'关键词',exact:true});await input.fill('旧查询');await page.getByRole('button',{name:'检索画作'}).click();await input.fill('新查询');await page.getByRole('button',{name:'检索画作'}).click();
+  const input=page.getByRole('searchbox',{name:'关键词',exact:true});await input.fill('旧查询');await page.getByRole('button',{name:'检索画作'}).click();
+  // Filters remount when the committed query changes; type into that new form.
+  await page.waitForFunction(()=>document.querySelector('.gallery-filters input[name="keyword"]')?.defaultValue==='旧查询');
+  await input.fill('新查询');await page.getByRole('button',{name:'检索画作'}).click();
   assert.equal(await page.locator('.painting-card h3').count(),0,'Old query hidden immediately');await page.getByRole('heading',{name:'新查询 1',exact:true}).waitFor();await sleep(1800);assert.equal(await page.getByRole('heading',{name:/旧查询/}).count(),0);assert.equal(await input.inputValue(),'新查询');
   state.delays['/api/v1/paintings']=900;state.delay=null;await page.getByRole('button',{name:'加载更多画作',exact:true}).click();assert(await page.getByRole('region',{name:'画作加载'}).isVisible());await page.getByRole('heading',{name:'新查询 13',exact:true}).waitFor();await page.getByRole('heading',{name:'新查询 1',exact:true}).waitFor();await noOverflow();await shot('append');
  },{ignoreAbort:true});
@@ -99,14 +103,14 @@ try {
   await go(`/assistant?session=${id(1)}`);await page.getByRole('button',{name:'更多工具与恢复'}).click();const storage=page.getByTestId('assistant-storage');await storage.getByText(/已占配额/).waitFor();state.fail['/api/v1/assistant/storage']=403;await storage.getByRole('button',{name:'刷新用量'}).click();await storage.getByText('图片用量访问未获确认，已清除旧用量。请重新读取。',{exact:true}).waitFor();assert.equal(await storage.getByText(/已占配额/).count(),0);await shot('forbidden-usage');
  });
  await scenario('auth-slow-retry-expiry-motion',async({page,state,go,shot})=>{
-  state.delays['/api/user/profile']=11000;await go('/me');await page.getByRole('status').filter({hasText:'正在确认登录状态'}).waitFor();assert.equal(state.requests.filter(r=>r.path.includes('/favorites')).length,0);await sleep(10100);await shot('slow-auth');
+  state.delays['/api/user/profile']=11000;await go('/me');await page.getByRole('status',{includeHidden:true}).filter({hasText:'正在确认登录状态'}).waitFor({state:'attached'});assert.equal(state.requests.filter(r=>r.path.includes('/favorites')).length,0);await sleep(10100);await shot('slow-auth');
   await page.getByText('A@example.invalid',{exact:true}).waitFor();state.fail['/api/v1/me/favorites/paintings']=401;await page.getByRole('button',{name:'下一页',exact:true}).click();await page.waitForURL('**/login?**');assert.equal(await page.getByText('A@example.invalid',{exact:true}).count(),0);assert.equal(await page.evaluate(()=>localStorage.getItem('artlive.session.token.v1')),null);
  },{motion:true});
  await scenario('detail-and-image-loading',async({page,state,go,shot,noOverflow})=>{
-  state.delays['/api/v1/paintings/'+id(90)]=1400;state.delays['/api/v1/assets/'+id(1090)+'/content']=1500;await go('/gallery/'+id(90));await page.getByRole('status').filter({hasText:'正在展开作品详情'}).waitFor();await shot('detail-skeleton');await page.getByRole('heading',{name:'隔离详情山水',exact:true}).waitFor();await noOverflow();await shot('image-pending');await sleep(2000);assert(await page.locator('.detail-media img').evaluate(el=>el.complete&&el.naturalWidth>0));await shot('image-ready');
+  state.delays['/api/v1/paintings/'+id(90)]=1400;state.delays['/api/v1/assets/'+id(1090)+'/content']=1500;await go('/gallery/'+id(90));await page.getByRole('status',{includeHidden:true}).filter({hasText:'正在展开作品详情'}).waitFor({state:'attached'});await shot('detail-skeleton');await page.locator('.detail-info > header h1').waitFor();await noOverflow();await shot('image-pending');await sleep(2000);assert(await page.locator('main.detail-page .detail-media img').evaluate(el=>el.complete&&el.naturalWidth>0));await shot('image-ready');
  },{mobile:true});
  await scenario('rapid-route-navigation',async({page,state,go,noOverflow,shot})=>{
-  state.delays['/api/v1/paintings']=2000;await go('/gallery');await page.getByRole('status').filter({hasText:'正在读取画作目录'}).waitFor();await page.getByRole('navigation',{name:'主导航'}).getByRole('link',{name:'知识库'}).click();await page.locator('.knowledge-count strong').first().waitFor();await sleep(2300);assert.equal(await page.locator('.painting-card').count(),0);await page.getByRole('navigation',{name:'主导航'}).getByRole('link',{name:'画廊',exact:true}).click();await page.locator('.painting-card h3').first().waitFor();await noOverflow();await shot('revisit');
+  state.delays['/api/v1/paintings']=2000;await go('/gallery');await page.getByRole('status',{includeHidden:true}).filter({hasText:'正在读取画作目录'}).waitFor({state:'attached'});await page.getByRole('navigation',{name:'主导航'}).getByRole('link',{name:'知识库'}).click();await page.locator('.knowledge-count strong').first().waitFor();await sleep(2300);assert.equal(await page.locator('.painting-card').count(),0);await page.getByRole('navigation',{name:'主导航'}).getByRole('link',{name:'画廊',exact:true}).click();await page.locator('.painting-card h3').first().waitFor();await noOverflow();await shot('revisit');
  },{ignoreAbort:true});
 }finally{await browser.close();await writeFile(`${out}/BROWSER_RESULT.json`,JSON.stringify(report,null,2));}
 if(report.cases.some(c=>c.status!=='PASS')||report.blocked.length)process.exitCode=1;

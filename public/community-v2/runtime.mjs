@@ -14,7 +14,11 @@ function mediaPaths(value) {
 export async function mountCommunity(host, options) {
  const controller=new AbortController(), timers=new Set(), intervals=new Set(), frames=new Set(), listeners=[];
  let disposed=false, instanceWindow;
+ const presentations=new Map();
  const inactive=()=>disposed||!options.isCurrent();
+ let bootReady=false,pendingReads=0;
+ const updateReadiness=()=>{if(!inactive())host.dataset.pageReady=String(bootReady&&pendingReads===0);};
+ updateReadiness();
  const assertCurrent=()=>{if(inactive())throw new DOMException('Community session changed','AbortError');};
  const isCancelled=error=>inactive()&&error?.name==='AbortError';
  const runTask=task=>Promise.resolve(task).catch(error=>{if(!isCancelled(error))throw error;});
@@ -97,7 +101,7 @@ export async function mountCommunity(host, options) {
      outcome.state==='COMMITTED'&&outcome.status>=300||outcome.state==='FAILED'&&outcome.status<400)throw new Error('上次请求结果尚未确认，请稍后再次读取。');
   return resultResponse({ok:outcome.status<400,status:outcome.status,headers:response.headers},outcome.result);
  }
- const fetch=async (url,init={})=>{
+ const performFetch=async (url,init={})=>{
   assertCurrent();
   if(typeof url!=='string'||!url.startsWith('/api/'))throw new Error('未知社区请求');
   const headers=new Headers(init.headers);
@@ -113,16 +117,27 @@ export async function mountCommunity(host, options) {
   if(mutation)headers.set('x-request-id',requestId);
   assertCurrent();
   if(journaled){const next=new Map(uncertain);next.set(key,{id:requestId,signature,at:Date.now()});saveOperations(next);}
-  let response;
-  try{response=await globalThis.fetch(prefix+url,{...init,method,headers,signal:controller.signal,cache:'no-store'});}
-  catch(error){assertCurrent();throw error;}
-  assertCurrent();
-  if(journaled&&response.status>=500){const resolved=await resolveOperation(requestId);assertCurrent();completeOperation(key,requestId);return resolved;}
-  const json=await response.json();
-  assertCurrent();
-  if(response.ok&&(!json||typeof json!=='object'||!('data' in json)||!(json.code===200||json.success===true)))throw new Error('社区响应不完整，请核对操作结果。');
-  if(journaled)completeOperation(key,requestId);
-  return resultResponse(response,json);
+  const requestController=new AbortController();
+  const signals=[...new Set([controller.signal,init.signal].filter(Boolean))];
+  const abortRequest=()=>requestController.abort();
+  for(const signal of signals){if(signal.aborted)abortRequest();else signal.addEventListener('abort',abortRequest,{once:true});}
+  try {
+   const response=await globalThis.fetch(prefix+url,{...init,method,headers,signal:requestController.signal,cache:'no-store'});
+   assertCurrent();
+   if(journaled&&response.status>=500){const resolved=await resolveOperation(requestId);assertCurrent();completeOperation(key,requestId);return resolved;}
+   const json=await response.json();
+   assertCurrent();
+   if(response.ok&&(!json||typeof json!=='object'||!('data' in json)||!(json.code===200||json.success===true)))throw new Error('社区响应不完整，请核对操作结果。');
+   if(journaled)completeOperation(key,requestId);
+   return resultResponse(response,json);
+  }catch(error){assertCurrent();throw error;}
+  finally{for(const signal of signals)signal.removeEventListener('abort',abortRequest);}
+ };
+ const fetch=async(url,init={})=>{
+  const reading=(init.method||'GET').toUpperCase()==='GET';
+  if(reading){pendingReads++;updateReadiness();}
+  try{return await performFetch(url,init);}
+  finally{if(reading){pendingReads--;updateReadiness();}}
  };
  const menu=root.querySelector('#community-menu'), app=root.querySelector('#app-screen'), backdrop=root.querySelector('#community-menu-backdrop');
  function closeMenu(){app.classList.remove('menu-open');menu.setAttribute('aria-expanded','false');backdrop.classList.add('hidden');}
@@ -133,14 +148,24 @@ export async function mountCommunity(host, options) {
  const views=['home','rooms','create','mine','favorites','coins','notifications','tags','profile','admin'];
  const initialView=views.includes(params.get('view'))?params.get('view'):'home';
  const context={document,window:instanceWindow,fetch,location:globalThis.location,setTimeout,clearTimeout,setInterval,clearInterval,requestAnimationFrame,cancelAnimationFrame,
-  disposed:inactive,isCancelled,runTask,guardEvent,assertCurrent,
+  disposed:inactive,isCancelled,runTask,guardEvent,assertCurrent,signal:controller.signal,
   localStorage:{getItem:key=>key==='guohua_token'?options.token:null,setItem(){},removeItem(){}},
   signOut:()=>{if(!disposed&&options.isCurrent())options.signOut();}, initialView,
-  onView(view){if(inactive())return;closeMenu();const url=new URL(globalThis.location.href);url.searchParams.set('view',view);if(view!=='room')url.searchParams.delete('room');if(view!=='detail')url.searchParams.delete('post');globalThis.history.replaceState(globalThis.history.state,'',url);},
+  present(scope,ready,regions=[scope]){presentations.get(scope)?.();for(const region of regions)region.hidden=false;const cancel=options.present?.(scope,ready,regions)||(()=>{});presentations.set(scope,cancel);},
+  onView(view,previousView,ready=()=>true){
+   if(inactive())return;
+   closeMenu();const url=new URL(globalThis.location.href);url.searchParams.set('view',view);if(view!=='room')url.searchParams.delete('room');if(view!=='detail')url.searchParams.delete('post');globalThis.history.replaceState(globalThis.history.state,'',url);
+   const main=body.querySelector('.main-content'),target=body.querySelector('#view-'+view);
+   if(main&&target&&(view!==previousView||['preparing','error'].includes(target.dataset.contentPhase))){
+    for(const [scope,stop] of presentations)if(scope!==main&&!target.contains(scope)){stop();presentations.delete(scope);}
+    target.dataset.contentLabel='社区模块 '+view;context.present(main,ready,[target]);
+   }
+  },
   onRoom(id){if(inactive())return;const url=new URL(globalThis.location.href);url.searchParams.set('room',id);url.searchParams.delete('code');globalThis.history.replaceState(globalThis.history.state,'',url);},
   onPost(id){if(inactive())return;const url=new URL(globalThis.location.href);url.searchParams.set('post',String(id));globalThis.history.replaceState(globalThis.history.state,'',url);},
   onReady(){
    if(inactive())return;
+   bootReady=true;updateReadiness();
    if(journalProblem)instanceWindow.communityApp.showNotice(journalProblem,'error');
    if(params.get('post'))void runTask(instanceWindow.communityApp.openDetail(Number(params.get('post'))));
    else if(params.get('room'))void runTask(instanceWindow.roomFeature.openRoom(params.get('room')));
@@ -153,7 +178,7 @@ export async function mountCommunity(host, options) {
  const cleanup=()=>{
   if(disposed)return;
   const errors=[];
-  for(const stop of [disposeDrafts,()=>instanceWindow.roomVoice?.leave(),()=>instanceWindow.roomFeature?.leaveRoom()])try{stop();}catch(error){errors.push(error);}
+  for(const stop of [...presentations.values(),disposeDrafts,()=>instanceWindow.roomVoice?.leave(),()=>instanceWindow.roomFeature?.leaveRoom()])try{stop();}catch(error){errors.push(error);}
   disposed=true;controller.abort();
   for(const id of timers)globalThis.clearTimeout(id);for(const id of intervals)globalThis.clearInterval(id);for(const id of frames)globalThis.cancelAnimationFrame(id);
   for(const args of listeners)globalThis.window.removeEventListener(...args);

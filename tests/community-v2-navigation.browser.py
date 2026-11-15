@@ -89,6 +89,8 @@ class Fixture:
             return self.reply(route, {'items': [], 'hasMore': False})
         if local == '/api/v2/rooms/public':
             return self.reply(route, {'items': [room('A'), room('B')]})
+        if local == '/api/rtc-config':
+            return self.reply(route, {'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}], 'relayAvailable': False})
         if local == '/api/ws-ticket':
             self.pending_tickets.append(route)
             self.page.evaluate('(count)=>window.__reviewTicketCount=count', len(self.pending_tickets))

@@ -6,6 +6,8 @@ import { artworkAspectRatio } from "@/lib/masonry-layout";
 import { resolveMediaUrl } from "@/lib/media";
 import type { PaintingSummary } from "@/lib/types";
 import { PaintingGridSkeleton, LoadingStatus } from "@/components/loading";
+import { startPresentation } from "@/lib/content-presentation";
+import { StatePanel } from "@/components/state-panel";
 
 // Public asset dimensions only: no account data, tokens, or persistent storage.
 const ratios = new Map<string, number>();
@@ -103,7 +105,8 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
 
   const count = visiblePrepared.reduce((sum, entry) => sum + entry.batch.length, 0);
   const pending = count < batches.reduce((sum, batch) => sum + batch.length, 0);
-  useEffect(() => { onPrepared(count); }, [count, onPrepared]);
+  const displayedIds = useRef(new Set<string>());
+  const [presentationError, setPresentationError] = useState(false);
   const gap = width > 900 ? 20 : width > 680 ? 16 : 14;
   const rows = useMemo(() => {
     const result: { paintings: PaintingSummary[]; height: number; widths: number[]; left: number }[] = [];
@@ -124,6 +127,18 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
     }
     return result;
   }, [visiblePrepared, width, gap]);
+
+  useLayoutEffect(() => {
+    const node = container.current;
+    if (!node || !rows.length) { onPrepared(0); return; }
+    const cards = Array.from(node.querySelectorAll<HTMLElement>("[data-painting-id]"));
+    const next = cards.filter(card => !displayedIds.current.has(card.dataset.paintingId!));
+    const prepared = () => { displayedIds.current = new Set(cards.map(card => card.dataset.paintingId!)); onPrepared(count); };
+    if (!displayedIds.current.size || !next.length) { prepared(); return; }
+    if (presentationError) { for (const card of next) card.hidden = true; return; }
+    const presentation = startPresentation(node, { regions: next, ready: () => !pending, onPrepared: prepared, onTimeout: () => setPresentationError(true) });
+    return presentation.cancel;
+  }, [rows, count, pending, onPrepared, presentationError]);
 
   useLayoutEffect(() => {
     const node = container.current;
@@ -183,6 +198,7 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
         {renderPainting(painting, rowIndex === 0)}
       </div>)}
     </div>)}
+    {presentationError ? <StatePanel kind="error" title="新增画作预览暂未准备完成" description="请重新筛选或刷新页面后重试。" actionLabel="刷新页面" onAction={() => location.reload()} /> : null}
     {pending ? <div className="gallery-preparing"><PaintingGridSkeleton count={3} rows /><LoadingStatus label="正在准备画作预览" /></div> : null}
   </div>;
 }

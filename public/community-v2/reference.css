@@ -83,7 +83,7 @@
 .canvas-toolbar button.active,.canvas-toolbar button:hover,.room-tabs button.active { background:var(--ink); color:white; }
 .canvas-toolbar span { margin-left:auto; color:var(--muted); font-size:.78rem; }
 .artwork-stage { grid-row:4; position:relative; min-height:0; overflow:hidden; display:grid; place-items:center; background-color:#2e312f; background-image:linear-gradient(45deg,#343836 25%,transparent 25%),linear-gradient(-45deg,#343836 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#343836 75%),linear-gradient(-45deg,transparent 75%,#343836 75%); background-size:24px 24px; background-position:0 0,0 12px,12px -12px,-12px 0; touch-action:none; }
-.artwork-transform { position:absolute; width:min(90%,920px); max-height:90%; transform-origin:center center; box-shadow:0 14px 48px rgba(0,0,0,.45); }
+.artwork-transform { position:absolute; width:0; height:0; transform-origin:center center; box-shadow:0 14px 48px rgba(0,0,0,.45); }
 .artwork-transform img { width:100%; height:100%; display:block; object-fit:contain; user-select:none; pointer-events:none; }
 #annotation-layer { position:absolute; inset:0; width:100%; height:100%; overflow:visible; cursor:crosshair; touch-action:none; }
 #annotation-layer.drawing-active { cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='5' fill='none' stroke='%23f1c75b' stroke-width='2'/%3E%3C/svg%3E") 12 12,crosshair; }

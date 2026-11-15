@@ -55,7 +55,7 @@ async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers });
   const result = await response.json();
   if (response.status === 401 && token) { localStorage.removeItem('guohua_token'); token = null; current = null; showAuth(); }
-  if (!response.ok) { const error = new Error(result.error?.message || result.message || '操作失败'); error.code = result.error?.code; error.details = result.error?.details; throw error; }
+  if (!response.ok) { const error = new Error(result.error?.message || result.message || '操作失败'); error.status = response.status; error.code = result.error?.code; error.details = result.error?.details; throw error; }
   return result;
 }
 function showAuth() { context.signOut(); }

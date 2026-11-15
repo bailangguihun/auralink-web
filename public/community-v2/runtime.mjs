@@ -117,16 +117,21 @@ export async function mountCommunity(host, options) {
   if(mutation)headers.set('x-request-id',requestId);
   assertCurrent();
   if(journaled){const next=new Map(uncertain);next.set(key,{id:requestId,signature,at:Date.now()});saveOperations(next);}
-  let response;
-  try{response=await globalThis.fetch(prefix+url,{...init,method,headers,signal:controller.signal,cache:'no-store'});}
-  catch(error){assertCurrent();throw error;}
-  assertCurrent();
-  if(journaled&&response.status>=500){const resolved=await resolveOperation(requestId);assertCurrent();completeOperation(key,requestId);return resolved;}
-  const json=await response.json();
-  assertCurrent();
-  if(response.ok&&(!json||typeof json!=='object'||!('data' in json)||!(json.code===200||json.success===true)))throw new Error('社区响应不完整，请核对操作结果。');
-  if(journaled)completeOperation(key,requestId);
-  return resultResponse(response,json);
+  const requestController=new AbortController();
+  const signals=[...new Set([controller.signal,init.signal].filter(Boolean))];
+  const abortRequest=()=>requestController.abort();
+  for(const signal of signals){if(signal.aborted)abortRequest();else signal.addEventListener('abort',abortRequest,{once:true});}
+  try {
+   const response=await globalThis.fetch(prefix+url,{...init,method,headers,signal:requestController.signal,cache:'no-store'});
+   assertCurrent();
+   if(journaled&&response.status>=500){const resolved=await resolveOperation(requestId);assertCurrent();completeOperation(key,requestId);return resolved;}
+   const json=await response.json();
+   assertCurrent();
+   if(response.ok&&(!json||typeof json!=='object'||!('data' in json)||!(json.code===200||json.success===true)))throw new Error('社区响应不完整，请核对操作结果。');
+   if(journaled)completeOperation(key,requestId);
+   return resultResponse(response,json);
+  }catch(error){assertCurrent();throw error;}
+  finally{for(const signal of signals)signal.removeEventListener('abort',abortRequest);}
  };
  const fetch=async(url,init={})=>{
   const reading=(init.method||'GET').toUpperCase()==='GET';
@@ -143,7 +148,7 @@ export async function mountCommunity(host, options) {
  const views=['home','rooms','create','mine','favorites','coins','notifications','tags','profile','admin'];
  const initialView=views.includes(params.get('view'))?params.get('view'):'home';
  const context={document,window:instanceWindow,fetch,location:globalThis.location,setTimeout,clearTimeout,setInterval,clearInterval,requestAnimationFrame,cancelAnimationFrame,
-  disposed:inactive,isCancelled,runTask,guardEvent,assertCurrent,
+  disposed:inactive,isCancelled,runTask,guardEvent,assertCurrent,signal:controller.signal,
   localStorage:{getItem:key=>key==='guohua_token'?options.token:null,setItem(){},removeItem(){}},
   signOut:()=>{if(!disposed&&options.isCurrent())options.signOut();}, initialView,
   present(scope,ready,regions=[scope]){presentations.get(scope)?.();for(const region of regions)region.hidden=false;const cancel=options.present?.(scope,ready,regions)||(()=>{});presentations.set(scope,cancel);},

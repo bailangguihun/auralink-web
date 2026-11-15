@@ -75,6 +75,9 @@ class Fixture:
         self.pending_resolution = False
         self.bad_tags = False
         self.with_audio = False
+        self.artwork_size = None
+        self.share_presenter = None
+        self.snapshot_failures = 0
 
     def envelope(self, data):
         return {'code': 200, 'message': 'ok', 'data': data}
@@ -95,6 +98,9 @@ class Fixture:
             name = path.rsplit('/', 1)[1]
             if name in assets:
                 return route.fulfill(content_type='text/javascript' if name.endswith('.mjs') else 'text/css' if name.endswith('.css') else 'text/html', body=assets[name])
+        if path == '/fixture-artwork.svg':
+            w,h=self.artwork_size or (1000,2000)
+            return route.fulfill(content_type='image/svg+xml',body=f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}"><rect width="100%" height="100%" fill="#eee0c0"/></svg>')
         local = path.removeprefix('/api/community/v2')
         method = request.method
         self.calls.append({'method': method, 'path': local, 'authorization': request.headers.get('authorization'), 'request_id': request.headers.get('x-request-id')})
@@ -135,7 +141,19 @@ class Fixture:
         if local in ['/api/v2/rooms/A', '/api/v2/rooms/A/join']:
             return self.reply(route, room())
         if local == '/api/v2/rooms/A/snapshot':
-            return self.reply(route, {'room': room(), 'members': [], 'annotations': [], 'drawings': [], 'messages': []})
+            if self.snapshot_failures:
+                self.snapshot_failures-=1
+                return route.fulfill(status=503,content_type='application/json',body=json.dumps({'code':503,'message':'Temporary fixture failure'}))
+            value={'room': room(), 'members': [], 'annotations': [], 'drawings': [], 'messages': []}
+            if self.artwork_size:
+                w,h=self.artwork_size
+                value['room']['currentSession']={'id':'S','title':'Fixture artwork','asset':{'width':w,'height':h,'url':'/fixture-artwork.svg'}}
+                value['annotations']=[{'id':'other','sessionId':'S','author':user(43),'shapeType':'rectangle','geometry':{'x':.05,'y':.05,'width':.1,'height':.1},'content':'Other member annotation','status':'visible','createdAt':'2026-11-15 00:00:00'}]
+                if self.share_presenter:
+                    value['share']={'roomId':'A','presenterId':self.share_presenter,'sessionId':'S','selectedAnnotationId':None if self.share_presenter==42 else 'other','strokes':[],'viewport':{'scale':1,'panX':0,'panY':0}}
+            return self.reply(route,value)
+        if local == '/api/rtc-config':
+            return self.reply(route, {'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}], 'relayAvailable': False})
         if local == '/api/ws-ticket':
             return self.reply(route, {'ticket': 'isolated-ticket'})
         raise AssertionError('Unexpected isolated request: ' + method + ' ' + request.url)
@@ -172,7 +190,7 @@ class Fixture:
 
     def entered_room(self):
         self.page.locator('#runtime-host #home-room-grid [data-enter-room="A"]').click()
-        expect(self.page.locator('#runtime-host #room-voice-prompt')).to_be_visible()
+        expect(self.page.locator('#runtime-host #room-voice-prompt')).to_be_visible(timeout=10000)
 
 
 with sync_playwright() as playwright:
@@ -450,6 +468,186 @@ with sync_playwright() as playwright:
             expect(fixture.page.locator('#runtime-host #post-form textarea[name="content"]')).to_have_value('')
             expect(fixture.page.locator('#runtime-host input[name="images"]')).to_have_value('')
 
+        def artwork_room(fixture,shared=None):
+            fixture.artwork_size=(1000,2000);fixture.share_presenter=shared
+            fixture.prepare();fixture.page.evaluate('()=>{window.AudioContext=undefined;window.webkitAudioContext=undefined;}')
+            fixture.mount();fixture.entered_room();fixture.page.locator('#runtime-host #room-voice-later').click()
+            fixture.page.locator('#runtime-host #room-artwork').evaluate('(image)=>image.decode()')
+            if shared==42:fixture.page.locator('#runtime-host #share-annotation-mode').click()
+
+        def annotation_exit(fixture,shared=None):
+            artwork_room(fixture,shared)
+            item=fixture.page.locator('#runtime-host [data-select-annotation="other"]')
+            focus=fixture.page.locator('#runtime-host .focus-dim')
+            item.click();expect(focus).to_have_count(1)
+            item.click();expect(focus).to_have_count(0)
+            item.click();fixture.page.keyboard.press('Escape');expect(focus).to_have_count(0)
+            item.click();fixture.page.locator('#runtime-host #clear-annotation-selection').click();expect(focus).to_have_count(0)
+            if shared:
+                item.click();expect(focus).to_have_count(1)
+            else:
+                fixture.page.locator('#runtime-host .annotation-shape[data-annotation-shape="other"]').click();expect(focus).to_have_count(1)
+            fixture.page.locator('#runtime-host .annotation-shape[data-annotation-shape="other"]').click();expect(focus).to_have_count(0)
+            item.click();stage=fixture.page.locator('#runtime-host #artwork-stage').bounding_box()
+            fixture.page.mouse.click(stage['x']+5,stage['y']+5);expect(focus).to_have_count(0)
+            if shared:
+                assert fixture.page.evaluate('()=>window.__reviewSockets.flatMap(s=>s.sent).filter(m=>m.type==="share.annotation").at(-1).annotationId') is None
+
+        def viewer_focus_is_local(fixture):
+            artwork_room(fixture,99)
+            focus=fixture.page.locator('#runtime-host .focus-dim');expect(focus).to_have_count(1)
+            fixture.page.locator('#runtime-host #clear-annotation-selection').click();expect(focus).to_have_count(0)
+            assert fixture.page.evaluate('()=>window.__reviewSockets.flatMap(s=>s.sent).filter(m=>m.type==="share.annotation").length')==0
+            fixture.page.evaluate('()=>window.__reviewSockets.at(-1).emit("share.annotation",{annotationId:"other"})')
+            expect(focus).to_have_count(1)
+
+        def canvas_geometry(fixture):
+            artwork_room(fixture)
+            for width,height in [(1440,900),(1024,768),(768,1024),(390,844)]:
+                fixture.page.set_viewport_size({'width':width,'height':height})
+                fixture.page.wait_for_function("""()=>{const r=document.querySelector('#runtime-host').shadowRoot,i=r.querySelector('#room-artwork'),s=r.querySelector('#annotation-layer').getBoundingClientRect();return s.width>0&&Math.abs(s.width/s.height-i.naturalWidth/i.naturalHeight)<.001;}""")
+                fixture.page.locator('#runtime-host [data-canvas-tool="rectangle"]').click()
+                image=fixture.page.locator('#runtime-host #room-artwork').bounding_box()
+                fixture.page.mouse.move(image['x']+.25*image['width'],image['y']+.6*image['height']);fixture.page.mouse.down()
+                fixture.page.mouse.move(image['x']+.35*image['width'],image['y']+.7*image['height'],steps=3);fixture.page.mouse.up()
+                pending=fixture.page.locator('#runtime-host [data-annotation-shape="pending"]');expect(pending).to_have_count(1)
+                values=pending.evaluate('(r)=>["x","y","width","height"].map(k=>Number(r.getAttribute(k)))')
+                assert all(abs(a-b)<.005 for a,b in zip(values,[.25,.6,.1,.1])),(width,height,values)
+                fixture.page.locator('#runtime-host #cancel-annotation').click()
+            fixture.page.screenshot(path=str(args.output/'canvas-phone.png'),full_page=True)
+
+        def microphone_reconnect(fixture,cancel=False,failures=0):
+            artwork_room(fixture)
+            fixture.page.locator('#runtime-host #room-voice-action').click()
+            fixture.page.wait_for_function('()=>window.__reviewMicRequests.length===1')
+            fixture.page.evaluate('()=>window.__reviewMicRequests[0]()')
+            expect(fixture.page.locator('#runtime-host #room-voice-action')).to_have_text('关闭麦克风')
+            fixture.snapshot_failures=failures
+            fixture.page.evaluate('()=>window.__reviewSockets.at(-1).close(1006)')
+            assert fixture.page.evaluate('()=>window.__reviewTracks[0].enabled') is False
+            if cancel:fixture.page.locator('#runtime-host #room-voice-action').click()
+            fixture.page.wait_for_function('()=>window.__reviewSockets.length>=2&&window.__reviewSockets.at(-1).sent.some(m=>m.type==="voice.join")',timeout=20000)
+            fixture.flush()
+            if cancel:
+                expect(fixture.page.locator('#runtime-host #room-voice-action')).to_have_text('开启麦克风')
+                assert fixture.page.evaluate('()=>window.__reviewTracks[0].stops')==1
+                assert fixture.page.evaluate('()=>window.__reviewSockets.flatMap(s=>s.sent).filter(m=>m.type==="voice.start").length')==1
+            else:
+                expect(fixture.page.locator('#runtime-host #room-voice-action')).to_have_text('关闭麦克风')
+                assert fixture.page.evaluate('()=>window.__reviewTracks[0].enabled') is True
+                assert fixture.page.evaluate('()=>window.__reviewTracks[0].stops')==0
+                assert fixture.page.evaluate('()=>window.__reviewMicRequests.length')==1
+                assert fixture.page.evaluate('()=>window.__reviewSockets.flatMap(s=>s.sent).filter(m=>m.type==="voice.start").length')==2
+
+        def microphone_terminal_close(fixture):
+            artwork_room(fixture)
+            fixture.page.locator('#runtime-host #room-voice-action').click()
+            fixture.page.wait_for_function('()=>window.__reviewMicRequests.length===1')
+            fixture.page.evaluate('()=>window.__reviewMicRequests[0]()')
+            expect(fixture.page.locator('#runtime-host #room-voice-action')).to_have_text('关闭麦克风')
+            fixture.page.evaluate('()=>window.__reviewSockets.at(-1).close(4403)')
+            assert fixture.page.evaluate('()=>window.__reviewTracks[0].stops')==1
+            expect(fixture.page.locator('#runtime-host #room-connection-status')).to_contain_text('权限或登录状态已变化')
+            fixture.page.evaluate('()=>window.dispatchEvent(new Event("online"))')
+            assert fixture.page.evaluate('()=>window.__reviewSockets.length')==1
+
+        def ice_restart(fixture):
+            artwork_room(fixture)
+            fixture.page.evaluate("""()=>{window.__reviewPCs=[];
+              window.RTCPeerConnection=class {
+                constructor(){this.connectionState='new';this.signalingState='stable';this.offers=[];this.restarts=0;window.__reviewPCs.push(this);}
+                addTrack(){} addTransceiver(){} close(){this.connectionState='closed';} setConfiguration(){}
+                async createOffer(options={}){this.offers.push(options);return {type:'offer',sdp:'fixture-sdp'};}
+                async setLocalDescription(value){this.localDescription=value;}
+                restartIce(){this.restarts++;}
+              };
+            }""")
+            fixture.page.locator('#runtime-host #room-voice-action').click()
+            fixture.page.wait_for_function('()=>window.__reviewMicRequests.length===1')
+            fixture.page.evaluate('()=>window.__reviewMicRequests[0]()')
+            expect(fixture.page.locator('#runtime-host #room-voice-action')).to_have_text('关闭麦克风')
+            fixture.page.evaluate('()=>{const s=window.__reviewSockets.at(-1);s.emit("voice.joined",{peerId:"zz-peer",userId:43,speaking:false});s.emit("voice.updated",{peerId:"review-self",userId:42,speaking:true});}')
+            fixture.page.wait_for_function('()=>window.__reviewPCs.some(pc=>pc.offers.length>0&&pc.connectionState!=="closed")')
+            fixture.page.evaluate('()=>{const pc=window.__reviewPCs.findLast(pc=>pc.connectionState!=="closed");pc.connectionState="failed";pc.onconnectionstatechange();}')
+            fixture.page.wait_for_function('()=>window.__reviewPCs.some(pc=>pc.restarts===1&&pc.offers.some(value=>value.iceRestart))')
+            assert fixture.page.evaluate('()=>window.__reviewTracks[0].stops')==0
+            for expected in [2,3]:
+                fixture.page.evaluate('()=>{const pc=window.__reviewPCs.findLast(pc=>pc.connectionState!=="closed");pc.onconnectionstatechange();}')
+                fixture.page.wait_for_function('(n)=>window.__reviewPCs.some(pc=>pc.restarts===n)',arg=expected)
+            fixture.page.evaluate('()=>{const pc=window.__reviewPCs.findLast(pc=>pc.connectionState!=="closed");pc.onconnectionstatechange();}')
+            expect(fixture.page.locator('#runtime-host #notice')).to_contain_text('重新开启麦克风')
+            fixture.page.locator('#runtime-host #room-voice-action').click()
+            fixture.page.locator('#runtime-host #room-voice-action').click()
+            fixture.page.wait_for_function('()=>window.__reviewMicRequests.length===2')
+            fixture.page.evaluate('()=>window.__reviewMicRequests[1]()')
+            expect(fixture.page.locator('#runtime-host #room-voice-action')).to_have_text('关闭麦克风')
+            fixture.page.evaluate('()=>window.__reviewSockets.at(-1).emit("voice.updated",{peerId:"review-self",userId:42,speaking:true})')
+            fixture.page.wait_for_function('()=>window.__reviewPCs.filter(pc=>pc.connectionState!=="closed").length===1')
+            fixture.page.evaluate('()=>{const pc=window.__reviewPCs.findLast(pc=>pc.connectionState!=="closed");pc.connectionState="failed";pc.onconnectionstatechange();}')
+            fixture.page.wait_for_function('()=>window.__reviewPCs.at(-1).restarts===1')
+
+        def canvas_zoom_and_pan(fixture):
+            artwork_room(fixture)
+            stage=fixture.page.locator('#runtime-host #artwork-stage')
+            for _ in range(3):stage.dispatch_event('wheel',{'deltaY':-100})
+            fixture.page.locator('#runtime-host [data-canvas-tool="pan"]').click()
+            box=fixture.page.locator('#runtime-host #room-artwork').bounding_box()
+            fixture.page.mouse.move(box['x']+.7*box['width'],box['y']+.6*box['height']);fixture.page.mouse.down()
+            fixture.page.mouse.move(box['x']+.7*box['width']+15,box['y']+.6*box['height']+10);fixture.page.mouse.up()
+            fixture.page.locator('#runtime-host [data-canvas-tool="rectangle"]').click()
+            box=fixture.page.locator('#runtime-host #room-artwork').bounding_box()
+            fixture.page.mouse.move(box['x']+.25*box['width'],box['y']+.6*box['height']);fixture.page.mouse.down()
+            fixture.page.mouse.move(box['x']+.35*box['width'],box['y']+.7*box['height'],steps=3);fixture.page.mouse.up()
+            rect=fixture.page.locator('#runtime-host [data-annotation-shape="pending"]');expect(rect).to_have_count(1)
+            values=rect.evaluate('(r)=>["x","y","width","height"].map(k=>Number(r.getAttribute(k)))')
+            assert all(abs(a-b)<.005 for a,b in zip(values,[.25,.6,.1,.1])),values
+
+        def shared_center_after_resize(fixture):
+            artwork_room(fixture,99)
+            fixture.page.evaluate('()=>window.__reviewSockets.at(-1).emit("share.viewport",{scale:2,panX:.1,panY:.1,centerX:.25,centerY:.75})')
+            for width,height in [(1024,768),(768,1024),(1440,900)]:
+                fixture.page.set_viewport_size({'width':width,'height':height});fixture.flush()
+                fixture.page.wait_for_function("""()=>{const r=document.querySelector('#runtime-host').shadowRoot,s=r.querySelector('#artwork-stage').getBoundingClientRect(),a=r.querySelector('#annotation-layer').getBoundingClientRect();return Math.abs(a.x+a.width*.25-(s.x+s.width/2))<1&&Math.abs(a.y+a.height*.75-(s.y+s.height/2))<1;}""")
+
+        def rtc_config_timeout(fixture):
+            fixture.hold.add('/api/rtc-config')
+            artwork_room(fixture)
+            assert fixture.page.evaluate('()=>window.__reviewSockets.at(-1).sent.some(m=>m.type==="voice.join")')
+            fixture.page.locator('#runtime-host #room-voice-action').click()
+            fixture.page.wait_for_function('()=>window.__reviewMicRequests.length===1',timeout=10000)
+
+        def reconnect_snapshot_order(fixture):
+            artwork_room(fixture)
+            pending=[]
+            def hold(route):
+                pending.append(route);fixture.page.evaluate("(n)=>window.__reviewSnapshotsPending=n",len(pending))
+            fixture.page.route('**/api/v2/rooms/A/snapshot',hold)
+            fixture.page.evaluate('()=>window.__reviewSockets.at(-1).close(1006)')
+            fixture.page.wait_for_function('()=>document.querySelector("#runtime-host").shadowRoot.querySelector("#room-connection-status").textContent.includes("恢复")')
+            fixture.page.wait_for_function('()=>window.__reviewSnapshotsPending===1')
+            assert len(pending)==1
+            fixture.page.evaluate('()=>window.dispatchEvent(new Event("online"))')
+            fixture.page.wait_for_function('()=>window.__reviewSnapshotsPending===2')
+            assert len(pending)==2
+            def answer(route,name):
+                value=room();value['name']=name
+                fixture.reply(route,{'room':value,'members':[],'annotations':[],'drawings':[],'messages':[]})
+            answer(pending[1],'NEW');expect(fixture.page.locator('#runtime-host #room-title')).to_have_text('NEW')
+            answer(pending[0],'OLD');fixture.flush();expect(fixture.page.locator('#runtime-host #room-title')).to_have_text('NEW')
+
+        scenario('rtc-config-timeout-does-not-block-voice-join',rtc_config_timeout)
+        scenario('newer-reconnect-snapshot-rejects-late-older-snapshot',reconnect_snapshot_order)
+        scenario('pointer-coordinates-survive-canvas-zoom-and-pan',canvas_zoom_and_pan)
+        scenario('shared-artwork-center-survives-viewport-rotation',shared_center_after_resize)
+        scenario('terminal-permission-close-stops-mic-and-does-not-reconnect',microphone_terminal_close)
+        scenario('failed-webrtc-peer-restarts-ice-with-retained-mic',ice_restart)
+        scenario('annotation-repeat-blank-button-and-escape',annotation_exit)
+        scenario('shared-presenter-clears-shared-selection',lambda fixture:annotation_exit(fixture,42))
+        scenario('shared-viewer-dismisses-only-local-focus',viewer_focus_is_local)
+        scenario('canvas-image-alignment-and-pointer-coordinates-after-resize',canvas_geometry)
+        scenario('microphone-recovers-with-retained-authorized-stream',microphone_reconnect)
+        scenario('cancel-during-reconnect-never-reopens-microphone',lambda fixture:microphone_reconnect(fixture,cancel=True))
+        scenario('reconnect-retries-failed-room-snapshots',lambda fixture:microphone_reconnect(fixture,failures=2))
         scenario('composer-attachment-chooser-and-independent-removal', composer_attachment_controls)
         scenario('composer-hidden-invalid-url-opens-before-validation', composer_hidden_invalid_url)
         scenario('composer-restores-links-and-quote-and-resets-after-publish', composer_restores_links_and_quote)

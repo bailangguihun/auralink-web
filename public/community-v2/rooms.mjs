@@ -1,13 +1,14 @@
 // Adapted from 国画社区系统2.0; see docs/community-v2-reference.md.
+import {fittedArtwork, artworkPoint} from "./room-canvas.mjs";
 export function mountRooms(context) {
 const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setInterval,clearInterval,requestAnimationFrame,cancelAnimationFrame} = context;
 (() => {
   const app = window.communityApp;
   const state = {
     room:null, members:[], annotations:[], drawings:[], messages:[], histories:[], socket:null,
-    navigationEpoch:0, connectionEpoch:0, targetRoomId:null,
+    navigationEpoch:0, connectionEpoch:0, targetRoomId:null, reconnectTimer:null, reconnectAttempt:0, connectionState:"idle",
     scale:1, panX:0, panY:0, tool:'pan', drawing:null, pendingGeometry:null,
-    selectedId:null, hideAll:false, hideDrawings:false, viewingSession:null, dragging:false,
+    selectedId:null, dismissedSharedId:null, blankPointer:null, hideAll:false, hideDrawings:false, viewingSession:null, dragging:false,
     drawingMode:false, drawingAction:'draw', draftStrokes:[], activeStroke:null,
     brush:'ink', brushColor:'#b44b3e', brushWidth:8, brushOpacity:.8, brushTipMode:'auto',
     annotationMode:'manual', aiDraft:null, share:null, shareRequests:[], shareRequested:false, sharePreview:null, shareAnnotationPreview:null, shareAnnotationPreviewAt:0, shareViewportTimer:null, sharePreviewAt:0, shareUndoPending:false, shareUndoTimer:null, pendingSharedStrokes:[]
@@ -18,11 +19,12 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
   const currentRoom = (roomId, epoch) => currentNavigation(epoch) && state.targetRoomId === roomId;
   function disconnectRoom() {
     state.connectionEpoch += 1;
+    clearTimeout(state.reconnectTimer);state.reconnectTimer=null;state.reconnectAttempt=0;state.connectionState="idle";
     window.roomVoice?.leave();
     if (state.socket) { const socket=state.socket;state.socket=null;socket.close(1000,'离开房间'); }
   }
   function beginRoomNavigation(roomId) {
-    state.navigationEpoch += 1;state.targetRoomId=roomId;disconnectRoom();
+    state.navigationEpoch += 1;state.targetRoomId=roomId;state.dismissedSharedId=null;disconnectRoom();
     return state.navigationEpoch;
   }
 
@@ -74,10 +76,11 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
     try {const url=`/api/v2/room-invitations/${encodeURIComponent(code.trim())}`;const room=(await app.api(url)).data;if(!isCurrent())return;const payment=await paymentConfirmation(room,isCurrent);if(payment===null||!isCurrent())return;const result=await app.api(`${url}/join`,{method:'POST',body:JSON.stringify(payment)});if(isCurrent())await openRoom(result.data.id,true); }
     catch(error){if(isCurrent())app.showNotice(error.message,'error');}
   }
-  async function loadSnapshot(roomId,{preserveDrawing=false,navigation=state.navigationEpoch}={}) {
-    if(!currentRoom(roomId,navigation))return false;
+  async function loadSnapshot(roomId,{preserveDrawing=false,navigation=state.navigationEpoch,connection=null}={}) {
+    const current=()=>currentRoom(roomId,navigation)&&(connection===null||state.connectionEpoch===connection);
+    if(!current())return false;
     const result=await app.api(`/api/v2/rooms/${roomId}/snapshot`);
-    if(!currentRoom(roomId,navigation))return false;
+    if(!current())return false;
     const nextShare=result.data.share||null;
     const sameArtwork=preserveDrawing&&state.room?.id===roomId&&state.viewingSession?.id===result.data.room.currentSession?.id;
     const sameShare=Boolean(sameArtwork&&state.share&&nextShare&&state.share.sessionId===nextShare.sessionId&&state.share.presenterId===nextShare.presenterId);
@@ -149,10 +152,35 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
   function renderArtwork(){
     const session=state.viewingSession;const image=q('#room-artwork');const empty=q('#empty-artwork');const tools=q('#owner-artwork-tools');tools.classList.toggle('hidden',!isOwner()||state.room.status!=='active'||Boolean(state.share));
     if(!session){image.classList.add('hidden');q('#annotation-layer').classList.add('hidden');empty.classList.remove('hidden');return;}
-    empty.classList.add('hidden');image.classList.remove('hidden');q('#annotation-layer').classList.remove('hidden');image.src=session.asset.previewUrl||session.asset.url;const transform=q('#artwork-transform');transform.style.aspectRatio=`${session.asset.width}/${session.asset.height}`;applyTransform();
+    empty.classList.add('hidden');image.classList.remove('hidden');q('#annotation-layer').classList.remove('hidden');image.src=session.asset.previewUrl||session.asset.url;fitArtwork();applyTransform();
   }
-  function applyTransform(){q('#artwork-transform').style.transform=`translate(${state.panX}px,${state.panY}px) scale(${state.scale})`;q('#canvas-scale').textContent=`${Math.round(state.scale*100)}%`;if(isPresenter()&&state.socket?.readyState===WebSocket.OPEN){clearTimeout(state.shareViewportTimer);state.shareViewportTimer=setTimeout(()=>{const stage=q('#artwork-stage').getBoundingClientRect();sendShare({type:'share.viewport',viewport:{scale:state.scale,panX:state.panX/Math.max(1,stage.width),panY:state.panY/Math.max(1,stage.height)}});},70);}}
-  function followShareViewport(viewport){if(!viewport||!Number.isFinite(viewport.scale))return;const stage=q('#artwork-stage').getBoundingClientRect();state.scale=viewport.scale;state.panX=viewport.panX*stage.width;state.panY=viewport.panY*stage.height;applyTransform();}
+  function fitArtwork() {
+    const session=state.viewingSession;if(!session)return;
+    const stage=q('#artwork-stage'),image=q('#room-artwork'),transform=q('#artwork-transform');
+    const size=fittedArtwork(stage.clientWidth,stage.clientHeight,Number(session.asset.width)||image.naturalWidth,Number(session.asset.height)||image.naturalHeight);
+    if(size){transform.style.width=size.width+'px';transform.style.height=size.height+'px';}
+  }
+  function applyTransform({broadcast=true}={}) {
+    q('#artwork-transform').style.transform=`translate(${state.panX}px,${state.panY}px) scale(${state.scale})`;
+    q('#canvas-scale').textContent=`${Math.round(state.scale*100)}%`;
+    if(broadcast&&isPresenter()&&state.socket?.readyState===WebSocket.OPEN){
+      clearTimeout(state.shareViewportTimer);state.shareViewportTimer=setTimeout(()=>{
+        const stage=q('#artwork-stage'),art=q('#artwork-transform');
+        sendShare({type:'share.viewport',viewport:{scale:state.scale,
+          panX:Math.max(-2,Math.min(2,state.panX/Math.max(1,stage.clientWidth))),panY:Math.max(-2,Math.min(2,state.panY/Math.max(1,stage.clientHeight))),
+          centerX:Math.max(-16,Math.min(16,.5-state.panX/Math.max(1,art.clientWidth*state.scale))),
+          centerY:Math.max(-16,Math.min(16,.5-state.panY/Math.max(1,art.clientHeight*state.scale)))}});
+      },70);
+    }
+  }
+  function followShareViewport(viewport) {
+    if(!viewport||!Number.isFinite(viewport.scale))return;
+    const stage=q('#artwork-stage'),art=q('#artwork-transform');state.scale=viewport.scale;
+    if(Number.isFinite(viewport.centerX)&&Number.isFinite(viewport.centerY)){
+      state.panX=(.5-viewport.centerX)*art.clientWidth*state.scale;state.panY=(.5-viewport.centerY)*art.clientHeight*state.scale;
+    }else{state.panX=viewport.panX*stage.clientWidth;state.panY=viewport.panY*stage.clientHeight;}
+    applyTransform({broadcast:false});
+  }
   function sendShare(message){if(state.socket?.readyState===WebSocket.OPEN)state.socket.send(JSON.stringify(message));}
   function sendSharedAnnotationPreview(preview,force=false){if(!isPresenter())return;if(!force&&Date.now()-state.shareAnnotationPreviewAt<65)return;state.shareAnnotationPreviewAt=Date.now();sendShare({type:'share.annotation.preview',preview});}
   function shapeMarkup(annotation, attrs=''){
@@ -170,11 +198,11 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
     const fiberA=roughPencilPoints(points,random,Math.min(1.15,width*.12),pixelWidth,pixelHeight),fiberB=roughPencilPoints(points,random,Math.min(1.5,width*.16),pixelWidth,pixelHeight);const dashA=`${(18+random()*12).toFixed(1)}px ${(1.1+random()*1.1).toFixed(1)}px ${(9+random()*8).toFixed(1)}px ${(0.6+random()*.8).toFixed(1)}px`,dashB=`${(11+random()*9).toFixed(1)}px ${(0.8+random()*1.2).toFixed(1)}px ${(24+random()*12).toFixed(1)}px ${(1+random()).toFixed(1)}px`;html+=`<path class="drawing-stroke pencil-fiber" data-drawing-stroke="${drawingId}" d="${smoothPathData(fiberA)}" stroke="${color}" stroke-opacity="${clamp(opacity*.24,.05,.3).toFixed(3)}" vector-effect="non-scaling-stroke" style="stroke-width:${Math.max(.35,width*.15).toFixed(2)}px;stroke-dasharray:${dashA}" /><path class="drawing-stroke pencil-fiber" data-drawing-stroke="${drawingId}" d="${smoothPathData(fiberB)}" stroke="${color}" stroke-opacity="${clamp(opacity*.17,.04,.24).toFixed(3)}" vector-effect="non-scaling-stroke" style="stroke-width:${Math.max(.3,width*.1).toFixed(2)}px;stroke-dasharray:${dashB}" />`;return `${html}</g>`;}
   function inkOutlinePath(points,width,tipMode){const rect=q('#annotation-layer').getBoundingClientRect();const pixelWidth=Math.max(1,rect.width),pixelHeight=Math.max(1,rect.height);const left=[],right=[];points.forEach((point,index)=>{const previous=points[Math.max(0,index-1)],next=points[Math.min(points.length-1,index+1)];const dx=(next.x-previous.x)*pixelWidth,dy=(next.y-previous.y)*pixelHeight;const length=Math.hypot(dx,dy)||1;const normalX=-dy/length,normalY=dx/length;const taper=tipMode==='fixed'?1:.18+.82*Math.min(1,(index+1)/3,(points.length-index)/3);const pressure=tipMode==='fixed'?.62:point.p;const radius=Math.max(.35,width*.5*(.28+pressure*.95)*taper);left.push({x:point.x+normalX*radius/pixelWidth,y:point.y+normalY*radius/pixelHeight});right.push({x:point.x-normalX*radius/pixelWidth,y:point.y-normalY*radius/pixelHeight});});const outline=[...left,...right.reverse()];return outline.length?`M ${outline.map(point=>`${point.x} ${point.y}`).join(' L ')} Z`:'';}
   function drawingStrokeMarkup(stroke,drawingId,strokeIndex){
-    const points=smoothStrokePoints(stroke.points||[]);if(points.length<2)return '';const brush=['ink','liner','pencil','marker','dry'].includes(stroke.brush)?stroke.brush:'liner';const color=/^#[0-9a-f]{6}$/i.test(stroke.color)?stroke.color:'#b44b3e';const width=clamp(Number(stroke.width)||4,1,40);const opacity=clamp(Number(stroke.opacity)||.8,.1,1);const tipMode=['auto','device','fixed'].includes(stroke.tipMode)?stroke.tipMode:'auto';if(brush==='ink')return `<path class="drawing-stroke drawing-ink-shape brush-ink" data-drawing-stroke="${drawingId}" d="${inkOutlinePath(points,width,tipMode)}" style="fill:${color};fill-opacity:${opacity};stroke:none" />`;if(brush==='pencil')return pencilStrokeMarkup(points,stroke,drawingId,strokeIndex,color,width,opacity);const common=`class="drawing-stroke brush-${brush}" data-drawing-stroke="${drawingId}" stroke="${color}" stroke-opacity="${opacity}" vector-effect="non-scaling-stroke"`;return `<path ${common} d="${smoothPathData(points)}" style="stroke-width:${width}px" />`;
+    const points=smoothStrokePoints(stroke.points||[]);if(points.length<2)return '';const brush=['ink','liner','pencil','marker','dry'].includes(stroke.brush)?stroke.brush:'liner';const color=/^#[0-9a-f]{6}$/i.test(stroke.color)?stroke.color:'#b44b3e';const width=Number.isFinite(stroke.widthRatio)&&stroke.widthRatio>0?stroke.widthRatio*Math.max(1,q('#annotation-layer').getBoundingClientRect().width):clamp(Number(stroke.width)||4,1,40);const opacity=clamp(Number(stroke.opacity)||.8,.1,1);const tipMode=['auto','device','fixed'].includes(stroke.tipMode)?stroke.tipMode:'auto';if(brush==='ink')return `<path class="drawing-stroke drawing-ink-shape brush-ink" data-drawing-stroke="${drawingId}" d="${inkOutlinePath(points,width,tipMode)}" style="fill:${color};fill-opacity:${opacity};stroke:none" />`;if(brush==='pencil')return pencilStrokeMarkup(points,stroke,drawingId,strokeIndex,color,width,opacity);const common=`class="drawing-stroke brush-${brush}" data-drawing-stroke="${drawingId}" stroke="${color}" stroke-opacity="${opacity}" vector-effect="non-scaling-stroke"`;return `<path ${common} d="${smoothPathData(points)}" style="stroke-width:${width}px" />`;
   }
   function drawingMarkup(drawing){return `<g class="drawing-group" data-drawing-group="${drawing.id}">${drawing.strokes.map((stroke,index)=>drawingStrokeMarkup(stroke,drawing.id,index)).join('')}</g>`;}
   function renderAnnotations(){
-    const svg=q('#annotation-layer');if(!state.viewingSession){svg.innerHTML='';return;}const sharedId=state.share?.selectedAnnotationId;const visible=state.share?state.annotations.filter(item=>item.id===sharedId&&item.status==='visible'):state.hideAll?[]:state.annotations.filter(item=>item.status!=='deleted'&&item.status!=='hidden');const selected=visible.find(item=>item.id===(state.share?sharedId:state.selectedId));let html='<defs>';
+    const svg=q('#annotation-layer');if(!state.viewingSession){svg.innerHTML='';return;}const sharedId=state.dismissedSharedId===state.share?.selectedAnnotationId?null:state.share?.selectedAnnotationId;const visible=state.share?state.annotations.filter(item=>item.id===sharedId&&item.status==='visible'):state.hideAll?[]:state.annotations.filter(item=>item.status!=='deleted'&&item.status!=='hidden');const selected=visible.find(item=>item.id===(state.share?sharedId:state.selectedId));let html='<defs>';
     if(selected)html+=`<mask id="focus-mask" maskUnits="objectBoundingBox"><rect x="0" y="0" width="1" height="1" fill="white"/>${shapeMarkup(selected,'fill="black" stroke="none"')}</mask>`;
     html+='</defs>';
     if(state.share){if(state.share.strokes?.length)html+=drawingMarkup({id:'shared-live',strokes:state.share.strokes});if(state.sharePreview&&!isPresenter())html+=drawingMarkup({id:'shared-preview',strokes:[state.sharePreview]});}
@@ -186,6 +214,8 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
     if(state.pendingGeometry&&!state.hideAll)html+=shapeMarkup({id:'pending',...state.pendingGeometry},'class="annotation-pending" vector-effect="non-scaling-stroke"');
     if((state.share&&isPresenter())||(!state.share&&!state.hideAll&&!state.hideDrawings)){const draft=state.share?(state.activeStroke?[state.activeStroke]:[]):[...state.draftStrokes,...(state.activeStroke?[state.activeStroke]:[])];if(draft.length)html+=drawingMarkup({id:'draft',strokes:draft});}
     svg.innerHTML=html;svg.querySelectorAll('[data-annotation-shape]').forEach(element=>element.addEventListener('click',event=>{event.stopPropagation();selectAnnotation(element.dataset.annotationShape);}));if(state.share&&isPresenter()&&state.activeStroke?.points.length>=2&&Date.now()-state.sharePreviewAt>65){state.sharePreviewAt=Date.now();sendShare({type:'share.stroke.preview',stroke:state.activeStroke});}renderAnnotationList();
+    const focused=Boolean(selected);
+    q('#clear-annotation-selection')?.classList.toggle('hidden',!focused);
     renderDrawingPanel();
   }
   function renderAnnotationList(){
@@ -199,7 +229,20 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
   function canManageAnnotation(item){return item.author?.id===app.getCurrent()?.id||isOwner();}
   function clearAiDraft(){state.aiDraft=null;q('#ai-annotation-evidence').innerHTML='';q('#ai-annotation-evidence').classList.add('hidden');q('#ai-annotation-status').textContent='智能体会先理解整幅作品，再结合选区与网络参考资料生成100～500字草稿。';}
   function setAnnotationMode(mode,{clearContent=true}={}){state.annotationMode=mode==='ai'?'ai':'manual';document.querySelectorAll('[data-annotation-mode]').forEach(button=>button.classList.toggle('active',button.dataset.annotationMode===state.annotationMode));q('#ai-annotation-controls').classList.toggle('hidden',state.annotationMode!=='ai');const textarea=q('#annotation-form textarea[name="content"]');textarea.placeholder=state.annotationMode==='ai'?'生成后可在这里修改AI草稿（100～500字）':'点评不超过 500 字';if(clearContent){textarea.value='';q('#annotation-character-count').textContent='0/500';clearAiDraft();}}
-  function selectAnnotation(annotationId){if(state.share&&!isPresenter())return;state.selectedId=annotationId;if(state.share){state.share.selectedAnnotationId=annotationId;sendShare({type:'share.annotation.preview',preview:null});sendShare({type:'share.annotation',annotationId});}state.pendingGeometry=null;clearAiDraft();q('#annotation-form').classList.add('hidden');renderAnnotations();}
+  function selectAnnotation(annotationId,{toggle=true}={}) {
+    if(state.share&&!isPresenter())return;
+    const current=state.share?state.share.selectedAnnotationId:state.selectedId;
+    const next=toggle&&annotationId===current?null:annotationId;
+    state.selectedId=next;state.dismissedSharedId=null;q('#artwork-stage').focus({preventScroll:true});
+    if(state.share){state.share.selectedAnnotationId=next;sendShare({type:'share.annotation.preview',preview:null});sendShare({type:'share.annotation',annotationId:next});}
+    state.pendingGeometry=null;clearAiDraft();q('#annotation-form').classList.add('hidden');renderAnnotations();
+  }
+  function clearAnnotationSelection() {
+    if(state.share&&!isPresenter()){
+      state.dismissedSharedId=state.share.selectedAnnotationId;state.selectedId=null;renderAnnotations();
+    }else selectAnnotation(null,{toggle:false});
+  }
+
   function renderAiEvidence(draft){const target=q('#ai-annotation-evidence');const sources=(draft.sources||[]).map(source=>`<a href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">${esc(source.title)}</a>`).join('');target.innerHTML=`<p><strong>整图理解：</strong>${esc(draft.overallTheme||'未提供')}</p>${draft.selectedRegionDescription?`<p><strong>选区识别：</strong>${esc(draft.selectedRegionDescription)}</p>`:''}${draft.uncertainty?`<p><strong>不确定性：</strong>${esc(draft.uncertainty)}</p>`:''}<div><strong>参考资料：</strong>${sources||'<span class="muted">本次未检索到可用的网络资料，仅依据画面分析。</span>'}</div>`;target.classList.remove('hidden');}
   async function generateAiAnnotation(){if(!state.pendingGeometry)return app.showNotice('请先圈选需要点评的区域','error');const key=q('#room-deepseek-key').value.trim();if(!key)return app.showNotice('请填写自己的 DeepSeek API Key','error');if(!q('#ai-artwork-consent').checked)return app.showNotice('请先同意发送作品进行分析','error');const button=q('#generate-ai-annotation');button.disabled=true;button.textContent='正在理解整幅作品…';q('#ai-annotation-status').textContent='正在分析整幅作品、检索参考资料并理解选中区域，请稍候。';try{const result=await app.api(`/api/v2/rooms/${state.room.id}/artwork-sessions/${state.room.currentSession.id}/ai-critiques`,{method:'POST',headers:{'X-DeepSeek-Key':key,'X-DeepSeek-Model':q('#room-deepseek-model').value.trim()||'deepseek-flash'},body:JSON.stringify({...state.pendingGeometry,userQuestion:q('#ai-annotation-question').value.trim(),consent:true})});state.aiDraft=result.data;const textarea=q('#annotation-form textarea[name="content"]');textarea.value=result.data.content;q('#annotation-character-count').textContent=`${Array.from(result.data.content).length}/500`;q('#ai-annotation-status').textContent=`草稿已生成 · ${result.data.model} · ${result.data.characterCount}字，可修改后发布。`;renderAiEvidence(result.data);textarea.focus();}catch(error){q('#ai-annotation-status').textContent=error.message;app.showNotice(error.message,'error');}finally{button.disabled=false;button.textContent='重新生成赏析与点评';}}
   async function changeAnnotation(annotationId,action){try{const result=await app.api(`/api/v2/annotations/${annotationId}/${action}`,{method:'POST',body:'{}'});const index=state.annotations.findIndex(item=>item.id===annotationId);if(index>=0)state.annotations[index]=result.data;if(action==='hide'&&state.selectedId===annotationId)state.selectedId=null;renderAnnotations();}catch(error){app.showNotice(error.message,'error');}}
@@ -247,7 +290,7 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
   function enterShareAnnotationMode(){if(!canShareDraw())return;setDrawingMode(false);if(state.tool==='pan'){state.tool='rectangle';document.querySelectorAll('[data-canvas-tool]').forEach(button=>button.classList.toggle('active',button.dataset.canvasTool==='rectangle'));}switchTab('annotations');renderShareControls();}
   function setDrawingMode(enabled,{preserveStroke=false}={}){if(enabled&&!state.viewingSession)return app.showNotice('当前没有可查看的作品','error');if(enabled&&state.pendingGeometry)return app.showNotice('请先发布或取消当前区域点评','error');state.drawingMode=Boolean(enabled);if(!preserveStroke||!state.drawingMode)state.activeStroke=null;if(state.drawingMode)state.selectedId=null;q('#room-drawing-panel').classList.toggle('hidden',!state.drawingMode);q('.room-tabs').classList.toggle('hidden',state.drawingMode);if(state.drawingMode)document.querySelectorAll('.room-tab').forEach(tab=>tab.classList.add('hidden'));else{const active=q('.room-tabs button.active')?.dataset.roomTab||'annotations';document.querySelectorAll('.room-tab').forEach(tab=>tab.classList.toggle('hidden',tab.id!==`room-tab-${active}`));}q('#toggle-drawing-mode').classList.toggle('active',state.drawingMode);q('#toggle-drawing-mode').textContent=state.drawingMode?'结束绘制':'标记与绘制';q('#annotation-layer').classList.toggle('drawing-active',state.drawingMode&&state.drawingAction==='draw'&&(canWrite()||canShareDraw())&&state.viewingSession?.id===state.room.currentSession?.id);renderAnnotations();}
   function setDrawingAction(action){state.drawingAction=action==='pan'?'pan':'draw';document.querySelectorAll('[data-drawing-action]').forEach(button=>button.classList.toggle('active',button.dataset.drawingAction===state.drawingAction));q('#annotation-layer').classList.toggle('drawing-active',state.drawingMode&&state.drawingAction==='draw'&&(canWrite()||canShareDraw())&&state.viewingSession?.id===state.room.currentSession?.id);}
-  function normalizedPoint(event){const rect=q('#annotation-layer').getBoundingClientRect();return{x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))};}
+  function normalizedPoint(event){return artworkPoint(q('#annotation-layer'),event.clientX,event.clientY)||{x:0,y:0};}
   function geometryFromPoints(start,end,points=[]){const x=Math.min(start.x,end.x),y=Math.min(start.y,end.y),width=Math.abs(end.x-start.x),height=Math.abs(end.y-start.y);if(state.tool==='freehand'){const xs=points.map(p=>p.x),ys=points.map(p=>p.y);return{x:Math.min(...xs),y:Math.min(...ys),width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys),points};}return{x,y,width,height};}
   function simplifyPoints(points){if(points.length<=300)return points;const step=Math.ceil(points.length/300);return points.filter((_,index)=>index%step===0).slice(0,300);}
   function compactStrokePoints(points){
@@ -256,11 +299,11 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
   }
   function simulatedPressure(event,speed=0){const mode=state.activeStroke?.tipMode||state.brushTipMode;if(mode==='fixed')return .62;if(mode==='device')return event.pressure>0?clamp(event.pressure,.08,1):.5;if(event.pointerType==='pen'&&event.pressure>0)return clamp(event.pressure,.08,1);const target=clamp(.94-speed*.68,.16,.92);const previous=state.activeStroke?.points.at(-1)?.p;return previous===undefined?target:previous*.62+target*.38;}
   function onCanvasPointerDown(event){
-    if(!state.viewingSession||event.button!==0||state.share&&!isPresenter())return;if(state.drawingMode){if(state.drawingAction==='pan'){state.dragging={x:event.clientX,y:event.clientY,panX:state.panX,panY:state.panY};q('#annotation-layer').setPointerCapture(event.pointerId);return;}if(!(canWrite()||canShareDraw())||state.viewingSession.id!==state.room.currentSession?.id)return;const point=normalizedPoint(event);state.activeStroke={brush:state.brush,color:state.brushColor,width:state.brushWidth,opacity:state.brushOpacity,tipMode:state.brushTipMode,lastAt:event.timeStamp,points:[{...point,p:state.brushTipMode==='fixed'?.62:(event.pointerType==='pen'&&event.pressure>0?clamp(event.pressure,.08,1):.2)}]};q('#annotation-layer').setPointerCapture(event.pointerId);renderAnnotations();return;}if(state.tool==='pan'){state.dragging={x:event.clientX,y:event.clientY,panX:state.panX,panY:state.panY};q('#annotation-layer').setPointerCapture(event.pointerId);return;}if(event.target?.closest?.('[data-annotation-shape]'))return;if(!canAnnotate()||state.viewingSession.id!==state.room.currentSession?.id)return;if(state.pendingGeometry)return app.showNotice('请先发布或取消当前点评','error');if(state.share)selectAnnotation(null);const point=normalizedPoint(event);state.drawing={start:point,last:point,points:[point],preview:geometryFromPoints(point,point,[point,point,point])};q('#annotation-layer').setPointerCapture(event.pointerId);renderAnnotations();
+    if(!state.viewingSession||event.button!==0)return;if(state.share&&!isPresenter()){if(!event.target?.closest?.('[data-annotation-shape]'))clearAnnotationSelection();return;}if(state.drawingMode){if(state.drawingAction==='pan'){state.dragging={x:event.clientX,y:event.clientY,panX:state.panX,panY:state.panY};q('#annotation-layer').setPointerCapture(event.pointerId);return;}if(!(canWrite()||canShareDraw())||state.viewingSession.id!==state.room.currentSession?.id)return;const point=normalizedPoint(event);state.activeStroke={brush:state.brush,color:state.brushColor,width:state.brushWidth,widthRatio:state.brushWidth/Math.max(1,q('#annotation-layer').getBoundingClientRect().width),opacity:state.brushOpacity,tipMode:state.brushTipMode,lastAt:event.timeStamp,points:[{...point,p:state.brushTipMode==='fixed'?.62:(event.pointerType==='pen'&&event.pressure>0?clamp(event.pressure,.08,1):.2)}]};q('#annotation-layer').setPointerCapture(event.pointerId);renderAnnotations();return;}if(state.tool==='pan'){if(event.target?.closest?.('[data-annotation-shape]'))return;state.blankPointer={x:event.clientX,y:event.clientY};state.dragging={x:event.clientX,y:event.clientY,panX:state.panX,panY:state.panY};q('#annotation-layer').setPointerCapture(event.pointerId);return;}if(event.target?.closest?.('[data-annotation-shape]'))return;if(!canAnnotate()||state.viewingSession.id!==state.room.currentSession?.id)return;if(state.pendingGeometry)return app.showNotice('请先发布或取消当前点评','error');clearAnnotationSelection();const point=normalizedPoint(event);state.drawing={start:point,last:point,points:[point],preview:geometryFromPoints(point,point,[point,point,point])};q('#annotation-layer').setPointerCapture(event.pointerId);renderAnnotations();
   }
   function onCanvasPointerMove(event){if(state.dragging){state.panX=state.dragging.panX+event.clientX-state.dragging.x;state.panY=state.dragging.panY+event.clientY-state.dragging.y;applyTransform();return;}if(state.drawingMode&&state.activeStroke){const point=normalizedPoint(event);const previous=state.activeStroke.points.at(-1);const rect=q('#annotation-layer').getBoundingClientRect();const distance=Math.hypot((point.x-previous.x)*rect.width,(point.y-previous.y)*rect.height);if(distance<1.2)return;const elapsed=Math.max(8,event.timeStamp-state.activeStroke.lastAt);const pressure=simulatedPressure(event,distance/elapsed);const steps=Math.min(32,Math.max(1,Math.ceil(distance/3)));for(let step=1;step<=steps;step++){const ratio=step/steps;state.activeStroke.points.push({x:previous.x+(point.x-previous.x)*ratio,y:previous.y+(point.y-previous.y)*ratio,p:previous.p+(pressure-previous.p)*ratio});}state.activeStroke.points=compactStrokePoints(state.activeStroke.points);state.activeStroke.lastAt=event.timeStamp;renderAnnotations();return;}if(!state.drawing)return;const point=normalizedPoint(event);state.drawing.last=point;if(state.tool==='freehand')state.drawing.points.push(point);const points=state.tool==='freehand'?simplifyPoints(state.drawing.points):[];state.drawing.preview=geometryFromPoints(state.drawing.start,point,points.length>=3?points:[state.drawing.start,point,state.drawing.start]);renderAnnotations();if(state.share&&state.drawing.preview.width>0&&state.drawing.preview.height>0)sendSharedAnnotationPreview({shapeType:state.tool,geometry:state.drawing.preview});}
-  function onCanvasPointerUp(){if(state.dragging){state.dragging=false;return;}if(state.drawingMode&&state.activeStroke){const shared=isPresenter();const strokes=shared?(state.share?.strokes||[]):state.draftStrokes;const totalPoints=strokes.reduce((sum,stroke)=>sum+stroke.points.length,0);if(state.activeStroke.points.length>=2&&strokes.length<60&&totalPoints+state.activeStroke.points.length<=6000){if(state.activeStroke.tipMode!=='fixed'){state.activeStroke.points[0].p=Math.min(state.activeStroke.points[0].p,.18);state.activeStroke.points.at(-1).p=Math.min(state.activeStroke.points.at(-1).p,.12);}delete state.activeStroke.lastAt;if(shared){const stroke=state.activeStroke;stroke.clientId=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;state.share.strokes.push(stroke);state.pendingSharedStrokes.push(stroke);sendShare({type:'share.stroke.complete',stroke});}else state.draftStrokes.push(state.activeStroke);}else if(strokes.length>=60||totalPoints+state.activeStroke.points.length>6000)app.showNotice('本次绘制已达到笔画或采样点上限，请先结束共享或发布','error');state.activeStroke=null;renderAnnotations();return;}if(!state.drawing)return;const geometry=state.drawing.preview;state.drawing=null;if(geometry.width<0.005||geometry.height<0.005){sendSharedAnnotationPreview(null,true);renderAnnotations();return app.showNotice('圈选区域太小','error');}state.pendingGeometry={shapeType:state.tool,geometry};sendSharedAnnotationPreview(state.pendingGeometry,true);setAnnotationMode('manual');q('#annotation-form').classList.remove('hidden');q('#annotation-form textarea').focus();renderAnnotations();}
-  function onCanvasPointerCancel(){if(state.dragging){state.dragging=false;return;}if(state.drawingMode&&state.activeStroke){if(state.activeStroke.points.length>=2){onCanvasPointerUp();return;}state.activeStroke=null;if(isPresenter())sendShare({type:'share.stroke.cancel'});renderAnnotations();return;}if(state.drawing){state.drawing=null;sendSharedAnnotationPreview(null,true);renderAnnotations();}}
+  function onCanvasPointerUp(event){if(state.dragging){state.dragging=false;const blank=state.blankPointer;state.blankPointer=null;if(blank&&event&&Math.hypot(event.clientX-blank.x,event.clientY-blank.y)<5)clearAnnotationSelection();return;}if(state.drawingMode&&state.activeStroke){const shared=isPresenter();const strokes=shared?(state.share?.strokes||[]):state.draftStrokes;const totalPoints=strokes.reduce((sum,stroke)=>sum+stroke.points.length,0);if(state.activeStroke.points.length>=2&&strokes.length<60&&totalPoints+state.activeStroke.points.length<=6000){if(state.activeStroke.tipMode!=='fixed'){state.activeStroke.points[0].p=Math.min(state.activeStroke.points[0].p,.18);state.activeStroke.points.at(-1).p=Math.min(state.activeStroke.points.at(-1).p,.12);}delete state.activeStroke.lastAt;if(shared){const stroke=state.activeStroke;stroke.clientId=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;state.share.strokes.push(stroke);state.pendingSharedStrokes.push(stroke);sendShare({type:'share.stroke.complete',stroke});}else state.draftStrokes.push(state.activeStroke);}else if(strokes.length>=60||totalPoints+state.activeStroke.points.length>6000)app.showNotice('本次绘制已达到笔画或采样点上限，请先结束共享或发布','error');state.activeStroke=null;renderAnnotations();return;}if(!state.drawing)return;const geometry=state.drawing.preview;state.drawing=null;if(geometry.width<0.005||geometry.height<0.005){sendSharedAnnotationPreview(null,true);renderAnnotations();return app.showNotice('圈选区域太小','error');}state.pendingGeometry={shapeType:state.tool,geometry};sendSharedAnnotationPreview(state.pendingGeometry,true);setAnnotationMode('manual');q('#annotation-form').classList.remove('hidden');q('#annotation-form textarea').focus();renderAnnotations();}
+  function onCanvasPointerCancel(){if(state.dragging){state.dragging=false;state.blankPointer=null;return;}if(state.drawingMode&&state.activeStroke){if(state.activeStroke.points.length>=2){onCanvasPointerUp();return;}state.activeStroke=null;if(isPresenter())sendShare({type:'share.stroke.cancel'});renderAnnotations();return;}if(state.drawing){state.drawing=null;sendSharedAnnotationPreview(null,true);renderAnnotations();}}
 
   async function publishDrawing(){if(!state.draftStrokes.length)return;const button=q('#publish-drawing');button.disabled=true;button.textContent='正在发布…';try{const result=await app.api(`/api/v2/rooms/${state.room.id}/artwork-sessions/${state.room.currentSession.id}/drawings`,{method:'POST',body:JSON.stringify({strokes:state.draftStrokes})});if(!state.drawings.some(item=>item.id===result.data.id))state.drawings.push(result.data);state.draftStrokes=[];renderAnnotations();app.showNotice('绘制已发布，房间成员现在可以看到');}catch(error){app.showNotice(error.message,'error');}finally{button.textContent='发布绘制';renderDrawingPanel();}}
   function undoDrawingStroke(){
@@ -279,38 +322,65 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
 
   async function uploadArtwork(){const file=q('#room-artwork-file').files[0];if(!file)return app.showNotice('请选择作品文件','error');if(state.room.currentSession&&!confirm('更换作品后，当前点评和已发布绘制将进入历史记录，未发布的绘制草稿会被清除。确定继续吗？'))return;const button=q('#upload-room-artwork');button.disabled=true;button.textContent='正在处理作品…';try{const response=await fetch('/api/v2/artwork-assets',{method:'POST',headers:{Authorization:`Bearer ${app.getToken()}`,'Content-Type':file.type,'X-File-Name':encodeURIComponent(file.name)},body:file});const result=await response.json();if(!response.ok)throw new Error(result.error?.message||'上传失败');await app.api(`/api/v2/rooms/${state.room.id}/artwork-sessions`,{method:'POST',body:JSON.stringify({assetId:result.data.id,title:q('#room-artwork-title').value.trim()||file.name})});q('#room-artwork-file').value='';q('#room-artwork-title').value='';state.draftStrokes=[];setDrawingMode(false);}catch(error){app.showNotice(error.message,'error');}finally{button.disabled=false;button.textContent='上传并切换';}}
 
-  async function connectSocket(roomId,{prompt=false}={}){
+  function connectionStatus(value) {
+    state.connectionState=value;
+    const target=q('#room-connection-status');if(!target)return;
+    target.classList.toggle('hidden',value==='connected'||value==='idle');
+    target.textContent={connecting:'正在连接房间…',recovering:'房间连接暂时中断，正在恢复…',offline:'网络已断开，联网后自动恢复。',blocked:'房间权限或登录状态已变化，请重新进入。'}[value]||'';
+  }
+  function scheduleReconnect(roomId,navigation,connection) {
+    if(!currentRoom(roomId,navigation)||state.connectionEpoch!==connection||state.reconnectTimer)return;
+    connectionStatus(navigator.onLine===false?'offline':'recovering');
+    const delay=Math.min(15000,800*2**Math.min(state.reconnectAttempt++,5))+Math.random()*250;
+    state.reconnectTimer=setTimeout(()=>{state.reconnectTimer=null;if(currentRoom(roomId,navigation)&&state.connectionEpoch===connection)void connectSocket(roomId,{recover:true});},delay);
+  }
+  async function connectSocket(roomId,{prompt=false,recover=false}={}) {
     const navigation=state.navigationEpoch;
     if(!currentRoom(roomId,navigation))return;
+    clearTimeout(state.reconnectTimer);state.reconnectTimer=null;
     const connection=++state.connectionEpoch;
-    if(state.socket){const previous=state.socket;state.socket=null;previous.close(1000,'重新连接');}
+    if(state.socket){const previous=state.socket;state.socket=null;if(previous.readyState!==WebSocket.CLOSED)previous.close(1000,'重新连接');}
     const current=()=>currentRoom(roomId,navigation)&&state.connectionEpoch===connection;
-    try{
+    connectionStatus(recover?'recovering':'connecting');
+    try {
+      if(navigator.onLine===false){scheduleReconnect(roomId,navigation,connection);return;}
+      if(recover&&!await loadSnapshot(roomId,{preserveDrawing:true,navigation,connection}))return;
+      if(!current())return;
       const ticket=(await app.api('/api/ws-ticket',{method:'POST',body:'{}'})).data.ticket;
       if(!current())return;
       const protocol=location.protocol==='https:'?'wss':'ws';
       const socket=new WebSocket(`${protocol}://${location.host}/api/community-ws?ticket=${encodeURIComponent(ticket)}`);
       state.socket=socket;
       const ownsSocket=()=>current()&&state.socket===socket;
+      const handshake=setTimeout(()=>{if(ownsSocket()&&state.connectionState!=='connected')socket.close(4000,'连接超时');},12000);
       window.roomVoice?.attach(state.room,socket);window.roomVoice?.updateRoom(state.room,state.members);
       if(prompt)window.roomVoice?.promptOnEntry();
       socket.addEventListener('open',()=>{if(ownsSocket())socket.send(JSON.stringify({type:'room.subscribe',roomId}));else socket.close(1000,'离开房间');});
-      socket.addEventListener('message',event=>{if(!ownsSocket())return;let message;try{message=JSON.parse(event.data);}catch{return;}handleSocketEvent(message);});
-      socket.addEventListener('close',event=>{
-        if(!ownsSocket()||event.code===1000)return;
-        setTimeout(()=>{
-          if(!ownsSocket())return;
-          void loadSnapshot(roomId,{preserveDrawing:true,navigation}).then(loaded=>{if(loaded&&ownsSocket())void connectSocket(roomId);}).catch(()=>{});
-        },1800);
+      socket.addEventListener('message',event=>{
+        if(!ownsSocket())return;let message;try{message=JSON.parse(event.data);}catch{return;}
+        if(message.eventType==='room.subscribed'){clearTimeout(handshake);state.reconnectAttempt=0;connectionStatus('connected');}
+        if(message.eventType==='error'&&message.data?.code==='ROOM_MEMBERSHIP_REQUIRED'){clearTimeout(handshake);connectionStatus('blocked');window.roomVoice?.leave();socket.close(4403,'房间访问权限已失效');return;}
+        handleSocketEvent(message);
       });
-    }catch(error){if(current())app.showNotice(error.message,'error');}
+      socket.addEventListener('close',event=>{
+        clearTimeout(handshake);if(!ownsSocket())return;
+        console.info('Community connection closed',{code:event.code,clean:event.wasClean,attempt:state.reconnectAttempt});
+        if([4401,4403].includes(event.code)){connectionStatus('blocked');window.roomVoice?.leave();return;}
+        scheduleReconnect(roomId,navigation,connection);
+      });
+      socket.addEventListener('error',()=>{if(ownsSocket())connectionStatus('recovering');});
+    }catch(error){
+      if(!current())return;
+      if([401,403,404].includes(error.status)){connectionStatus('blocked');window.roomVoice?.leave();return;}
+      scheduleReconnect(roomId,navigation,connection);
+    }
   }
   function handleSocketEvent(event){
     const data=event.data;if(event.eventType==='room.subscribed'&&isPresenter()){setDrawingAction(state.drawingAction);updateWriteControls();applyTransform();state.pendingSharedStrokes.forEach(stroke=>sendShare({type:'share.stroke.complete',stroke}));}
     if(event.eventType==='share.started'){if(state.viewingSession?.id!==data.sessionId){loadSnapshot(state.room.id).catch(error=>app.showNotice(error.message,'error'));return;}state.share=data;state.sharePreview=null;state.shareAnnotationPreview=null;state.pendingSharedStrokes=[];clearTimeout(state.shareUndoTimer);state.shareUndoPending=false;state.shareRequested=false;state.draftStrokes=[];state.activeStroke=null;state.selectedId=null;state.pendingGeometry=null;q('#annotation-form').classList.add('hidden');renderArtwork();if(isPresenter()){setDrawingMode(true);applyTransform();}else{setDrawingMode(false);followShareViewport(data.viewport);}renderShareControls();renderAnnotations();updateWriteControls();}
     if(event.eventType==='share.ended'){state.share=null;state.sharePreview=null;state.shareAnnotationPreview=null;state.pendingSharedStrokes=[];state.pendingGeometry=null;state.drawing=null;q('#annotation-form').classList.add('hidden');clearTimeout(state.shareUndoTimer);state.shareUndoPending=false;state.activeStroke=null;renderArtwork();setDrawingMode(false);renderShareControls();renderAnnotations();updateWriteControls();}
     if(event.eventType==='share.viewport'&&state.share&&!isPresenter()){state.share.viewport=data;followShareViewport(data);}
-    if(event.eventType==='share.annotation'&&state.share){state.share.selectedAnnotationId=data.annotationId;if(data.annotationId===null)state.selectedId=null;state.shareAnnotationPreview=null;renderAnnotations();}
+    if(event.eventType==='share.annotation'&&state.share){state.share.selectedAnnotationId=data.annotationId;state.dismissedSharedId=null;if(data.annotationId===null)state.selectedId=null;state.shareAnnotationPreview=null;renderAnnotations();}
     if(event.eventType==='share.annotation.preview'&&state.share&&!isPresenter()){state.shareAnnotationPreview=data.preview;renderAnnotations();}
     if(event.eventType==='share.stroke.preview'&&state.share&&!isPresenter()){state.sharePreview=data.stroke;renderAnnotations();}
     if(event.eventType==='share.stroke.cancel'&&state.share&&!isPresenter()){state.sharePreview=null;renderAnnotations();}
@@ -336,6 +406,9 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
   const tipModeLabel=document.createElement('label');tipModeLabel.innerHTML='笔锋模式<select id="drawing-tip-mode"><option value="auto">自动（压感或速度模拟）</option><option value="device">设备压感</option><option value="fixed">固定粗细</option></select>';q('.drawing-settings').insertBefore(tipModeLabel,q('.drawing-settings').children[1]);
   q('#toggle-drawing-mode').insertAdjacentHTML('afterend','<button id="room-share-action" class="share-action hidden">共享我的视角</button>');
   q('#toggle-drawing-mode').insertAdjacentHTML('afterend','<button id="share-annotation-mode" class="hidden" title="共享期间圈选并发布标注">共享标注</button>');
+  q('#room-description').insertAdjacentHTML('afterend','<p id="room-connection-status" class="muted hidden" role="status" aria-live="polite"></p>');
+  q('#artwork-stage').tabIndex=0;
+  q('#reset-canvas').insertAdjacentHTML('afterend','<button type="button" id="clear-annotation-selection" class="hidden">取消选中</button>');
   q('.canvas-toolbar').insertAdjacentHTML('afterend','<div id="room-share-banner" class="room-share-banner hidden"></div>');
   q('.room-tabs').insertAdjacentHTML('beforebegin','<div id="room-share-requests" class="room-share-requests"></div>');
   q('#room-share-action').addEventListener('click',shareAction);
@@ -346,9 +419,11 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
   q('#room-create-form').addEventListener('submit',async event=>{event.preventDefault();const navigation=state.navigationEpoch;const form=event.target;const formData=new FormData(form);const values=Object.fromEntries(formData);values.memberLimit=Number(values.memberLimit);values.entryPrice=Number(values.entryPrice);values.allowMemberInvites=Boolean(values.allowMemberInvites);delete values.coverFile;try{const coverFile=form.querySelector('[name="coverFile"]').files[0];if(coverFile)values.coverUrl=await uploadCover(coverFile);if(!currentNavigation(navigation))return;const result=await app.api('/api/v2/rooms',{method:'POST',body:JSON.stringify(values)});if(!currentNavigation(navigation))return;form.reset();form.querySelector('[name="memberLimit"]').value=100;await openRoom(result.data.id,true);}catch(error){if(currentNavigation(navigation))app.showNotice(error.message,'error');}});
   document.querySelectorAll('.room-tabs [data-room-tab]').forEach(button=>button.addEventListener('click',()=>switchTab(button.dataset.roomTab)));
   document.querySelectorAll('[data-canvas-tool]').forEach(button=>button.addEventListener('click',()=>{if(state.drawingMode)setDrawingMode(false);state.tool=button.dataset.canvasTool;document.querySelectorAll('[data-canvas-tool]').forEach(item=>item.classList.toggle('active',item===button));}));
+  q('#clear-annotation-selection').addEventListener('click',clearAnnotationSelection);
   q('#reset-canvas').addEventListener('click',()=>{state.scale=1;state.panX=0;state.panY=0;applyTransform();});
   q('#toggle-annotations').addEventListener('click',()=>{state.hideAll=!state.hideAll;q('#toggle-annotations').textContent=state.hideAll?'显示全部标注':'隐藏全部标注';state.selectedId=null;renderAnnotations();});
   q('#toggle-drawing-mode').addEventListener('click',()=>{setDrawingMode(!state.drawingMode);renderShareControls();});q('#close-drawing-mode').addEventListener('click',()=>{setDrawingMode(false);renderShareControls();});document.querySelectorAll('[data-drawing-action]').forEach(button=>button.addEventListener('click',()=>setDrawingAction(button.dataset.drawingAction)));document.querySelectorAll('[data-brush]').forEach(button=>button.addEventListener('click',()=>{state.brush=button.dataset.brush;document.querySelectorAll('[data-brush]').forEach(item=>item.classList.toggle('active',item===button));}));q('#drawing-color').addEventListener('input',event=>{state.brushColor=event.target.value;});q('#drawing-tip-mode').addEventListener('change',event=>{state.brushTipMode=event.target.value;});q('#drawing-width').addEventListener('input',event=>{state.brushWidth=Number(event.target.value);q('#drawing-width-value').textContent=event.target.value;});q('#drawing-opacity').addEventListener('input',event=>{state.brushOpacity=Number(event.target.value)/100;q('#drawing-opacity-value').textContent=`${event.target.value}%`;});q('#undo-drawing-stroke').title='快捷键 Ctrl+Z';q('#undo-drawing-stroke').setAttribute('aria-keyshortcuts','Control+Z');q('#undo-drawing-stroke').addEventListener('click',undoDrawingStroke);q('#clear-drawing-draft').addEventListener('click',clearDrawingDraft);q('#publish-drawing').addEventListener('click',publishDrawing);q('#toggle-drawings').addEventListener('click',()=>{state.hideDrawings=!state.hideDrawings;q('#toggle-drawings').textContent=state.hideDrawings?'显示全部绘制':'隐藏全部绘制';renderAnnotations();});
+  q('#artwork-stage').addEventListener('click',event=>{if(event.target===q('#artwork-stage'))clearAnnotationSelection();});
   q('#annotation-layer').addEventListener('pointerdown',onCanvasPointerDown);q('#annotation-layer').addEventListener('pointermove',onCanvasPointerMove);q('#annotation-layer').addEventListener('pointerup',onCanvasPointerUp);q('#annotation-layer').addEventListener('pointercancel',onCanvasPointerCancel);
   q('#artwork-stage').addEventListener('wheel',event=>{event.preventDefault();if(state.share&&!isPresenter())return;state.scale=Math.max(0.5,Math.min(5,state.scale*(event.deltaY<0?1.12:0.89)));applyTransform();},{passive:false});
   document.querySelectorAll('[data-annotation-mode]').forEach(button=>button.addEventListener('click',()=>setAnnotationMode(button.dataset.annotationMode)));
@@ -360,7 +435,7 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
   q('#upload-room-artwork').addEventListener('click',uploadArtwork);
   document.addEventListener('keydown',event=>{
     if(typeof event.key!=='string')return;
-    if(event.key==='Escape'&&state.selectedId){state.selectedId=null;renderAnnotations();}
+    if(event.key==='Escape'&&!q('#view-room').classList.contains('hidden')&&(state.selectedId||state.share?.selectedAnnotationId)){clearAnnotationSelection();}
     if(event.key.toLowerCase()!=='z'||!event.ctrlKey||event.shiftKey||event.altKey||event.metaKey||event.repeat||event.isComposing)return;
     if(!state.drawingMode||q('#view-room').classList.contains('hidden')||q('#room-workspace').classList.contains('hidden'))return;
     if(event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]'))return;
@@ -368,6 +443,12 @@ const {document,window,fetch,localStorage,location,setTimeout,clearTimeout,setIn
     event.preventDefault();undoDrawingStroke();
   });
 
+  const resizeArtwork=()=>{if(context.disposed()||!state.viewingSession)return;fitArtwork();if(state.share&&!isPresenter())followShareViewport(state.share.viewport);else applyTransform();renderAnnotations();};
+  const artworkObserver=new ResizeObserver(resizeArtwork);artworkObserver.observe(q('#artwork-stage'));
+  context.signal?.addEventListener('abort',()=>artworkObserver.disconnect(),{once:true});
+  q('#room-artwork').addEventListener('load',resizeArtwork);
+  window.addEventListener('online',()=>{if(state.targetRoomId&&state.connectionState!=='connected'&&state.connectionState!=='blocked')void connectSocket(state.targetRoomId,{recover:true});});
+  window.addEventListener('offline',()=>{if(state.targetRoomId&&state.connectionState!=='blocked')connectionStatus('offline');});
   const params=new URLSearchParams(location.search);if(params.get('code')&&app.getCurrent())joinPrivate(params.get('code'));else if(app.getCurrent())loadHomeRooms();
   window.roomFeature={loadHomeRooms,loadRooms,openRoom,joinPrivate,renderVoiceMembers(){if(state.room&&!q('#view-room').classList.contains('hidden'))renderMembers();},leaveRoom(){beginRoomNavigation(null);}};
 })();

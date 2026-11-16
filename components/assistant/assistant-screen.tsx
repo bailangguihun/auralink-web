@@ -12,6 +12,7 @@ import { terminal, stateLabel, stageLabels, mergeItems, ragflowAvailable, webSea
 import { subscribeAssistant } from '@/lib/assistant-stream';
 import { useAssistantAccess } from './use-assistant-access';
 import { useAssistantAttachments } from './use-assistant-attachments';
+import { assistantImageFile } from '@/lib/assistant-image-input';
 import { PrivateAttachment } from './private-attachment';
 import { AssistantStorage } from './assistant-storage';
 import { useBrowserSpeech } from './use-browser-speech';
@@ -20,9 +21,10 @@ import { selectedArtworkReferences, reconcileRejectedArtworkSubmission, artworkR
 import { AssistantPanel, AssistantModelPicker } from './assistant-panels';
 import { AssistantMarkdown } from './assistant-markdown';
 import { CommunityAssistantBanner, CommunityAssistantImport, CommunityShareReply } from '@/components/community/community-assistant-bridge';
-import { assistantMarkdownLink, assertAssistantSources } from '@/lib/assistant-presentation';
+import { assistantMarkdownLink, assistantVisibleMarkdown, assertAssistantSources } from '@/lib/assistant-presentation';
 import styles from './assistant.module.css';
 const enc = encodeURIComponent;
+const inputModeLabel = { text: '文字', image: '图片', voice: '语音转写', 'voice+image': '语音转写＋图片' };
 const empty = <T,>(): Page<T> => ({ items: [], nextCursor: null, hasMore: false });
 type Access = ReturnType<typeof useAssistantAccess>;
 function usePage<T>(path: string | null, access: Access, id: (row: T) => string, revision = 0, prepend = false, keepItems = false, reportErrors = true) {
@@ -176,6 +178,8 @@ function SessionWorkspace({ id, status, registry, generationReady, ledger, onCha
   </>;
 }
 function BranchWorkspace({ id, branchId, status, registry, generationReady, session, ledger, revision, reload, onBranch, onAuto, onRevoked }: { id: string; branchId: string; status: AssistantStatus; registry: Registry | null; generationReady: boolean; session: AssistantSession; ledger: OperationLedger; revision: number; reload: () => void; onBranch: (id: string) => void; onAuto: (value: boolean) => Promise<void>; onRevoked: () => void }) {
+  const { user } = useSession();
+  const modelPreferenceKey = user ? `artlive:assistant-model:${user.id}:${id}` : null;
   const [error, setError] = useState(''); const access = useAssistantAccess(setError); const { request, report, token, sessionIdentity, isCurrentSession, signOutIfCurrent } = access;
   const revokedRef = useRef(onRevoked); revokedRef.current = onRevoked;
   const branchRef = useRef(onBranch); branchRef.current = onBranch;
@@ -200,11 +204,30 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const active = usePage<Run>(status.executionAvailable ? `/sessions/${enc(id)}/runs/page?activeOnly=true` : null, access, row => row.id, revision + activityTick, false, true);
   const summaries = usePage<Summary>(status.executionAvailable && summaryOpen ? `/sessions/${enc(id)}/summaries/page?branchId=${enc(branchId)}` : null, access, row => row.id, revision, false, false, false);
   const timeline = usePage<Timeline>(status.executionAvailable && timelineOpen ? `/sessions/${enc(id)}/timeline/page?branchId=${enc(branchId)}` : null, access, row => row.messageId, revision, true);
-  const speech = useBrowserSpeech(value => setText(current => `${current}${current ? '\n' : ''}${value}`), setError);
+  const [voiceInput, setVoiceInput] = useState(false);
+  const [autoSendVoice, setAutoSendVoice] = useState(false);
+  const [autoReadVoice, setAutoReadVoice] = useState(false);
+  const readVoiceRun = useRef<string | null>(null);
+  const speech = useBrowserSpeech(value => {
+    const recognized = `${text}${text ? '\n' : ''}${value}`.slice(0, 32000);
+    setText(recognized);
+    setVoiceInput(true);
+    if (autoSendVoice && !unconfirmedChat) void submit(undefined, recognized);
+  }, setError);
   const selectedModel = registry?.models.find(item => item.id === model);
   const generationAvailable = generationReady && assistantGenerationAvailable(status);
   const requireGeneration = () => { if (!generationAvailable) throw new Error(generationReady ? assistantGenerationNotice(status.generationState) : '正在确认生成能力，请稍候。'); };
-  useEffect(() => { if (!model && registry?.models.length) setModel(registry.models.find(item => item.enabled && item.configured && item.capabilities.streaming)?.id || ''); }, [registry, model]);
+  useEffect(() => {
+    if (model || !registry?.models.length) return;
+    const available = registry.models.filter(item => item.enabled && item.configured && item.capabilities.streaming);
+    let preferred = '';
+    try { if (modelPreferenceKey) preferred = sessionStorage.getItem(modelPreferenceKey) || ''; } catch { /* Storage may be disabled. */ }
+    setModel(available.find(item => item.id === preferred)?.id ?? available[0]?.id ?? '');
+  }, [registry, model, modelPreferenceKey]);
+  const chooseModel = (value: string) => {
+    setModel(value);
+    try { if (modelPreferenceKey) sessionStorage.setItem(modelPreferenceKey, value); } catch { /* Selection still applies in this view. */ }
+  };
   useEffect(() => { let alive = true; void request((token, signal) => assistantRequest<Branch>(`/sessions/${enc(id)}/branches/${enc(branchId)}`, token, signal)).then(value => { if (alive) setBranch(value); }).catch(error => { if (alive) report(error); }); return () => { alive = false; }; }, [id, branchId, revision, request, report]);
   useEffect(() => {
     let alive = true;
@@ -244,6 +267,16 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const running = live && !terminal(live.status) ? live : active.items.find(item => !terminal(item.status));
   const pendingChat = running?.kind === 'CHAT' ? running : active.items.find(item => item.kind === 'CHAT' && !terminal(item.status));
   const runningId = running?.id;
+  const speakReply = speech.read;
+  useEffect(() => {
+    if (!live || live.id !== readVoiceRun.current || !terminal(live.status)) return;
+    // Confirm the stored terminal answer, which may include finished crop placement.
+    if (live.status === 'COMPLETED' && !live.checkpoint.trim()) return;
+    readVoiceRun.current = null;
+    if (autoReadVoice && live.status === 'COMPLETED') {
+      speakReply(assistantVisibleMarkdown(live.checkpoint).replace(/^!\[[^\n]+\]\(assistant-crop:[^\n]*$/gm, '').trim());
+    }
+  }, [live, autoReadVoice, speakReply]);
   useEffect(() => {
     if (!runningId || !token) return;
     const controller = new AbortController(); const identity = sessionIdentity; let current: Run | null = null;
@@ -256,7 +289,9 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
           if (!currentAccount()) return; setLive(current);
           if (terminal(current.status)) { setConnection(''); reload(); return; }
           setConnection('正在接收已保存的回复');
-          current = await subscribeAssistant(current, token, controller.signal, value => { if (currentAccount()) setLive(value); });
+          current = await subscribeAssistant(current, token, controller.signal, value => {
+            if (currentAccount() && !terminal(value.status)) setLive(value);
+          });
           if (!currentAccount()) return;
           // The next loop always confirms the saved server state, including after EOF.
           setConnection('正在确认服务端状态…'); await delay(350);
@@ -291,7 +326,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     ledger.resolved(chatScope);
     reload();
   });
-  const command = (value: string, ids: string[]) => ({ branchId, expectedVersion: branch?.version, text: value, attachmentIds: ids, modelKey: model, retrieval: assistantRetrievalRequest(registry, selectedArtworks.length > 0, ragflow, webSearch), artworkRefs: selectedArtworkReferences(selectedArtworks) });
+  const command = (value: string, ids: string[], dictated = false) => ({ branchId, expectedVersion: branch?.version, text: value, attachmentIds: ids, modelKey: model, retrieval: assistantRetrievalRequest(registry, selectedArtworks.length > 0, ragflow, webSearch), artworkRefs: selectedArtworkReferences(selectedArtworks), ...(dictated ? { voiceInput: true } : {}) });
   const submitCommand = async (path: string, payload: ReturnType<typeof command>, scope: string, operation: string) => {
     const requestKey = await ledger.key(scope, payload);
     try {
@@ -304,31 +339,38 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       throw error;
     }
   };
-  const submit = async (event?: React.FormEvent) => {
-    event?.preventDefault(); if (!generationAvailable || (!text.trim() && !attachments.length) || !branch || !selectedModel || pendingChat || busyRef.current || messages.loading || messages.error || draft.loading || draft.error || draft.hasMore || attachments.length > 4 || (attachments.length > 0 && !selectedModel.capabilities.images)) return;
-    const sent = { text, attachmentIds: attachments.map(image => image.id) };
-    const payload = command(sent.text, sent.attachmentIds);
+  const submit = async (event?: React.FormEvent, dictatedText?: string) => {
+    event?.preventDefault();
+    const value = dictatedText ?? text;
+    if (!generationAvailable || (!value.trim() && !attachments.length) || !branch || !selectedModel || pendingChat || busyRef.current || messages.loading || messages.error || draft.loading || draft.error || draft.hasMore || attachments.length > 4 || (attachments.length > 0 && !selectedModel.capabilities.images)) return;
+    const dictated = Boolean(value.trim()) && (dictatedText !== undefined || voiceInput);
+    const sent = { text: value, attachmentIds: attachments.map(image => image.id) };
+    const payload = command(sent.text, sent.attachmentIds, dictated);
     await act(async () => {
+      if (speech.listening) speech.stopListening();
       followBottom.current = true;
       setOutgoing(sent);
       setText('');
+      setVoiceInput(false);
       try {
         const scope = `CHAT_EXECUTION:${id}`;
         const result = await submitCommand(`/sessions/${enc(id)}/runs`, payload, scope, 'CHAT_EXECUTION');
         ledger.resolved(scope);
         setOutgoing({ ...sent, inputMessageId: result.run.inputMessageId });
+        if (dictated && autoReadVoice && !result.replay) readVoiceRun.current = result.run.id;
         setLive(result.run);
         setSelectedArtworks([]);
         reload();
       } catch (failure) {
         setOutgoing(null);
         setText(current => current ? `${sent.text}\n${current}` : sent.text);
+        if (dictated) setVoiceInput(true);
         throw failure;
       }
     });
   };
   const uploadDisabled = busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat;
-  const upload = async (file: File | undefined) => { if (file) await act(() => draft.upload(file)); };
+  const upload = async (file: File | undefined) => { if (file) await act(async () => draft.upload(await assistantImageFile(file, file.name))); };
   const pasteImage = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const images = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
     if (!images.length) return;
@@ -438,16 +480,16 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       {editedHead ? <div className={styles.notice}>编辑已保存为新分支；原分支保留。<button type="button" className="button" disabled={busy || !!pendingChat || !model || !generationAvailable} onClick={() => void executeEdit()}>生成编辑后的回复</button></div> : null}
 </div>
       {selectedArtworks.length ? <button type="button" className={styles.selectionChip} onClick={() => setPanel('artworks')}>已选 {selectedArtworks.length} 幅平台作品 · 查看 / 调整</button> : null}
-      <div className={styles.inputRow}><textarea ref={textareaRef} aria-label="消息" rows={1} value={text} maxLength={32000} placeholder="聊聊你的画题…" onPaste={pasteImage} onChange={event => setText(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229) { event.preventDefault(); void submit(); } }} />
+      <div className={styles.inputRow}><textarea ref={textareaRef} aria-label="消息" rows={1} value={text} maxLength={32000} placeholder="聊聊你的画题…" onPaste={pasteImage} onChange={event => { setText(event.target.value); if (!event.target.value.trim()) setVoiceInput(false); }} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !composing.current && event.keyCode !== 229) { event.preventDefault(); void submit(); } }} />
       {running ? <button type="button" className={styles.sendButton} disabled={busy} onClick={() => void cancel(pendingChat || running)} aria-label="取消生成">停止</button> : <button type="submit" className={styles.sendButton} disabled={busy || !generationAvailable || !model || !branch || messages.loading || !!messages.error || draft.loading || !!draft.error || draft.hasMore || attachments.length > 4 || (!text.trim() && !attachments.length) || (!!attachments.length && !selectedModel?.capabilities.images)} aria-label="发送消息">发送 <span aria-hidden>↑</span></button>}
       </div>
       <div className={styles.composerActions}>
-        <AssistantModelPicker registry={registry} value={model} onChange={setModel} disabled={busy || !generationReady} />
+        <AssistantModelPicker registry={registry} value={model} onChange={chooseModel} disabled={busy || !generationReady} />
         <div className={styles.inputTools}>
           <button type="button" className={styles.small} onClick={() => setPanel('artworks')} aria-haspopup="dialog">平台作品</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="联网搜索" aria-pressed={webSearch} disabled={!onlineSearchAvailable || busy || !!pendingChat} title={onlineSearchAvailable ? '为下一条消息启用联网搜索' : '联网搜索尚未配置'} onClick={() => setWebSearch(value => !value)}>{webSearch ? '✓ ' : ''}联网搜索</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="知识库检索" aria-pressed={ragflow} disabled={!knowledgeSearchAvailable || busy || !!pendingChat} title={knowledgeSearchAvailable ? '为下一条消息启用知识库检索' : '知识库接口已预留，RAGFlow 尚未配置'} onClick={() => setRagflow(value => !value)}>{ragflow ? '✓ ' : ''}知识库检索</button>
-          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png" disabled={uploadDisabled} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
+          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png,image/webp" disabled={uploadDisabled} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
           {speech.supported ? <button type="button" className={styles.small} onClick={speech.listen}>{speech.listening ? '停止语音' : '语音输入'}</button> : null}
           {speech.speaking ? <button type="button" className={styles.small} onClick={speech.stop}>停止朗读</button> : null}
           <button type="button" className={styles.small} onClick={() => setPanel('tools')} aria-haspopup="dialog" aria-label="更多工具与恢复">•••</button>
@@ -471,9 +513,25 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     </AssistantPanel> : null}
     {panel === 'artworks' ? <AssistantPanel title="平台作品参考" eyebrow="ARTWORKS" close={() => setPanel(null)}><ArtworkSelection selected={selectedArtworks} onChange={setSelectedArtworks} disabled={busy || !!pendingChat} /></AssistantPanel> : null}
     {panel === 'tools' ? <AssistantPanel title="工具与恢复" eyebrow="TOOLS & STORAGE" close={() => setPanel(null)}>
-      <p>Enter 发送，Shift + Enter 换行。语音转写先进入输入框，由你编辑确认；浏览器可能使用在线语音服务。{!speech.supported ? '当前浏览器不支持语音输入。' : ''}图片仅支持 JPEG／PNG，最多 4 张。离开页面不会取消已受理的生成。</p>
+      <p>Enter 发送，Shift + Enter 换行。最多添加 4 张图片，WebP 会转成 PNG。离开页面不会取消已受理的生成。</p>
+      {speech.supported ? <fieldset>
+        <legend>当前对话的语音设置</legend>
+        <p>默认先在输入框确认转写。浏览器可能使用在线语音服务。</p>
+        <label className={styles.inline}><input type="checkbox" checked={autoSendVoice} onChange={event => setAutoSendVoice(event.target.checked)} />识别完成后自动发送</label>
+        {speech.readable ? <label className={styles.inline}><input type="checkbox" checked={autoReadVoice} onChange={event => setAutoReadVoice(event.target.checked)} />自动朗读语音提问的回复</label> : null}
+      </fieldset> : <p>当前浏览器不支持语音输入。</p>}
       <AssistantStorage access={access} revision={revision + draft.storageRevision} />
-            <details className={`glass-panel ${styles.tools}`} open={timelineOpen} onToggle={event => setTimelineOpen(event.currentTarget.open)}><summary>创作记录</summary><p>仅记录助手中的交流；阶段分类不代表平台工作坊或现实创作行为。</p>{timeline.loading ? <p role="status">正在读取创作记录…</p> : null}<LoadMore page={timeline} label="加载更早记录" />{timeline.items.map(row => <article key={row.messageId}><span className={styles.meta}>{assistantDate(row.createdAt).toLocaleString('zh-CN')} · {row.role === 'USER' ? '我' : '助手'} · {stateLabel(row.state)}</span><p className={styles.body}>{row.body}</p><label>阶段分类<select aria-label={`阶段分类 ${row.messageId}`} value={row.classification || ''} disabled={busy} onChange={event => void classify(row, event.target.value)}><option value="" disabled>未分类</option>{stageLabels.map(label => <option key={label}>{label}</option>)}</select></label><small>来源：{row.classificationSource === 'USER' ? '用户分类' : '规则分类'} · 版本 {row.classificationVersion}</small></article>)}{!timeline.error && !timeline.loading && !timeline.items.length ? <p>当前分支暂无创作记录。</p> : null}</details>
+      <details className={`glass-panel ${styles.tools}`} open={timelineOpen} onToggle={event => setTimelineOpen(event.currentTarget.open)}>
+        <summary>创作记录</summary><p>仅记录助手中的交流；阶段分类不代表平台工作坊或现实创作行为。</p>
+        {timeline.loading ? <p role="status">正在读取创作记录…</p> : null}<LoadMore page={timeline} label="加载更早记录" />
+        {timeline.items.map(row => <article key={row.messageId}>
+          <span className={styles.meta}>{assistantDate(row.createdAt).toLocaleString('zh-CN')} · {row.role === 'USER' ? '我' : '助手'} · {stateLabel(row.state)}{row.inputMode && inputModeLabel[row.inputMode] ? ` · ${inputModeLabel[row.inputMode]}` : ''}</span>
+          <p className={styles.body}>{row.body || (row.inputMode === 'image' ? '图片输入' : '')}</p>
+          <label>阶段分类<select aria-label={`阶段分类 ${row.messageId}`} value={row.classification || ''} disabled={busy} onChange={event => void classify(row, event.target.value)}><option value="" disabled>未分类</option>{stageLabels.map(label => <option key={label}>{label}</option>)}</select></label>
+          <small>来源：{row.classificationSource === 'USER' ? '用户分类' : '规则分类'} · 版本 {row.classificationVersion}</small>
+        </article>)}
+        {!timeline.error && !timeline.loading && !timeline.items.length ? <p>当前分支暂无创作记录。</p> : null}
+      </details>
       <details className={`glass-panel ${styles.tools}`}><summary>执行状态与恢复</summary><p>刷新与重连只读取同一任务。结果不确定时不会自动重新执行；明确重试使用该执行的原模型与配置，是新的尝试；上一次仍可能产生费用。</p>{runs.items.map(run => <article key={run.id}><p>{run.kind} · {stateLabel(run.status)} · 尝试 {run.attempt} · {run.modelKey}</p>{run.errorCode ? <p>{run.errorCode}</p> : null}{['FAILED', 'CANCELLED', 'INTERRUPTED'].includes(run.status) ? <button className="button" disabled={busy || !!running || !generationAvailable} onClick={() => void retry(run)}>明确重试</button> : null}</article>)}<LoadMore page={runs} label="更多执行记录" /></details>
 
     </AssistantPanel> : null}

@@ -23,7 +23,7 @@ export const assistantRetrievalRequest = (registry: Registry | null, artworks: b
 export type Citation = { id: string; ordinal: number; sourceType: 'PLATFORM_ARTWORK' | 'RAGFLOW_DOCUMENT' | 'WEB_RESULT'; sourceId: string; sourceVersion: string; projectionVersion: string; provenance: Record<string, unknown>; excerpt: string; excerptSha256: string };
 export type Choice = { runId: string; sourceMessageId: string; id: string; title: string; options: { id: string; label: string; text: string }[] };
 export type Summary = { id: string; branch_id: string; current_run_id: string; body: string; status: string; model_id: string; stale: boolean; usage: Record<string, unknown> };
-export type Timeline = { messageId: string; role: string; state: string; body: string; classification: string; classificationSource: string; classificationVersion: number; classifierVersion: string; runs: Run[]; createdAt: AssistantTimestamp };
+export type Timeline = { messageId: string; role: string; state: string; body: string; classification: string; classificationSource: string; classificationVersion: number; classifierVersion: string; runs: Run[]; createdAt: AssistantTimestamp; inputMode?: 'text' | 'image' | 'voice' | 'voice+image' | null };
 export type Page<T> = { items: T[]; nextCursor: string | null; hasMore: boolean };
 export const terminal = (state: string) => ['COMPLETED', 'FAILED', 'CANCELLED', 'INTERRUPTED'].includes(state);
 export const stateLabel = (state: string) => ({ QUEUED: '排队中', EXECUTING: '生成中', COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消', INTERRUPTED: '结果不确定／已中断', ACCEPTED: '已保存' }[state] || state);

@@ -27,6 +27,8 @@ async function scenario(name,fn,options={}) {
    try {if(response.abort)await route.abort('failed');else await route.fulfill({status:response.status,contentType:response.contentType,headers:{'access-control-allow-origin':web,'cache-control':'no-store'},body:Buffer.isBuffer(response.body)||typeof response.body==='string'?response.body:JSON.stringify(response.body)});}catch{/* Deliberate page close may cancel a fixture read. */}return;
   }
   if(u.origin===web&&method==='GET')return route.continue();
+  // Account replacement clears the same-origin community media session.
+  if(u.origin===web&&method==='DELETE'&&u.pathname==='/api/community/v2/api/media-session')return route.fulfill({status:204});
   // The shared shell's optional WeChat script is inert in this fixture, not loaded remotely.
   if(u.hostname==='res.wx.qq.com')return route.fulfill({status:200,contentType:'application/javascript',body:'/* isolated shell */'});
   result.blocked.push({case:name,method,url:req.url()});return route.abort();
@@ -94,6 +96,7 @@ try {
   const outgoing=page.getByTestId('outgoing-message');
   await outgoing.waitFor();
   assert.equal(await input.inputValue(),'');
+  await outgoing.getByRole('img').waitFor();
   assert.equal(await outgoing.getByRole('img').count(),1);
   assert.equal(await page.getByRole('form',{name:'发送消息'}).getByRole('img').count(),0);
   await page.getByText('正在发送，等待确认…',{exact:true}).waitFor();
@@ -195,6 +198,8 @@ try {
   await page.getByRole('button',{name:'视觉对话模型',exact:true}).click();await page.keyboard.press('ArrowDown');assert.equal(await page.getByRole('radio').nth(1).evaluate(e=>e===document.activeElement),true);assert.equal(state.writes.length,0);await page.keyboard.press('Enter');await until(()=>page.locator('dialog:modal').count().then(n=>n===0),'Model selection dismissed');assert(await page.getByRole('button',{name:'文字对话模型',exact:true}).isVisible());assert.equal(state.writes.length,0);
   await page.getByRole('button',{name:'语音输入',exact:true}).click();await until(()=>input.inputValue().then(t=>t.includes('语音转写待编辑')),'Transcript editable');await input.fill('编辑后的转写');assert.equal(state.writes.length,0);
   await open('平台作品参考','平台作品');await dialog('平台作品参考').getByText('筛选并选用平台作品',{exact:true}).click();await dialog('平台作品参考').getByRole('button',{name:'查找作品',exact:true}).click();await dialog('平台作品参考').getByRole('button',{name:'选用此作品'}).click();await close();await page.getByRole('button',{name:'已选 1 幅平台作品 · 查看 / 调整'}).waitFor();assert.equal(await input.inputValue(),'编辑后的转写');await noOverflow();assert.equal(state.writes.length,0);
+  await page.reload();
+  await page.getByRole('button',{name:'文字对话模型',exact:true}).waitFor();
  },{mobile:true,speech:true});
  await scenario('voice-opt-in-uses-saved-reply-once',async({page,state,dialog,open,close})=>{
   await open('工具与恢复','更多工具与恢复');

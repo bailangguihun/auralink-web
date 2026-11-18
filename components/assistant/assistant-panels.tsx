@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useId, useRef } from 'react';
-import type { Registry } from '@/lib/assistant-contracts';
+import type { Model, Registry } from '@/lib/assistant-contracts';
 import styles from './assistant.module.css';
 
 /** Native modal semantics: inert background, trapped focus, Escape, and return focus. */
@@ -24,6 +24,15 @@ export function AssistantPanel({ title, eyebrow, children, close, footer }: {
   </dialog>;
 }
 
+const dashscopeModelNames = new Map([
+  ['qwen3.8-flash', { name: '问墨', subtitle: '文字问答' }],
+  ['qwen3-vl-plus', { name: '读画', subtitle: '图文问答' }],
+]);
+
+function modelDisplay(model: Model | undefined) {
+  return model?.providerId === 'dashscope' ? dashscopeModelNames.get(model.modelId) : undefined;
+}
+
 export function AssistantModelPicker({ registry, value, onChange, disabled }: {
   registry: Registry | null; value: string; onChange: (id: string) => void; disabled: boolean;
 }) {
@@ -42,7 +51,7 @@ export function AssistantModelPicker({ registry, value, onChange, disabled }: {
     const option = dialog.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]:not(:disabled)') || dialog.querySelector<HTMLElement>('[role="radio"]:not(:disabled)') || dialog.querySelector('button');
     option?.focus(); option?.scrollIntoView({ block: 'nearest' });
   };
-  return <><button ref={anchor} type="button" className={styles.modelTrigger} aria-haspopup="dialog" disabled={disabled} onClick={show}>{selected?.label || '选择模型'} <span aria-hidden>⌃</span></button>
+  return <><button ref={anchor} type="button" className={styles.modelTrigger} aria-haspopup="dialog" disabled={disabled} onClick={show}>{modelDisplay(selected)?.name || selected?.label || '选择模型'} <span aria-hidden>⌃</span></button>
     <dialog ref={ref} className={`${styles.panel} ${styles.modelMenu}`} aria-labelledby={labelId} onCancel={event => { event.preventDefault(); close(); }} onClick={event => { if (event.target === event.currentTarget) { const r = event.currentTarget.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) close(); } }}>
       <header className={styles.panelHeader}><div><span className={styles.eyebrow}>MODEL REGISTRY</span><h2 id={labelId}>选择模型</h2></div><button type="button" className={styles.iconButton} aria-label="关闭模型选择" onClick={close}>×</button></header>
       <div className={styles.panelBody} role="radiogroup" aria-label="模型" onKeyDown={event => {
@@ -54,10 +63,18 @@ export function AssistantModelPicker({ registry, value, onChange, disabled }: {
         options[index]?.focus();
       }}>
         {!registry ? <p role="status">模型注册表尚未读取成功，请刷新会话后重试。</p> : !registry.models.length ? <p>注册表暂无模型。</p> : null}
-        {registry?.models.map(model => <button type="button" role="radio" aria-checked={value === model.id} className={styles.modelOption} key={model.id} disabled={!model.enabled || !model.configured || !model.capabilities.streaming} onClick={() => { onChange(model.id); close(); }}>
-          <span aria-hidden className={styles.modelCheck}>{value === model.id ? '●' : '○'}</span>
-          <span><strong>{model.label}</strong><small>{model.providerId} · {model.capabilities.images ? '文字与图片' : '文字'}{!model.configured ? ' · 未配置' : !model.enabled ? ' · 已停用' : !model.capabilities.streaming ? ' · 不支持流式会话' : ''}</small><small>能力声明：{model.evidence || '尚无提供商验证声明'}</small></span>
-        </button>)}
+        {registry?.models.map(model => {
+          const display = modelDisplay(model);
+          const subtitle = display?.subtitle ?? `${model.providerId} · ${model.capabilities.images ? '文字与图片' : '文字'}`;
+          return <button type="button" role="radio" aria-checked={value === model.id} className={styles.modelOption} key={model.id} disabled={!model.enabled || !model.configured || !model.capabilities.streaming} onClick={() => { onChange(model.id); close(); }}>
+            <span aria-hidden className={styles.modelCheck}>{value === model.id ? '●' : '○'}</span>
+            <span>
+              <strong>{display?.name ?? model.label}</strong>
+              <small>{subtitle}{!model.configured ? ' · 未配置' : !model.enabled ? ' · 已停用' : !model.capabilities.streaming ? ' · 不支持流式会话' : ''}</small>
+              {!display && <small>能力声明：{model.evidence || '尚无提供商验证声明'}</small>}
+            </span>
+          </button>;
+        })}
       </div>
     </dialog>
   </>;

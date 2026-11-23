@@ -59,6 +59,10 @@ export function responseFor(s,method,u,body) {
  if(p.endsWith('/choices'))return json(s.choices?[{runId:p.split('/').at(-2),sourceMessageId:id(10),id:id(71),title:'服务端选择卡',options:[{id:'ink',label:'继续聊笔墨',text:'继续聊笔墨'}]}]:[]);
  if(p.endsWith('/events')) {
   const r=s.runs.find(r=>r.id===p.split('/').at(-2));r.sequence++;r.checkpoint='### 正在展开思路\n\n隔离流式回复，取消后保留已接收内容。';
+  if(s.completeVoice){
+   r.status='COMPLETED';r.checkpoint='最终保存的语音回复。';
+   return {status:200,contentType:'text/event-stream',body:`id: ${r.sequence}\nevent: run.state\ndata: ${JSON.stringify({contractVersion:1,sequence:r.sequence,runId:r.id,branchId:r.branchId,state:r.status})}\n\n`};
+  }
   return {status:200,contentType:'text/event-stream',body:`id: ${r.sequence}\nevent: message.snapshot\ndata: ${JSON.stringify({contractVersion:1,sequence:r.sequence,runId:r.id,branchId:r.branchId,text:r.checkpoint,state:r.status})}\n\n`,delayMs:200};
  }
  if(p.endsWith('/cancel')) {const r=s.runs.find(r=>r.id===p.split('/').at(-2));r.status='CANCELLED';return json(r);}

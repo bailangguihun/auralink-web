@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "@/components/session-provider";
 import { communityApi } from "@/lib/community";
 import { assistantImageFingerprint } from "@/lib/assistant-api";
+import { assistantImageFile } from "@/lib/assistant-image-input";
 import type { Attachment } from "@/lib/assistant-contracts";
 import { errorMessage } from "@/lib/api";
 import { communityHandoffKey, readCommunityHandoff, saveCommunityHandoff, type CommunityHandoff } from "@/lib/community-draft";
@@ -25,14 +26,6 @@ function useIncoming() {
 export function CommunityAssistantBanner({ onNew, buttonClassName }: { onNew: () => void; buttonClassName: string }) {
   const { handoff } = useIncoming();
   return handoff ? <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--line)", color: "var(--text-soft)", fontSize: ".8rem", lineHeight: 1.9 }}>社区作品《{handoff.title || "未命名作品"}》已准备好。选择会话后，可以导入作品与问题。<button type="button" className={buttonClassName} style={{ marginLeft: 14 }} onClick={onNew}>新建一个对话 ↗</button></div> : null;
-}
-async function assistantFile(blob: Blob, filename: string) {
-  if (blob.type !== "image/webp") return new File([blob], filename, { type: blob.type });
-  const bitmap = await createImageBitmap(blob); const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width; canvas.height = bitmap.height; canvas.getContext("2d")?.drawImage(bitmap, 0, 0); bitmap.close();
-  const converted = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/png"));
-  if (!converted) throw new Error("图片格式转换失败，请从社区下载原图后再选择。");
-  return new File([converted], filename.replace(/\.webp$/i, "") + ".png", { type: "image/png" });
 }
 export function CommunityAssistantImport({ disabled, textPresent, onText, onImage, readImages, onReference, run, className, buttonClassName }: {
   disabled: boolean; textPresent: boolean; onText: (text: string) => void;
@@ -66,7 +59,7 @@ export function CommunityAssistantImport({ disabled, textPresent, onText, onImag
           if (image.mimeType !== "image/webp" && existing.some(item => item.sha256 === image.sha256)) continue;
           const blob = await communityApi.imageBlob(token, assetId, true);
           if (!current()) return;
-          const file = await assistantFile(blob, image.filename);
+          const file = await assistantImageFile(blob, image.filename);
           if (!current()) return;
           const sha256 = await assistantImageFingerprint(file);
           if (!current()) return;

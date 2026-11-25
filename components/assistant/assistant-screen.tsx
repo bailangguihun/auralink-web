@@ -12,8 +12,8 @@ import { terminal, stateLabel, stageLabels, mergeItems, ragflowAvailable, webSea
 import { subscribeAssistant } from '@/lib/assistant-stream';
 import { useAssistantAccess } from './use-assistant-access';
 import { useAssistantAttachments } from './use-assistant-attachments';
-import { assistantImageFile } from '@/lib/assistant-image-input';
-import { PrivateAttachment } from './private-attachment';
+import { assistantImageAccept, assistantImageFile, isAssistantImageInput } from '@/lib/assistant-image-input';
+import { PrivateAttachment, UploadingAttachment } from './private-attachment';
 import { AssistantStorage } from './assistant-storage';
 import { useBrowserSpeech } from './use-browser-speech';
 import { ArtworkSelection } from './artwork-selection';
@@ -199,6 +199,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const [unconfirmedChat, setUnconfirmedChat] = useState(false);
   const [outgoing, setOutgoing] = useState<{ text: string; attachmentIds: string[]; inputMessageId?: string } | null>(null);
   const draft = useAssistantAttachments(id, revision, ledger, access); const attachments = draft.attachments;
+  const [uploadingImage, setUploadingImage] = useState<{ name: string; file?: File } | null>(null);
   const messages = usePage<Message>(`/sessions/${enc(id)}/messages/page?branchId=${enc(branchId)}`, access, row => row.id, revision, true);
   const runs = usePage<Run>(status.executionAvailable ? `/sessions/${enc(id)}/runs/page?branchId=${enc(branchId)}` : null, access, row => row.id, revision);
   const active = usePage<Run>(status.executionAvailable ? `/sessions/${enc(id)}/runs/page?activeOnly=true` : null, access, row => row.id, revision + activityTick, false, true);
@@ -370,9 +371,21 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     });
   };
   const uploadDisabled = busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat;
-  const upload = async (file: File | undefined) => { if (file) await act(async () => draft.upload(await assistantImageFile(file, file.name))); };
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    await act(async () => {
+      setUploadingImage({ name: file.name });
+      try {
+        const prepared = await assistantImageFile(file, file.name);
+        setUploadingImage({ name: prepared.name, file: prepared });
+        await draft.upload(prepared);
+      } finally {
+        setUploadingImage(null);
+      }
+    });
+  };
   const pasteImage = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const images = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
+    const images = Array.from(event.clipboardData.files).filter(isAssistantImageInput);
     if (!images.length) return;
     event.preventDefault();
     if (images.length > 1) {
@@ -473,7 +486,8 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       {draft.notice ? <p role="status">{draft.notice}</p> : null}
       {draft.pending.map(item => <p key={item.scope} role="status">{item.state === 'uploading' ? '上次上传仍未完成。可核对状态，或明确移除后重新选择图片。' : '上次图片尚未获服务器确认。请重新选择原文件；若文件从未被接受，刷新后无法恢复本地字节。'}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void draft.refresh()}>核对上传状态</button>{item.id ? <button type="button" className={styles.small} disabled={busy} onClick={() => void act(() => draft.remove(item.id!, item.scope))}>移除未完成上传</button> : null}</p>)}
 
-      {attachments.filter(image => !outgoing?.attachmentIds.includes(image.id)).map(image => <div className={styles.draftImage} key={image.id}><PrivateAttachment id={image.id} />{image.draftExpiresAt ? <small className={styles.meta}>未发送草稿有效期至 {assistantDate(image.draftExpiresAt).toLocaleString('zh-CN')}</small> : null}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void act(() => draft.remove(image.id))}>移除待发送图片</button></div>)}
+      {uploadingImage ? <div className={styles.draftImage}><UploadingAttachment {...uploadingImage} /></div> : null}
+      {attachments.filter(image => !outgoing?.attachmentIds.includes(image.id)).map(image => <div className={styles.draftImage} key={image.id}><PrivateAttachment id={image.id} knownAttachment={image} localFile={draft.localFiles.get(image.id)} />{image.draftExpiresAt ? <small className={styles.meta}>未发送草稿有效期至 {assistantDate(image.draftExpiresAt).toLocaleString('zh-CN')}</small> : null}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void act(() => draft.remove(image.id))}>移除待发送图片</button></div>)}
       {draft.hasMore ? <button type="button" className="button" disabled={draft.loading} onClick={() => void draft.more()}>加载更多待发送图片</button> : null}
       {attachments.length > 4 || draft.hasMore ? <p role="alert">当前会话有超过四张待发送图片。请读取并移除多余图片后再发送；不会静默遗漏或自动删除。</p> : null}
       {attachments.length && !selectedModel?.capabilities.images ? <p role="alert">所选模型不支持图片，请明确选择支持图片的模型；不会丢弃图片或自动切换模型。</p> : null}
@@ -489,7 +503,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
           <button type="button" className={styles.small} onClick={() => setPanel('artworks')} aria-haspopup="dialog">平台作品</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="联网搜索" aria-pressed={webSearch} disabled={!onlineSearchAvailable || busy || !!pendingChat} title={onlineSearchAvailable ? '为下一条消息启用联网搜索' : '联网搜索尚未配置'} onClick={() => setWebSearch(value => !value)}>{webSearch ? '✓ ' : ''}联网搜索</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="知识库检索" aria-pressed={ragflow} disabled={!knowledgeSearchAvailable || busy || !!pendingChat} title={knowledgeSearchAvailable ? '为下一条消息启用知识库检索' : '知识库接口已预留，RAGFlow 尚未配置'} onClick={() => setRagflow(value => !value)}>{ragflow ? '✓ ' : ''}知识库检索</button>
-          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png,image/webp" disabled={uploadDisabled} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
+          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept={assistantImageAccept} disabled={uploadDisabled} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
           {speech.supported ? <button type="button" className={styles.small} onClick={speech.listen}>{speech.listening ? '停止语音' : '语音输入'}</button> : null}
           {speech.speaking ? <button type="button" className={styles.small} onClick={speech.stop}>停止朗读</button> : null}
           <button type="button" className={styles.small} onClick={() => setPanel('tools')} aria-haspopup="dialog" aria-label="更多工具与恢复">•••</button>
@@ -513,7 +527,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     </AssistantPanel> : null}
     {panel === 'artworks' ? <AssistantPanel title="平台作品参考" eyebrow="ARTWORKS" close={() => setPanel(null)}><ArtworkSelection selected={selectedArtworks} onChange={setSelectedArtworks} disabled={busy || !!pendingChat} /></AssistantPanel> : null}
     {panel === 'tools' ? <AssistantPanel title="工具与恢复" eyebrow="TOOLS & STORAGE" close={() => setPanel(null)}>
-      <p>Enter 发送，Shift + Enter 换行。最多添加 4 张图片，WebP 会转成 PNG。离开页面不会取消已受理的生成。</p>
+      <p>Enter 发送，Shift + Enter 换行。最多添加 4 张 JPG、JPEG、PNG、WebP、GIF、BMP 或 AVIF 图片，动图取首帧。离开页面不会取消已受理的生成。</p>
       {speech.supported ? <fieldset>
         <legend>当前对话的语音设置</legend>
         <p>默认先在输入框确认转写。浏览器可能使用在线语音服务。</p>

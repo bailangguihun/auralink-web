@@ -24,7 +24,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Verify deployment shell
-        run: python3 tests/deploy-workflow-fixtures.py --bash bash
+        run: |
+          python3 tests/deploy-workflow-fixtures.py --bash bash
+          python3 -B -m unittest discover -s tests -p 'test_deploy_artifact.py'
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4

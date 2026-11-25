@@ -9,7 +9,168 @@ permissions:
   contents: read
 
 jobs:
+  package:
+    if: vars.R25_WEB_ARTIFACT_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    outputs:
+      build_id: ${{ steps.pack.outputs.build_id }}
+      archive_sha256: ${{ steps.pack.outputs.archive_sha256 }}
+      public_build_manifest_sha256: ${{ steps.pack.outputs.public_build_manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.20.2'
+          cache: npm
+      - name: Build the approved release source
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://api.artlive.top
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/release
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Package the standalone release
+        id: pack
+        run: |
+          set -Eeuo pipefail
+          python3 -B scripts/package-web-release.py --commit "$GITHUB_SHA" --output "$RUNNER_TEMP/web-release"
+          python3 - "$RUNNER_TEMP/web-release/web-release.json" <<'PY' >> "$GITHUB_OUTPUT"
+          import json, sys
+          with open(sys.argv[1]) as stream:
+              metadata = json.load(stream)
+          for field in ("build_id", "archive_sha256", "public_build_manifest_sha256"):
+              print(f"{field}={metadata[field]}")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/web-release/
+          if-no-files-found: error
+          compression-level: 0
+
+  publish-artifact:
+    needs: package
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+    timeout-minutes: 24
+    env:
+      WEB_BUILD_ID: ${{ needs.package.outputs.build_id }}
+      WEB_ARCHIVE_SHA256: ${{ needs.package.outputs.archive_sha256 }}
+      WEB_PUBLIC_BUILD_SHA256: ${{ needs.package.outputs.public_build_manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/web-release
+      - name: Push the verified release and invoke the installed R25 publisher
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_HOST_KEY: ${{ vars.SERVER_HOST_KEY }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/release
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "$WEB_BUILD_ID" =~ ^[A-Za-z0-9._-]{1,80}$ && "$WEB_ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$SERVER_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && "$SERVER_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$SERVER_PORT" =~ ^[1-9][0-9]{0,4}$ && "$SERVER_HOST_KEY" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}$ ]]
+          test -n "$SERVER_SSH_KEY"
+
+          umask 077
+          key_dir=$(mktemp -d "$RUNNER_TEMP/r25-web-ssh.XXXXXX")
+          trap 'rm -f -- "$key_dir/key" "$key_dir/known_hosts"; rmdir -- "$key_dir"' EXIT
+          printf '%s\n' "$SERVER_SSH_KEY" > "$key_dir/key"
+          known_host="$SERVER_HOST"
+          if [ "$SERVER_PORT" != 22 ]; then
+            known_host="[$SERVER_HOST]:$SERVER_PORT"
+          fi
+          printf '%s %s\n' "$known_host" "$SERVER_HOST_KEY" > "$key_dir/known_hosts"
+          unset SERVER_SSH_KEY
+          options=(-i "$key_dir/key" -o "UserKnownHostsFile=$key_dir/known_hosts" -o StrictHostKeyChecking=yes
+                   -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+          destination="$SERVER_USER@$SERVER_HOST"
+          remote=(ssh "${options[@]}" -p "$SERVER_PORT" "$destination")
+          root=/root/autodl-tmp/auralink-web-deploy
+          publisher="$root/bin/deploy-web.sh"
+          release_id="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          archive="$RUNNER_TEMP/web-release/web.tar.gz"
+          printf '%s  %s\n' "$WEB_ARCHIVE_SHA256" "$archive" | sha256sum --check
+          chmod 600 "$archive"
+
+          if ! "${remote[@]}" "$publisher prepare-artifact $release_id" ||
+              ! timeout 300 scp "${options[@]}" -P "$SERVER_PORT" -p "$archive" "$destination:$root/incoming/$release_id/"; then
+            echo 'Web release transfer failed. Publication has not started.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          deadline=$((SECONDS + 180))
+          while true; do
+            latest=$(timeout 15 git ls-remote --exit-code origin refs/heads/release | cut -f1)
+            if [ "$latest" != "$GITHUB_SHA" ]; then
+              echo 'Web release advanced while waiting for publication.' >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            if result=$("${remote[@]}" "timeout --signal=TERM --kill-after=90 540 $publisher deploy-artifact $release_id $WEB_ARCHIVE_SHA256 $WEB_BUILD_ID" 2>&1); then
+              printf '%s\n' "$result"
+              if grep -Fxq "DEPLOY_WEB=ARTIFACT_COMMITTED commit=$GITHUB_SHA build=$WEB_BUILD_ID" <<< "$result" ||
+                  grep -Fxq "DEPLOY_WEB=ARTIFACT_CURRENT commit=$GITHUB_SHA build=$WEB_BUILD_ID" <<< "$result"; then
+                break
+              fi
+              echo 'Web publication receipt could not be verified. Inspect the R25 transition.' >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            else
+              rc=$?
+              printf '%s\n' "$result"
+              if [ "$rc" -ne 65 ] || [ "$result" != 'DEPLOY_WEB=REFUSED reason=frontend_deployment_busy' ]; then
+                if [ "$rc" -eq 1 ] && grep -Eq '^DEPLOY_WEB=ROLLBACK_OK reason=[a-z_]+$' <<< "$result"; then
+                  stage=$(sed -n 's/^DEPLOY_WEB=RECONCILIATION_REQUIRED stage=//p' <<< "$result")
+                  if [[ "$stage" =~ ^"$root"/runtime/frontend-selection-transition-[0-9]{18,20}$ ]] &&
+                      "${remote[@]}" "$publisher recover-selection $stage"; then
+                    echo 'Web publication failed. R25 verified and retained the previous release.' >> "$GITHUB_STEP_SUMMARY"
+                    exit "$rc"
+                  fi
+                fi
+                echo 'Web publication failed or has an unknown outcome. Inspect the R25 transition.' >> "$GITHUB_STEP_SUMMARY"
+                exit "$rc"
+              fi
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo 'Web publication timed out waiting for the R25 shared lease.' >> "$GITHUB_STEP_SUMMARY"
+                exit "$rc"
+              fi
+              sleep 5
+            fi
+          done
+      - name: Verify public Web, build marker and API
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$WEB_BUILD_ID" =~ ^[A-Za-z0-9._-]{1,80}$ && "$WEB_PUBLIC_BUILD_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          options=(--fail --silent --show-error --connect-timeout 5 --max-time 12 --retry 2 --retry-all-errors --retry-max-time 35)
+          if curl "${options[@]}" --output /dev/null https://artlive.top/ &&
+              curl "${options[@]}" --output "$RUNNER_TEMP/web-build-marker.js" "https://artlive.top/_next/static/$WEB_BUILD_ID/_buildManifest.js" &&
+              printf '%s  %s\n' "$WEB_PUBLIC_BUILD_SHA256" "$RUNNER_TEMP/web-build-marker.js" | sha256sum --check &&
+              curl "${options[@]}" https://api.artlive.top/api/health |
+                python3 -c 'import json, sys; sys.exit(0 if json.load(sys.stdin).get("status") == "UP" else 1)'; then
+            echo "Web $GITHUB_SHA ($WEB_BUILD_ID) verified by R25 and public checks." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Web publication receipt verified. Public checks failed.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
   deploy:
+    if: vars.R25_WEB_ARTIFACT_DEPLOY_ENABLED != 'true'
     runs-on: ubuntu-latest
     environment:
       name: production

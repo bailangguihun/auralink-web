@@ -13,6 +13,7 @@ const enc = encodeURIComponent;
 export function useAssistantAttachments(id: string, revision: number, ledger: OperationLedger, access: Access) {
   const { request } = access;
   const [page, setPage] = useState<Page<Attachment>>({ items: [], nextCursor: null, hasMore: false });
+  const [localFiles, setLocalFiles] = useState<ReadonlyMap<string, File>>(() => new Map());
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [storageRevision, setStorageRevision] = useState(0);
   const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
@@ -42,6 +43,10 @@ export function useAssistantAttachments(id: string, revision: number, ledger: Op
       if (!alive.current || current !== epoch.current) return;
       setPending(unresolved); setNotice([...new Set(notices)].join(' '));
       setPage(old => cursor ? { ...result, items: mergeItems(old.items, result.items, row => row.id) } : result);
+      if (!cursor) {
+        const visibleIds = new Set(result.items.map(item => item.id));
+        setLocalFiles(old => new Map([...old].filter(([attachmentId]) => visibleIds.has(attachmentId))));
+      }
     } catch (failure) { if (alive.current && current === epoch.current && !isAbortError(failure)) setError(attachmentErrorMessage(failure)); }
     finally { if (alive.current && current === epoch.current) { setLoading(false); setStorageRevision(value => value + 1); } }
     return reconciled;
@@ -62,8 +67,21 @@ export function useAssistantAttachments(id: string, revision: number, ledger: Op
     }
     const requestKey = await ledger.key(scope, { digest, filename: file.name }); const form = new FormData(); form.set('file', file);
     try {
-      await request((token, signal) => assistantRequest<Attachment>(`/sessions/${enc(id)}/attachments?requestKey=${enc(requestKey)}`, token, signal, 'POST', form));
-      ledger.resolved(scope); await load();
+      const attachment = await request((token, signal) => assistantRequest<Attachment>(`/sessions/${enc(id)}/attachments?requestKey=${enc(requestKey)}`, token, signal, 'POST', form));
+      if (attachment?.sessionId !== id || attachment.status !== 'READY' || !attachment.id || !attachment.contentUrl) {
+        throw new Error('上传回执缺少已确认的图片信息。');
+      }
+      if (!alive.current) return;
+      ledger.resolved(scope);
+      // Any older list read may have started before the attachment was saved.
+      epoch.current++;
+      setPage(old => ({ ...old, items: [attachment, ...old.items.filter(item => item.id !== attachment.id)] }));
+      setLocalFiles(old => new Map(old).set(attachment.id, file));
+      setPending(old => old.filter(item => item.scope !== scope));
+      setError('');
+      setNotice('');
+      setLoading(false);
+      setStorageRevision(value => value + 1);
     } catch (failure) {
       if (isAbortError(failure)) throw failure;
       // Reconcile the same key even for a lost response. Never re-POST automatically.
@@ -83,5 +101,5 @@ export function useAssistantAttachments(id: string, revision: number, ledger: Op
       if (scope) ledger.resolved(scope); await load();
     } catch (failure) { if (isAbortError(failure)) throw failure; throw new Error(attachmentErrorMessage(failure)); }
   };
-  return { attachments: page.items, hasMore: page.hasMore, pending, loading, error, notice, storageRevision, upload, remove, refresh: () => load(), more: () => load(page.nextCursor) };
+  return { attachments: page.items, localFiles, hasMore: page.hasMore, pending, loading, error, notice, storageRevision, upload, remove, refresh: () => load(), more: () => load(page.nextCursor) };
 }

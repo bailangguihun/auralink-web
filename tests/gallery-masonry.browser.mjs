@@ -15,7 +15,7 @@ await mkdir(output, { recursive: true });
 const assets = await Promise.all([
   ['Bg1.jpg', 2048, 2352], ['Bg2.jpg', 2048, 1101], ['Bg3.jpeg', 1600, 1158], ['Bg4.jpg', 2896, 2350],
 ].map(async ([file, width, height]) => ({ width, height, body: await readFile(new URL(`../public/artlive-reference/${file}`, import.meta.url)) })));
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, executablePath: process.env.GALLERY_CHROMIUM });
 const report = { boundary: 'Local production build, synthetic API records, bounded fixture favorite writes. Browser plugin not available; Playwright fallback. No production I/O.', cases: [], errors: [] };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const artworkRatios = [.504, .373, 2.21, .576, .271, .544, .488, .512, 2.153, .487, .804, .427];
@@ -150,7 +150,7 @@ async function scenario(name, options, run) {
   const record = { name }; report.cases.push(record);
   const context = await browser.newContext({ viewport: { width: options.width || 1440, height: 1000 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
   const state = { ...newState(), total: 36, missing: false, slow: 0, broken: false, extreme: false, queryDelay: 0, moreDelay: 0, failPageOnce: null, currentDate: '2026-10-30', favorites: new Map(), calls: [], blocked: [], ...options };
-  await context.addInitScript(() => localStorage.setItem('artlive.session.token.v1', 'ISOLATED_GALLERY_TEST'));
+  if (!options.anonymous) await context.addInitScript(() => localStorage.setItem('artlive.session.token.v1', 'ISOLATED_GALLERY_TEST'));
   if (options.noResizeObserver) await context.addInitScript(() => { window.ResizeObserver = undefined; });
   const page = await context.newPage();
   const errors = [], logs = [];
@@ -435,6 +435,65 @@ try {
     await page.getByRole('button', { name: '清除', exact: true }).click();
     await page.getByRole('heading', { name: '布局预览 1', exact: true }).waitFor(); await geometry(page, 12);
   });
+  await scenario('shareable-filters', {}, async ({ page, state }) => {
+    await geometry(page, 12);
+    await page.getByText('更多筛选', { exact: true }).click();
+    await page.getByLabel('关键词', { exact: true }).fill('江山 & 水');
+    await page.getByLabel('作者', { exact: true }).fill('钱杜');
+    await page.locator('select[name="sort"]').selectOption('author');
+    await page.locator('select[name="direction"]').selectOption('desc');
+    await page.getByRole('button', { name: '检索画作', exact: true }).click();
+    const expected = { keyword: '江山 & 水', author: '钱杜', sort: 'author', direction: 'desc' };
+    const filtered = page.getByRole('heading', { name: '江山 & 水 1', exact: true });
+    await filtered.waitFor();
+    const filteredUrl = page.url();
+    assert.deepEqual(Object.fromEntries(new URL(filteredUrl).searchParams), expected);
+    const beforeReload = catalogCalls(state).length;
+    await page.reload();
+    await filtered.waitFor();
+    const request = new URLSearchParams(catalogCalls(state).slice(beforeReload).at(-1).query);
+    for (const [name, value] of Object.entries(expected)) assert.equal(request.get(name), value);
+    assert.equal(await page.getByLabel('关键词', { exact: true }).inputValue(), expected.keyword);
+    await page.getByText('更多筛选', { exact: true }).click();
+    assert.equal(await page.getByLabel('作者', { exact: true }).inputValue(), expected.author);
+    assert.equal(await page.locator('select[name="sort"]').inputValue(), expected.sort);
+    assert.equal(await page.locator('select[name="direction"]').inputValue(), expected.direction);
+    await moreButton(page).click();
+    await waitCards(page, 24);
+    await cards(page).nth(17).locator('a').first().click();
+    await page.getByRole('heading', { name: '隔离详情山水', exact: true, level: 1 }).waitFor();
+    await page.getByRole('link', { name: '返回画廊', exact: true }).click();
+    await page.waitForURL(filteredUrl);
+    await waitCards(page, 24);
+    await page.getByRole('button', { name: '清除', exact: true }).click();
+    await page.waitForURL(`${web}/gallery`);
+    const unfiltered = page.getByRole('heading', { name: '布局预览 1', exact: true });
+    await unfiltered.waitFor();
+    await page.goBack();
+    await page.waitForURL(filteredUrl);
+    await filtered.waitFor();
+    await page.goForward();
+    await unfiltered.waitFor();
+  });
+
+  await scenario('header-login-return', { anonymous: true }, async ({ page }) => {
+    const daily = page.getByRole('region', { name: '每日一画', exact: true }).getByRole('link', { name: /查看.+详情/ });
+    await daily.waitFor();
+    const login = new URL(await daily.getAttribute('href'), web);
+    const target = login.searchParams.get('next');
+    assert.match(target, /^\/gallery\/[^/]+$/);
+    await daily.click();
+    await page.waitForURL(login.href);
+    const headerLogin = page.getByRole('banner').getByRole('link', { name: '登录', exact: true });
+    assert.equal(new URL(await headerLogin.getAttribute('href'), web).href, login.href);
+    await headerLogin.click();
+    await page.waitForURL(login.href);
+    await page.getByRole('navigation', { name: '身份入口' }).getByRole('link', { name: '注册' }).click();
+    await page.waitForURL(url => url.pathname === '/register' && url.searchParams.get('next') === target);
+    await headerLogin.click();
+    await page.waitForURL(login.href);
+  });
+
   await scenario('same-query-restart', {}, async ({ page, state, record }) => {
     const firstPageCalls = () => catalogCalls(state).filter(call => Number(new URLSearchParams(call.query).get('page') || 0) === 0).length;
     const submit = page.getByRole('button', { name: '检索画作', exact: true });

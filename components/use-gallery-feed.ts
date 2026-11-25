@@ -12,8 +12,6 @@ import {
 } from "@/lib/gallery-feed";
 import type { PaintingPage, PaintingQuery } from "@/lib/types";
 
-export { getGalleryFeedSnapshot } from "@/lib/gallery-feed";
-
 type FeedState = {
   key: string;
   feed: GalleryFeedData;

@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 
 import { DailyPainting } from "@/components/daily-painting";
 import { ModuleHeader } from "@/components/module-header";
@@ -10,13 +11,14 @@ import { useReadResource } from "@/components/use-read-resource";
 import { SearchIcon } from "@/components/icons";
 import { PaintingCard } from "@/components/painting-card";
 import { GalleryRows, resetGalleryViewport } from "@/components/gallery-rows";
-import { getGalleryFeedSnapshot, useGalleryFeed } from "@/components/use-gallery-feed";
+import { useGalleryFeed } from "@/components/use-gallery-feed";
 import { useFavorites } from "@/components/favorite-provider";
 import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { INITIAL_GALLERY_QUERY } from "@/lib/gallery-order";
 import { galleryFeedKey } from "@/lib/gallery-feed";
+import { galleryHref, readGalleryQuery } from "@/lib/gallery-query";
 import { DAILY_PAINTING_KEY, DAILY_PAINTING_TTL_MS } from "@/lib/navigation-data";
 import type { PaintingQuery, PaintingSummary } from "@/lib/types";
 
@@ -29,7 +31,10 @@ function GalleryContent() {
   const { token, status, sessionIdentity, signOutIfCurrent, isCurrentSession } = useSession();
   const { isFavorited, isFavoriteBusy, toggleFavorite: toggleSessionFavorite } = useFavorites();
   const authenticated = status === "authenticated" && Boolean(token);
-  const [query, setQuery] = useState<PaintingQuery>(() => getGalleryFeedSnapshot(sessionIdentity.generation)?.query || INITIAL_GALLERY_QUERY);
+  const search = useSearchParams().toString();
+  const urlQuery = useMemo(() => readGalleryQuery(new URLSearchParams(search)), [search]);
+  const [repeatedSearch, setRepeatedSearch] = useState<{ source: PaintingQuery; query: PaintingQuery }>();
+  const query = repeatedSearch?.source === urlQuery ? repeatedSearch.query : urlQuery;
   const [actionError, setError] = useState<string | null>(null);
   const loadDaily = useCallback((signal: AbortSignal) => api.dailyPainting(token, signal), [token]);
   const ready = status !== "loading";
@@ -49,27 +54,25 @@ function GalleryContent() {
   const preparing = displayedCount < fetchedCount;
   const busy = loading || catalog.loadingMore || preparing;
 
+  const submitQuery = (nextQuery: PaintingQuery) => {
+    resetGalleryViewport();
+    const href = galleryHref(nextQuery);
+    if (href === `${location.pathname}${location.search}`) {
+      // Submitting the same filters still restarts pagination without adding a history entry.
+      setRepeatedSearch({ source: urlQuery, query: nextQuery });
+    } else {
+      window.history.pushState(null, "", `${href}${location.hash}`);
+    }
+  };
+
   const applyFilters = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    resetGalleryViewport();
-    const form = new FormData(event.currentTarget);
-    setQuery({
-      keyword: String(form.get("keyword") || "").trim(),
-      dynasty: String(form.get("dynasty") || "").trim(),
-      category: String(form.get("category") || "").trim(),
-      author: String(form.get("author") || "").trim(),
-      subject: String(form.get("subject") || "").trim(),
-      sort: form.get("sort") as PaintingQuery["sort"],
-      direction: form.get("direction") as PaintingQuery["direction"],
-      page: 0,
-      size: 12,
-    });
+    submitQuery(readGalleryQuery(new FormData(event.currentTarget)));
   };
 
   const clearFilters = (form: HTMLFormElement) => {
-    resetGalleryViewport();
     form.reset();
-    setQuery({ ...INITIAL_GALLERY_QUERY });
+    submitQuery({ ...INITIAL_GALLERY_QUERY });
   };
 
   const toggleFavorite = async (painting: PaintingSummary) => {

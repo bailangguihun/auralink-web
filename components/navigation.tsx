@@ -1,8 +1,8 @@
 "use client";
 
 import { SessionLink as Link } from "@/components/session-link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 import { BrandIcon, CloseIcon, MenuIcon, UserIcon } from "@/components/icons";
 import { PendingIndicator } from "@/components/loading";
@@ -10,6 +10,7 @@ import { useSession } from "@/components/session-provider";
 import { useNavigationPrefetch } from "@/components/use-navigation-prefetch";
 import { NavigationIndicator } from "@/components/navigation-indicator";
 import navigationMotion from "@/components/navigation-indicator.module.css";
+import { loginHref } from "@/lib/navigation";
 
 const links = [
   ["/", "首页"],
@@ -20,6 +21,15 @@ const links = [
   ["/assistant", "助手"],
   ["/about", "关于"],
 ] as const;
+
+function HeaderLoginLink({ href }: { href: string }) {
+  return <Link className="user-link" href={href} prefetch={false} title="登录或注册"><UserIcon /><span>登录</span></Link>;
+}
+
+function AuthPageLoginLink() {
+  const next = useSearchParams().get("next");
+  return <HeaderLoginLink href={next ? loginHref(next) : "/login"} />;
+}
 
 export function Navigation() {
   const pathname = usePathname();
@@ -74,9 +84,9 @@ export function Navigation() {
             <Link className="text-button" href="/me" prefetch={false}>我的收藏</Link>
             <button className="text-button" type="button" onClick={logout}>退出</button>
           </>
-        ) : (
-          <Link className="user-link" href="/login" prefetch={false} title="登录或注册"><UserIcon /><span>登录</span></Link>
-        )}
+        ) : pathname === "/login" || pathname === "/register" ? (
+          <Suspense fallback={null}><AuthPageLoginLink /></Suspense>
+        ) : <HeaderLoginLink href="/login" />}
       </div>
     </header>
   );

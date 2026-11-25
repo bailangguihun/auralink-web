@@ -8,7 +8,23 @@ import { useSession } from '@/components/session-provider';
 import { LoadingStatus, Skeleton } from '@/components/loading';
 import styles from './assistant.module.css';
 import type { ImageCrop } from '@/lib/assistant-presentation';
-export function PrivateAttachment({ id, crop, label }: { id: string; crop?: ImageCrop; label?: string }) {
+export function UploadingAttachment({ name, file }: { name: string; file?: File }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    if (!file) return;
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+  return <figure className={styles.attachment}>
+    {url ? <img src={url} alt={name} /> : null}
+    <figcaption>{name} · <span role="status">{file ? '上传中…' : '正在准备图片…'}</span></figcaption>
+  </figure>;
+}
+
+export function PrivateAttachment({ id, crop, label, knownAttachment, localFile }: {
+  id: string; crop?: ImageCrop; label?: string; knownAttachment?: Attachment; localFile?: File;
+}) {
   const { token, sessionIdentity, isCurrentSession, signOutIfCurrent } = useSession();
   const [metadata, setMetadata] = useState<Attachment | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -17,20 +33,22 @@ export function PrivateAttachment({ id, crop, label }: { id: string; crop?: Imag
     if (!token) return;
     const dialogElement = dialog.current; const controller = new AbortController(); const identity = sessionIdentity; let url = '';
     setImage(null); setMetadata(null); setError('');
-    void assistantRequest<Attachment>(`/attachments/${encodeURIComponent(id)}`, token, controller.signal).then(async metadata => {
+    const loadImage = async () => {
+      const metadata = knownAttachment ?? await assistantRequest<Attachment>(`/attachments/${encodeURIComponent(id)}`, token, controller.signal);
       if (controller.signal.aborted || !isCurrentSession(identity)) return;
       setMetadata(metadata);
-      const blob = await api.mediaBlob(metadata.contentUrl, token, controller.signal);
+      const blob = localFile ?? await api.mediaBlob(metadata.contentUrl, token, controller.signal);
       if (controller.signal.aborted || !isCurrentSession(identity)) return;
       if (!['image/png', 'image/jpeg'].includes(blob.type)) throw new Error('图片响应格式不受支持。');
       url = URL.createObjectURL(blob); setImage({ metadata, url });
-    }).catch(error => {
+    };
+    void loadImage().catch(error => {
       if (controller.signal.aborted || isAbortError(error) || !isCurrentSession(identity)) return;
       if (error instanceof ApiError && error.status === 401) { signOutIfCurrent(identity); return; }
       setError(attachmentErrorMessage(error));
     });
     return () => { controller.abort(); dialogElement?.close(); if (url) URL.revokeObjectURL(url); };
-  }, [id, token, sessionIdentity, isCurrentSession, signOutIfCurrent, attempt]);
+  }, [id, token, sessionIdentity, isCurrentSession, signOutIfCurrent, attempt, knownAttachment, localFile]);
   const cropStyle = crop && image ? { position: 'relative' as const, overflow: 'hidden', width: Math.min(170, 240 * crop.width * image.metadata.width / (crop.height * image.metadata.height)), maxWidth: '100%', aspectRatio: `${crop.width * image.metadata.width} / ${crop.height * image.metadata.height}` } : undefined;
   const imageStyle = crop ? { position: 'absolute' as const, maxWidth: 'none', maxHeight: 'none', width: `${100 / crop.width}%`, height: 'auto', left: `${-100 * crop.x / crop.width}%`, top: `${-100 * crop.y / crop.height}%` } : undefined;
   return <figure className={styles.attachment} data-testid={`attachment-${id}`}>

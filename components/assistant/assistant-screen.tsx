@@ -12,7 +12,7 @@ import { terminal, stateLabel, stageLabels, mergeItems, ragflowAvailable, webSea
 import { subscribeAssistant } from '@/lib/assistant-stream';
 import { useAssistantAccess } from './use-assistant-access';
 import { useAssistantAttachments } from './use-assistant-attachments';
-import { assistantImageFile } from '@/lib/assistant-image-input';
+import { assistantImageAccept, assistantImageFile, isAssistantImageInput } from '@/lib/assistant-image-input';
 import { PrivateAttachment } from './private-attachment';
 import { AssistantStorage } from './assistant-storage';
 import { useBrowserSpeech } from './use-browser-speech';
@@ -372,7 +372,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const uploadDisabled = busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat;
   const upload = async (file: File | undefined) => { if (file) await act(async () => draft.upload(await assistantImageFile(file, file.name))); };
   const pasteImage = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const images = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
+    const images = Array.from(event.clipboardData.files).filter(isAssistantImageInput);
     if (!images.length) return;
     event.preventDefault();
     if (images.length > 1) {
@@ -489,7 +489,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
           <button type="button" className={styles.small} onClick={() => setPanel('artworks')} aria-haspopup="dialog">平台作品</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="联网搜索" aria-pressed={webSearch} disabled={!onlineSearchAvailable || busy || !!pendingChat} title={onlineSearchAvailable ? '为下一条消息启用联网搜索' : '联网搜索尚未配置'} onClick={() => setWebSearch(value => !value)}>{webSearch ? '✓ ' : ''}联网搜索</button>
           <button type="button" className={`${styles.small} ${styles.retrievalToggle}`} aria-label="知识库检索" aria-pressed={ragflow} disabled={!knowledgeSearchAvailable || busy || !!pendingChat} title={knowledgeSearchAvailable ? '为下一条消息启用知识库检索' : '知识库接口已预留，RAGFlow 尚未配置'} onClick={() => setRagflow(value => !value)}>{ragflow ? '✓ ' : ''}知识库检索</button>
-          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept="image/jpeg,image/png,image/webp" disabled={uploadDisabled} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
+          <label className={styles.uploadButton}>＋ 图片<input type="file" aria-label="添加图片" accept={assistantImageAccept} disabled={uploadDisabled} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} /></label>
           {speech.supported ? <button type="button" className={styles.small} onClick={speech.listen}>{speech.listening ? '停止语音' : '语音输入'}</button> : null}
           {speech.speaking ? <button type="button" className={styles.small} onClick={speech.stop}>停止朗读</button> : null}
           <button type="button" className={styles.small} onClick={() => setPanel('tools')} aria-haspopup="dialog" aria-label="更多工具与恢复">•••</button>
@@ -513,7 +513,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     </AssistantPanel> : null}
     {panel === 'artworks' ? <AssistantPanel title="平台作品参考" eyebrow="ARTWORKS" close={() => setPanel(null)}><ArtworkSelection selected={selectedArtworks} onChange={setSelectedArtworks} disabled={busy || !!pendingChat} /></AssistantPanel> : null}
     {panel === 'tools' ? <AssistantPanel title="工具与恢复" eyebrow="TOOLS & STORAGE" close={() => setPanel(null)}>
-      <p>Enter 发送，Shift + Enter 换行。最多添加 4 张图片，WebP 会转成 PNG。离开页面不会取消已受理的生成。</p>
+      <p>Enter 发送，Shift + Enter 换行。最多添加 4 张 JPG、JPEG、PNG、WebP、GIF、BMP 或 AVIF 图片，动图取首帧。离开页面不会取消已受理的生成。</p>
       {speech.supported ? <fieldset>
         <legend>当前对话的语音设置</legend>
         <p>默认先在输入框确认转写。浏览器可能使用在线语音服务。</p>

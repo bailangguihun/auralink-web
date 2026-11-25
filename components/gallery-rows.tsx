@@ -11,6 +11,11 @@ import { StatePanel } from "@/components/state-panel";
 
 // Public asset dimensions only: no account data, tokens, or persistent storage.
 const ratios = new Map<string, number>();
+function catalogRatio(painting: PaintingSummary): number {
+  const { width, height } = painting.image ?? {};
+  return width && height && width > 0 && height > 0 ? artworkAspectRatio(width, height) : 4 / 3;
+}
+
 function prepareRatio(painting: PaintingSummary, signal: AbortSignal): Promise<number> {
   const source = resolveMediaUrl(painting.image?.contentUrl);
   if (!source) return Promise.resolve(4 / 3);
@@ -64,6 +69,10 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
   }, [prepared, batches]);
   const mountedVersion = useRef(viewportVersion);
   const restoring = useRef(savedViewport?.key === viewKey && Date.now() - savedViewport.savedAt < 20 * 60_000 ? savedViewport : undefined);
+  const [wasRestoring] = useState(() => Boolean(restoring.current));
+  const progressiveFirstBatch = !wasRestoring && Boolean(batches[0]?.some(painting =>
+    painting.image?.contentUrl && (!(Number(painting.image.width) > 0) || !(Number(painting.image.height) > 0))
+  ));
 
   useLayoutEffect(() => {
     const node = container.current;
@@ -93,7 +102,8 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
       const next = [...existing];
       for (let i = existing.length; i < batches.length; i++) {
         const batch = batches[i];
-        const sizes = await Promise.all(batch.map(painting => prepareRatio(painting, controller.signal)));
+        // Keep the initial rows stable without fetching images to discover dimensions.
+        const sizes = i === 0 && progressiveFirstBatch ? batch.map(catalogRatio) : await Promise.all(batch.map(painting => prepareRatio(painting, controller.signal)));
         if (controller.signal.aborted) return;
         next.push({ batch, ratios: sizes });
         preparedRef.current = [...next];
@@ -101,9 +111,10 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
       }
     })();
     return () => controller.abort();
-  }, [batches]);
+  }, [batches, progressiveFirstBatch]);
 
   const count = visiblePrepared.reduce((sum, entry) => sum + entry.batch.length, 0);
+  const firstBatchIds = useMemo(() => new Set(batches[0]?.map(painting => painting.paintingId)), [batches]);
   const pending = count < batches.reduce((sum, batch) => sum + batch.length, 0);
   const displayedIds = useRef(new Set<string>());
   const [presentationError, setPresentationError] = useState(false);
@@ -194,7 +205,7 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
 
   return <div ref={container} className="gallery-rows" data-gallery-restoring={Boolean(restoring.current)} role="region" aria-label="画作目录" aria-busy={pending} style={{ "--gallery-gap": `${gap}px` } as CSSProperties}>
     {rows.map((row, rowIndex) => <div className="gallery-row" key={row.paintings[0].paintingId} style={{ marginLeft: row.left, "--gallery-row-image-height": `${row.height}px` } as CSSProperties}>
-      {row.paintings.map((painting, index) => <div className="gallery-row-item" data-painting-id={painting.paintingId} key={painting.paintingId} style={{ width: row.widths[index] }}>
+      {row.paintings.map((painting, index) => <div className="gallery-row-item" data-painting-id={painting.paintingId} data-progressive-images={progressiveFirstBatch && firstBatchIds.has(painting.paintingId) ? "" : undefined} key={painting.paintingId} style={{ width: row.widths[index] }}>
         {renderPainting(painting, rowIndex === 0)}
       </div>)}
     </div>)}

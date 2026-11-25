@@ -170,7 +170,9 @@ async function scenario(name, options, run) {
     }
     assert(['GET', 'HEAD'].includes(method), 'Only bounded synthetic favorite writes are permitted');
     if (url.pathname.startsWith('/api/v1/assets/')) {
-      const index = Math.max(0, Number.parseInt(url.pathname.split('/')[4].slice(-12), 10) - 1100), asset = assets[index % assets.length];
+      const number = Number.parseInt(url.pathname.split('/')[4].slice(-12), 10);
+      const index = Math.max(0, number - 1100), asset = assets[index % assets.length];
+      if (number >= 1100 && number < 1112 && state.firstImageGate) await state.firstImageGate;
       if (index >= 12 && state.appendImageGate) await state.appendImageGate;
       if (state.slow) await sleep(state.slow);
       if (state.broken && index === 0) { await route.fulfill({ status: 404, headers, body: '' }); return; }
@@ -354,12 +356,22 @@ try {
     await cards(page).first().scrollIntoViewIfNeeded(); await shot('ready', false);
   });
   await scenario('missing-dimensions', { missing: true, slow: 550, queryDelay: 350 }, async ({ page, shot }) => {
-    await page.locator('.loading-section').first().waitFor(); await shot('skeleton');
     const first = await geometry(page, 12);
     for (const card of await cards(page).all()) { await card.scrollIntoViewIfNeeded(); await card.locator('[data-image-state="ready"]').waitFor(); }
     assertStable(first, await geometry(page, 12));
     await moreButton(page).click(); const second = await geometry(page, 24); assertStable(first, second);
     await page.evaluate(() => scrollTo(0, 0)); await shot('resolved');
+  });
+  let releaseFirstImages;
+  const firstImageGate = new Promise(resolve => { releaseFirstImages = resolve; });
+  await scenario('first-batch-visible-before-images', { missing: true, firstImageGate }, async ({ page }) => {
+    try {
+      const first = cards(page).first();
+      await first.getByRole('link', { name: /查看.*详情/ }).click({ trial: true, timeout: 5000 });
+      assert.equal(await cards(page).count(), 12);
+      assert.equal(await first.locator('[data-image-state="ready"]').count(), 0);
+    } finally { releaseFirstImages(); }
+    await cards(page).first().locator('[data-image-state="ready"]').waitFor();
   });
   await scenario('failed-and-extreme', { missing: true, broken: true, noImage: true }, async ({ page, state, shot }) => {
     await geometry(page, 12);
@@ -441,7 +453,7 @@ try {
       await target.evaluate(element => scrollTo(0, element.getBoundingClientRect().top + scrollY - 120));
       const offset = (await target.boundingBox()).y, before = catalogCalls(state).length;
       await target.locator('a').first().click(); await page.waitForURL(/\/gallery\/[^/]+$/);
-      await page.getByRole('heading', { name: '隔离详情山水', exact: true }).waitFor();
+      await page.getByRole('heading', { name: '隔离详情山水', exact: true, level: 1 }).waitFor();
       await page.getByRole('link', { name: '返回画廊', exact: true }).click(); await page.waitForURL(/\/gallery$/);
       await geometry(page, 24);
       await page.waitForFunction(({ id, offset }) => {
@@ -480,7 +492,7 @@ try {
     const offset = (await target.boundingBox()).y;
     const callsBefore = catalogCalls(state).length;
     await target.locator('a').first().click(); await page.waitForURL(/\/gallery\/[^/]+$/);
-    await page.getByRole('heading', { name: '隔离详情山水', exact: true }).waitFor();
+    await page.getByRole('heading', { name: '隔离详情山水', exact: true, level: 1 }).waitFor();
     await page.getByRole('link', { name: '返回画廊', exact: true }).click(); await page.waitForURL(/\/gallery$/);
     await geometry(page, 24);
     await page.waitForFunction(({ id, offset }) => {

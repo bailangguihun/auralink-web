@@ -100,6 +100,8 @@ export function startPresentation(root: HTMLElement, options: Options = {}): Pre
     if (scopes.some(scope => Array.from(scope.querySelectorAll<HTMLElement>(pendingSelector)).some(participating))) { stableFrames = 0; return; }
     let pendingImages = false;
     for (const scope of scopes) for (const image of scope.querySelectorAll<HTMLImageElement>("img")) {
+      // Images with reserved layout can load after their controls are exposed.
+      if (image.closest("[data-progressive-images]")) continue;
       if (!participating(image) || !(image.currentSrc || image.src)) continue;
       if (image.loading === "lazy") image.loading = "eager";
       const source = image.currentSrc || image.src;

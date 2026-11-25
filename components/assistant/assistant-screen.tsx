@@ -13,7 +13,7 @@ import { subscribeAssistant } from '@/lib/assistant-stream';
 import { useAssistantAccess } from './use-assistant-access';
 import { useAssistantAttachments } from './use-assistant-attachments';
 import { assistantImageAccept, assistantImageFile, isAssistantImageInput } from '@/lib/assistant-image-input';
-import { PrivateAttachment } from './private-attachment';
+import { PrivateAttachment, UploadingAttachment } from './private-attachment';
 import { AssistantStorage } from './assistant-storage';
 import { useBrowserSpeech } from './use-browser-speech';
 import { ArtworkSelection } from './artwork-selection';
@@ -199,6 +199,7 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
   const [unconfirmedChat, setUnconfirmedChat] = useState(false);
   const [outgoing, setOutgoing] = useState<{ text: string; attachmentIds: string[]; inputMessageId?: string } | null>(null);
   const draft = useAssistantAttachments(id, revision, ledger, access); const attachments = draft.attachments;
+  const [uploadingImage, setUploadingImage] = useState<{ name: string; file?: File } | null>(null);
   const messages = usePage<Message>(`/sessions/${enc(id)}/messages/page?branchId=${enc(branchId)}`, access, row => row.id, revision, true);
   const runs = usePage<Run>(status.executionAvailable ? `/sessions/${enc(id)}/runs/page?branchId=${enc(branchId)}` : null, access, row => row.id, revision);
   const active = usePage<Run>(status.executionAvailable ? `/sessions/${enc(id)}/runs/page?activeOnly=true` : null, access, row => row.id, revision + activityTick, false, true);
@@ -370,7 +371,19 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
     });
   };
   const uploadDisabled = busy || !generationReady || draft.loading || attachments.length >= 4 || draft.hasMore || !!pendingChat;
-  const upload = async (file: File | undefined) => { if (file) await act(async () => draft.upload(await assistantImageFile(file, file.name))); };
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    await act(async () => {
+      setUploadingImage({ name: file.name });
+      try {
+        const prepared = await assistantImageFile(file, file.name);
+        setUploadingImage({ name: prepared.name, file: prepared });
+        await draft.upload(prepared);
+      } finally {
+        setUploadingImage(null);
+      }
+    });
+  };
   const pasteImage = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const images = Array.from(event.clipboardData.files).filter(isAssistantImageInput);
     if (!images.length) return;
@@ -473,7 +486,8 @@ function BranchWorkspace({ id, branchId, status, registry, generationReady, sess
       {draft.notice ? <p role="status">{draft.notice}</p> : null}
       {draft.pending.map(item => <p key={item.scope} role="status">{item.state === 'uploading' ? '上次上传仍未完成。可核对状态，或明确移除后重新选择图片。' : '上次图片尚未获服务器确认。请重新选择原文件；若文件从未被接受，刷新后无法恢复本地字节。'}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void draft.refresh()}>核对上传状态</button>{item.id ? <button type="button" className={styles.small} disabled={busy} onClick={() => void act(() => draft.remove(item.id!, item.scope))}>移除未完成上传</button> : null}</p>)}
 
-      {attachments.filter(image => !outgoing?.attachmentIds.includes(image.id)).map(image => <div className={styles.draftImage} key={image.id}><PrivateAttachment id={image.id} />{image.draftExpiresAt ? <small className={styles.meta}>未发送草稿有效期至 {assistantDate(image.draftExpiresAt).toLocaleString('zh-CN')}</small> : null}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void act(() => draft.remove(image.id))}>移除待发送图片</button></div>)}
+      {uploadingImage ? <div className={styles.draftImage}><UploadingAttachment {...uploadingImage} /></div> : null}
+      {attachments.filter(image => !outgoing?.attachmentIds.includes(image.id)).map(image => <div className={styles.draftImage} key={image.id}><PrivateAttachment id={image.id} knownAttachment={image} localFile={draft.localFiles.get(image.id)} />{image.draftExpiresAt ? <small className={styles.meta}>未发送草稿有效期至 {assistantDate(image.draftExpiresAt).toLocaleString('zh-CN')}</small> : null}<button type="button" className={styles.small} disabled={busy || draft.loading} onClick={() => void act(() => draft.remove(image.id))}>移除待发送图片</button></div>)}
       {draft.hasMore ? <button type="button" className="button" disabled={draft.loading} onClick={() => void draft.more()}>加载更多待发送图片</button> : null}
       {attachments.length > 4 || draft.hasMore ? <p role="alert">当前会话有超过四张待发送图片。请读取并移除多余图片后再发送；不会静默遗漏或自动删除。</p> : null}
       {attachments.length && !selectedModel?.capabilities.images ? <p role="alert">所选模型不支持图片，请明确选择支持图片的模型；不会丢弃图片或自动切换模型。</p> : null}

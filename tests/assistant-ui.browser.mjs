@@ -23,6 +23,7 @@ async function scenario(name,fn,options={}) {
   if(u.origin===api){
    if(method==='OPTIONS')return route.fulfill({status:204,headers:{'access-control-allow-origin':web,'access-control-allow-methods':'GET,POST,PATCH,DELETE,OPTIONS','access-control-allow-headers':'authorization,content-type'}});
    const response=responseFor(state,method,u,req.postData()?.startsWith('{')?req.postDataJSON():null);
+   if(method==='POST'&&u.pathname.endsWith('/attachments'))await state.uploadGate;
    if(response.delayMs)await sleep(response.delayMs);
    try {if(response.abort)await route.abort('failed');else await route.fulfill({status:response.status,contentType:response.contentType,headers:{'access-control-allow-origin':web,'cache-control':'no-store'},body:Buffer.isBuffer(response.body)||typeof response.body==='string'?response.body:JSON.stringify(response.body)});}catch{/* Deliberate page close may cancel a fixture read. */}return;
   }
@@ -89,6 +90,40 @@ try {
   assert.equal(state.writes.length,1);
   assert.match(state.writes[0].path,/\/attachments$/);
  });
+ await scenario('upload-previews-locally-and-uses-confirmed-receipt',async({page,state})=>{
+  let releaseUpload;
+  state.uploadGate=new Promise(resolve=>{releaseUpload=resolve;});
+  const form=page.getByRole('form',{name:'发送消息'});
+  const send=page.getByRole('button',{name:'发送消息',exact:true});
+  const input=page.getByRole('textbox',{name:'消息',exact:true});
+  const picker=page.getByLabel('添加图片',{exact:true});
+  const draftReads=()=>state.requests.filter(request=>request.path.endsWith('/attachments/draft')).length;
+  await picker.waitFor();
+  await until(()=>picker.isEnabled(),'Draft is ready before the upload starts');
+  const initialDraftReads=draftReads();
+  try {
+   await picker.setInputFiles({name:'本地预览.png',mimeType:'image/png',buffer:png});
+   await form.getByText('上传中…',{exact:true}).waitFor();
+   const local=form.getByRole('img',{name:'本地预览.png',exact:true});
+   await local.waitFor();
+   assert.match(await local.getAttribute('src'),/^blob:/);
+   await input.fill('上传时可以继续输入');
+   assert.equal(await input.inputValue(),'上传时可以继续输入');
+   assert(await send.isDisabled());
+   await input.press('Enter');
+   assert.equal(state.writes.filter(write=>write.path.endsWith('/runs')).length,0);
+  } finally {
+   releaseUpload();
+  }
+
+  const attachment=form.getByTestId(`attachment-${id(80)}`).getByRole('img').first();
+  await attachment.waitFor();
+  assert.match(await attachment.getAttribute('src'),/^blob:/);
+  await until(()=>send.isEnabled(),'Server acknowledgement enables sending');
+  assert.equal(draftReads(),initialDraftReads);
+  assert.equal(state.requests.filter(request=>request.method==='GET'&&request.path.includes(`/attachments/${id(80)}`)).length,0);
+  assert.equal(state.writes.filter(write=>write.path.endsWith('/attachments')).length,1);
+ },{uploadReceiptWithoutExpiry:true});
  await scenario('send-immediately-moves-draft-into-conversation',async({page,state})=>{
   const input=page.getByRole('textbox',{name:'消息',exact:true});
   await input.fill('分析这张画');

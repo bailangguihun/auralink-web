@@ -35,18 +35,20 @@ function MetricPanel({ name, title, metric, children, ruleBased = false, wide = 
   </section>;
 }
 
-function PaintingView() {
+function PaintingView({ active }: { active: boolean }) {
   const statistics = useKnowledgeResource(KNOWLEDGE_STATISTICS_KEY, api.paintingStatistics);
   if (statistics.loading && !statistics.data) return <LoadingSection label="正在读取画作统计" onRetry={statistics.retry}><KnowledgeSkeleton /></LoadingSection>;
   if (statistics.error) return <ResourceFailure {...statistics} error={statistics.error} subject="画作统计" />;
   if (!statistics.data) return null;
   const { population, authorNames, metrics } = statistics.data;
-  return <div id="knowledge-paintings" role="tabpanel" aria-labelledby="knowledge-tab-paintings">
+  return <>
     {statistics.loading ? <LoadingStatus label="正在更新统计，暂保留当前已读取的数据" /> : null}
-    <div className="knowledge-counts content-reveal">
-      <section className="knowledge-count glass-panel"><span>国画作品数</span><strong>{format.format(population.count)}</strong></section>
-      <section className="knowledge-count glass-panel"><span>作者名称数</span><strong>{format.format(authorNames.count)}</strong></section>
-    </div>
+    <ContentReveal entryKey={String(active)} label="国画统计概览">
+      <div className="knowledge-counts">
+        <section className="knowledge-count glass-panel"><span>国画作品数</span><strong>{format.format(population.count)}</strong></section>
+        <section className="knowledge-count glass-panel"><span>作者名称数</span><strong>{format.format(authorNames.count)}</strong></section>
+      </div>
+    </ContentReveal>
     {population.count === 0 ? <StatePanel kind="empty" title="暂无可浏览画作" /> : <div className="knowledge-grid knowledge-painting-grid">
       <MetricPanel name="geography" title="作者地域分布" metric={metrics.geography}>
         <RemoteMetricBrowser metric="geography" title="作者地域分布" unit={metrics.geography.unit} />
@@ -70,10 +72,10 @@ function PaintingView() {
         <RemoteMetricBrowser metric="sentimentByDynasty" title="朝代情感" unit={metrics.sentimentByDynasty.unit} display="points" />
       </MetricPanel>
     </div>}
-  </div>;
+  </>;
 }
 
-function PoetryExplorer({ graph }: { graph: PoetryGraph }) {
+function PoetryExplorer({ graph, active }: { graph: PoetryGraph; active: boolean }) {
   const counts = useMemo(() => poetrySnapshotCounts(graph.nodes), [graph.nodes]);
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -88,15 +90,19 @@ function PoetryExplorer({ graph }: { graph: PoetryGraph }) {
   const selectedLinks = useMemo(() => graph.links.filter((link) => link.source === selectedId || link.target === selectedId), [graph.links, selectedId]);
   const clearSelection = () => { setSelectedId(null); setSelectedEdge(null); setFocused(false); };
   const selectNode = (id: string) => { setSelectedId(id); setSelectedEdge(null); };
-  return <div id="knowledge-poetry" role="tabpanel" aria-labelledby="knowledge-tab-poetry">
-    <div className="knowledge-counts content-reveal">
-      <section className="knowledge-count glass-panel" title="按现有图谱中含“诗词”的分类条目统计，非已核实的诗作总数"><span>诗词作品数</span><strong>{format.format(counts.poems)}</strong></section>
-      <section className="knowledge-count glass-panel" title="按现有图谱中含“诗人”的分类名称去重统计，非已核实的作者总数"><span>作者名称数</span><strong>{format.format(counts.authorNames)}</strong></section>
-    </div>
+  return <>
+    <ContentReveal entryKey={String(active)} label="诗词图谱概览">
+      <div className="knowledge-counts">
+        <section className="knowledge-count glass-panel" title="按现有图谱中含“诗词”的分类条目统计，非已核实的诗作总数"><span>诗词作品数</span><strong>{format.format(counts.poems)}</strong></section>
+        <section className="knowledge-count glass-panel" title="按现有图谱中含“诗人”的分类名称去重统计，非已核实的作者总数"><span>作者名称数</span><strong>{format.format(counts.authorNames)}</strong></section>
+      </div>
+    </ContentReveal>
     {graph.nodeCount === 0 ? <StatePanel kind="empty" title="图谱快照为空" description="当前配置的快照未包含实体或关系。" /> : <>
       <section className="knowledge-graph-panel glass-panel" aria-label="诗词图谱浏览器">
         <header className="knowledge-graph-toolbar"><div><h2>{focused && selected ? `${selected.name} · 一跳邻域` : "诗词关系"}</h2><p>{shownNodes.length} 个实体 · {shownLinks.length} 条关系</p></div><div className="knowledge-graph-actions"><button className="button" disabled={!selectedId} onClick={() => setFocused((value) => !value)}>{focused ? "返回全图" : "聚焦一跳邻域"}</button><button className="button" disabled={!selectedId && !selectedEdge} onClick={clearSelection}>清除选择</button></div></header>
-        <PoetryChart nodes={shownNodes} links={shownLinks} selectedId={selectedId} focused={focused} onNode={selectNode} onEdge={setSelectedEdge} />
+        <ContentReveal entryKey={String(active)} label="诗词关系图">
+          <PoetryChart nodes={shownNodes} links={shownLinks} selectedId={selectedId} focused={focused} onNode={selectNode} onEdge={setSelectedEdge} />
+        </ContentReveal>
         {selectedEdge || selected ? <div className="knowledge-inspector" aria-live="polite">
           {selectedEdge ? <><span className="knowledge-eyebrow">关系详情</span><h3>{byId.get(selectedEdge.source)?.name || selectedEdge.source} — {byId.get(selectedEdge.target)?.name || selectedEdge.target}</h3><p><b>{selectedEdge.label || "未命名关系"}</b> · 权重 {selectedEdge.value}</p><p>{selectedEdge.detail || selectedEdge.summary || "快照未提供关系描述。"}</p></>
             : selected ? <><span className="knowledge-eyebrow">{selected.category || "未分类"} · {Math.max(0, (connected?.size || 1) - 1)} 个邻接实体</span><h3>{selected.name}</h3><p>{selected.description || "快照未提供实体描述。"}</p>{selectedLinks.length ? <details><summary>查看相邻关系 · {selectedLinks.length} 条</summary><ul className="knowledge-relations">{selectedLinks.map((link, index) => <li key={index}><button className="text-button" onClick={() => setSelectedEdge(link)}>{byId.get(link.source)?.name} — {byId.get(link.target)?.name}：{link.label || "未命名关系"}</button></li>)}</ul></details> : <p>此实体没有相邻关系。</p>}</>
@@ -112,14 +118,14 @@ function PoetryExplorer({ graph }: { graph: PoetryGraph }) {
         <nav className="pagination" aria-label="实体分页"><button className="button" disabled={paging.page === 0} onClick={() => setPage(paging.page - 1)}>上一页</button><span>第 {paging.page + 1} / {paging.pageCount} 页</span><button className="button" disabled={paging.page + 1 >= paging.pageCount} onClick={() => setPage(paging.page + 1)}>下一页</button></nav>
       </section>
     </>}
-  </div>;
+  </>;
 }
 
-function PoetryView() {
+function PoetryView({ active }: { active: boolean }) {
   const resource = useKnowledgeResource(KNOWLEDGE_GRAPH_KEY, api.poetryGraph);
   if (resource.loading && !resource.data) return <LoadingSection label="正在读取诗词图谱" onRetry={resource.retry}><KnowledgeSkeleton graph /></LoadingSection>;
   if (resource.error) return <ResourceFailure {...resource} error={resource.error} subject="诗词图谱" />;
-  return resource.data ? <PoetryExplorer graph={resource.data} /> : null;
+  return resource.data ? <PoetryExplorer graph={resource.data} active={active} /> : null;
 }
 
 export function KnowledgeScreen() {
@@ -129,9 +135,11 @@ export function KnowledgeScreen() {
   return <main className="page-shell module-page knowledge-page">
     <ModuleHeader module="knowledge" />
     <div className="knowledge-tabs" role="tablist" aria-label="知识库视图">{([['paintings', '国画统计'], ['poetry', '诗词图谱']] as const).map(([key, title]) => <button type="button" key={key} id={`knowledge-tab-${key}`} role="tab" aria-selected={view === key} aria-controls={`knowledge-${key}`} tabIndex={view === key ? 0 : -1} onKeyDown={(event) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) { event.preventDefault(); const next = event.key === "Home" ? "paintings" : event.key === "End" ? "poetry" : view === "paintings" ? "poetry" : "paintings"; selectView(next); document.getElementById(`knowledge-tab-${next}`)?.focus(); } }} onClick={() => selectView(key)}><strong>{title}</strong></button>)}</div>
-    <ContentReveal entryKey={view} label="知识库模块">
-      <div hidden={view !== "paintings"}><PaintingView /></div>
-      {poetryVisited ? <div hidden={view !== "poetry"}><PoetryView /></div> : null}
-    </ContentReveal>
+    <div id="knowledge-paintings" role="tabpanel" aria-labelledby="knowledge-tab-paintings" hidden={view !== "paintings"}>
+      <PaintingView active={view === "paintings"} />
+    </div>
+    <div id="knowledge-poetry" role="tabpanel" aria-labelledby="knowledge-tab-poetry" hidden={view !== "poetry"}>
+      {poetryVisited ? <PoetryView active={view === "poetry"} /> : null}
+    </div>
   </main>;
 }

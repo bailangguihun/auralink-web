@@ -16,21 +16,25 @@ import { getArtworkPreview, isArtworkFlightActive, waitForArtworkFlight, type Ar
 import { getGalleryFeedSnapshot } from "@/lib/gallery-feed";
 import { INITIAL_GALLERY_QUERY } from "@/lib/gallery-order";
 import { galleryHref } from "@/lib/gallery-query";
-import { resolveMediaUrl } from "@/lib/media";
+import { resolveCatalogThumbnailUrl, resolveMediaUrl } from "@/lib/media";
 import { readPaintingDetail } from "@/lib/painting-detail-data";
 import type { PaintingDetail, PaintingImage } from "@/lib/types";
 
 /** Only reuse the public bitmap already displayed by this app, never a new media origin. */
 function previewImage(preview: ArtworkPreview): PaintingImage | null {
   try {
-    const path = new URL(preview.source).pathname;
+    const original = preview.originalSource ?? preview.source;
+    const path = new URL(original).pathname;
     const match = /^\/api\/v1\/assets\/([0-9a-f-]{36})\/content$/i.exec(path);
-    if (!match || resolveMediaUrl(path) !== preview.source) return null;
-    return {
+    if (!match || resolveMediaUrl(path) !== original) return null;
+    const image: PaintingImage = {
       assetId: match[1], mimeType: "", fileSize: null,
       width: preview.width, height: preview.height,
       contentUrl: path, downloadUrl: "",
+      thumbnailUrl: original === preview.source ? undefined : new URL(preview.source).pathname,
     };
+    if (image.thumbnailUrl && resolveCatalogThumbnailUrl(image) !== preview.source) return null;
+    return image;
   } catch { return null; }
 }
 
@@ -140,7 +144,7 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
   return (
     <div className="detail-layout" data-artwork-preview={!painting ? "true" : undefined} data-artwork-text-ready={String(textReady)}>
       <ArtworkViewer title={title} author={author} period={period} paintingId={paintingId} concealText={!textReady}
-        image={<MediaImage image={painting ? painting.image : preview!.image} alt={title} />}
+        image={<MediaImage image={painting ? painting.image : preview!.image} preferThumbnail={!painting} alt={title} />}
         error={painting ? error : null}
         actions={<>
           <Link className="button detail-back" data-artwork-return={paintingId} href={backHref}><ArrowIcon direction="left" /> 返回画廊</Link>

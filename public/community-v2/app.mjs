@@ -356,7 +356,9 @@ $('#sort-select').addEventListener('change', () => loadFeed(true));
 $('#admin-user-refresh').addEventListener('click', loadAdminUsers);
 $('#admin-post-refresh').addEventListener('click', loadAdminPosts);
 
-if (token) api('/api/user/profile').then(result => bootApp(result.data)).catch(error => showNotice(error.message,'error')); else showAuth();
+if (token) api('/api/user/profile').then(result => bootApp(result.data)).catch(error => {
+  if (!context.isCancelled(error)) { context.onStartupError?.(); showNotice(error.message,'error'); }
+}); else showAuth();
 
 window.communityApp = {
   api,

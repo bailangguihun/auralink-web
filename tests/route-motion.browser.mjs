@@ -95,7 +95,24 @@ async function scenario(name, options, run) {
   if (options.fastDeadline) { await page.clock.install(); await page.clock.resume(); }
   page.on('pageerror', error => record.errors.push(error.message));
   const go = path => page.goto(web + path, { waitUntil: 'domcontentloaded' });
-  const ready = () => page.locator('.route-content[data-route-phase="ready"]').waitFor({ state: 'attached', timeout: 35000 });
+  const ready = async () => {
+    await page.locator('.route-content[data-route-phase="ready"]').waitFor({ state: 'attached', timeout: 35000 });
+    const path = new URL(page.url()).pathname;
+    if (path === '/gallery') {
+      await page.locator('main[data-gallery-ready="true"]').waitFor();
+      await page.locator('[data-content-label="画廊结果"][data-content-phase="ready"]').waitFor();
+    }
+    if (path === '/knowledge') {
+      await page.locator('[data-content-label="国画统计概览"][data-content-phase="ready"]').waitFor();
+      await page.waitForFunction(() => {
+        const panel = document.querySelector('#knowledge-paintings');
+        return panel?.querySelector('canvas') && !panel.querySelector('[aria-busy="true"], [data-page-ready="false"], [data-content-phase="preparing"], [data-content-phase="entering"]');
+      });
+    }
+    if (path === '/community') {
+      await page.getByTestId('community-v2').locator('.view:not(.hidden)[data-content-phase="ready"]').waitFor();
+    }
+  };
   const hidden = async () => {
     // A production hydration can replace the SSR node between locator resolution
     // and evaluation. Inspect the current connected root after styles apply.
@@ -131,13 +148,32 @@ async function scenario(name, options, run) {
 }
 
 try {
-  await scenario('refresh-waits-for-all-data-and-staggers', {}, async ({ page, gate, seen, go, hidden, ready, record }) => {
-    const held = gate('/api/v1/paintings/daily');
-    await go('/gallery'); await seen(held); record.waiting = await hidden();
-    await page.locator('.gallery-row').first().waitFor({ state: 'attached' });
-    await hidden(); held.release.resolve();
-    await page.waitForFunction(() => window.__reveals.length > 3);
+  await scenario('gallery-shell-and-cards-survive-slow-daily-and-image', {}, async ({ page, gate, seen, go, record }) => {
+    const list = gate('/api/v1/paintings');
+    const daily = gate('/api/v1/paintings/daily');
+    const image = gate(`/api/v1/assets/${id(1091)}/content`);
+    await go('/gallery'); await seen(list); await seen(daily);
+    const gallery = page.locator('main[data-gallery-ready]');
+    const heading = gallery.getByRole('heading', { name: '笔墨之间，自有天地' });
+    const search = gallery.getByRole('searchbox', { name: '关键词', exact: true });
+    assert(await heading.isVisible(), 'The gallery heading is visible before either API responds');
+    assert(await search.isEditable(), 'The filter is usable while requests are in flight');
+    await gallery.getByRole('status').filter({ hasText: '正在读取画作目录' }).waitFor();
+    await page.screenshot({ path: `${output}/gallery-shell.png` });
+    list.release.resolve(); await seen(image);
+    const title = page.getByRole('heading', { name: '隔离画作 2', exact: true });
+    await title.waitFor({ timeout: 5000 });
+    assert(await gallery.getByRole('status').filter({ hasText: '正在选择今日画作' }).isVisible());
+    assert(await page.locator(`.gallery-row-item[data-painting-id="${id(91)}"] img`).evaluate(img => !img.complete));
     record.animations = await page.evaluate(() => window.__reveals);
+    assert(record.animations.some(item => item.id === 'artlive-content-reveal' && item.label === '画廊结果'));
+    await page.screenshot({ path: `${output}/gallery-progressive.png` });
+    daily.release.resolve(); image.release.resolve();
+    await page.getByRole('heading', { name: '每日隔离山水' }).waitFor();
+  });
+  await scenario('gallery-result-staggers-and-filters-locally', {}, async ({ page, go, ready, record }) => {
+    await go('/gallery'); await ready();
+    record.animations = await page.evaluate(() => window.__reveals.filter(item => item.label === '画廊结果'));
     const groups = record.animations;
     assert(groups.every(group => group.frames[0].opacity === 0 && group.frames[1].translate === '0 0'));
     assert(groups.some(group => group.timing.delay > 0));
@@ -147,48 +183,73 @@ try {
     assert(await page.locator('.route-content').evaluate(element => !element.inert));
     await page.screenshot({ path: `${output}/gallery-ready.png` });
     // Same-page filtering must not restart the whole entrance.
-    const count = groups.length;
     await page.getByRole('searchbox', { name: '关键词', exact: true }).fill('新查询');
     await page.getByRole('button', { name: '检索画作', exact: true }).click();
     await page.getByRole('heading', { name: '新查询 1', exact: true }).waitFor();
-    assert.equal(await page.evaluate(() => window.__reveals.filter(item => item.id === 'artlive-route-reveal').length), count);
-    assert(await page.evaluate(() => window.__reveals.some(item => item.id === 'artlive-content-reveal')));
+    assert(await page.evaluate(() => window.__reveals.every(item => item.id === 'artlive-content-reveal')));
+    assert(await page.evaluate(count => window.__reveals.filter(item => item.label === '画廊结果').length > count, groups.length));
   });
-  await scenario('offscreen-last-image-is-part-of-readiness', {}, async ({ page, gate, seen, go, hidden, ready }) => {
+  await scenario('gallery-offscreen-images-stay-lazy', { mobile: true }, async ({ page, gate, seen, go, ready }) => {
     const held = gate(`/api/v1/assets/${id(1101)}/content`);
-    await go('/gallery'); await seen(held); await hidden();
-    assert.equal(await page.locator('.gallery-row-item img[loading="lazy"]').count(), 0);
-    held.release.resolve(); await ready();
-    assert(await page.locator('.gallery-row-item img').evaluateAll(nodes => nodes.every(image => image.complete && image.naturalWidth > 0)));
+    await go('/gallery'); await ready();
+    const image = page.locator('.gallery-row-item img').last();
+    assert.equal(await image.getAttribute('loading'), 'lazy');
+    await image.scrollIntoViewIfNeeded(); await seen(held);
+    assert(await page.getByRole('heading', { name: '隔离画作 12', exact: true }).isVisible());
+    held.release.resolve();
+    await page.waitForFunction(() => [...document.querySelectorAll('.gallery-row-item img')].at(-1)?.naturalWidth > 0);
   });
-  await scenario('slow-data-does-not-reveal-after-five-seconds', {}, async ({ page, gate, seen, go, hidden, ready }) => {
+  await scenario('slow-gallery-data-shows-local-retry', { fastDeadline: true }, async ({ page, gate, seen, go, ready }) => {
     const held = gate('/api/v1/paintings'); await go('/gallery'); await seen(held);
-    // Deliberately cross the previous animation timeout; this is not a readiness sleep.
-    await page.waitForTimeout(5300); await hidden(); held.release.resolve(); await ready();
+    await page.clock.fastForward(11000); await page.clock.resume();
+    assert(await page.getByRole('searchbox', { name: '关键词', exact: true }).isEditable());
+    await page.getByRole('region', { name: '正在读取画作目录' }).getByRole('button', { name: '重新读取' }).waitFor();
+    assert.equal(await page.locator('.gallery-row-item').count(), 0);
+    held.release.resolve(); await ready();
   });
   await scenario('failure-shows-settled-error', {}, async ({ page, state, go, ready }) => {
     state.fail['/api/v1/paintings'] = 503; await go('/gallery'); await ready();
     assert(await page.getByRole('heading', { name: '画作目录加载失败' }).isVisible());
   });
+  await scenario('gallery-daily-retry-keeps-visible-results', {}, async ({ page, state, go, ready, record }) => {
+    state.fail['/api/v1/paintings/daily'] = 503;
+    await go('/gallery'); await ready();
+    await page.getByRole('heading', { name: '每日推荐暂不可用' }).waitFor();
+    const result = page.getByRole('heading', { name: '隔离画作 2', exact: true });
+    assert(await result.isVisible());
+    const catalogReads = () => record.calls.filter(call => call.path === '/api/v1/paintings' && call.method === 'GET').length;
+    const count = catalogReads();
+    delete state.fail['/api/v1/paintings/daily'];
+    await page.getByRole('button', { name: '重新读取推荐' }).click();
+    await page.getByRole('heading', { name: '每日隔离山水' }).waitFor();
+    assert(await result.isVisible());
+    assert.equal(catalogReads(), count);
+  });
   await scenario('broken-image-fallback-does-not-block', { brokenImage: true }, async ({ page, go, ready }) => {
     await go('/gallery'); await ready(); assert(await page.locator('.media-fallback').count() > 0);
   });
-  await scenario('rapid-navigation-discards-old-wait', {}, async ({ page, gate, seen, go, ready, hidden, record }) => {
+  await scenario('rapid-navigation-discards-old-wait', {}, async ({ page, gate, seen, go, ready, record }) => {
     const held = gate('/api/v1/paintings');
     await go('/about'); await ready();
     await page.locator('.primary-nav a[href="/gallery"]').click();
-    await seen(held); await page.waitForURL('**/gallery'); await hidden();
+    await seen(held); await page.waitForURL('**/gallery');
+    await page.getByRole('heading', { name: '笔墨之间，自有天地' }).waitFor();
     await page.locator('.primary-nav a[href="/about"]').click(); await page.waitForURL('**/about'); await ready();
     held.release.resolve();
-    record.routes = await page.evaluate(() => window.__reveals.map(item => item.path));
-    assert(!record.routes.includes('/gallery')); assert.equal(await page.locator('.route-content').getAttribute('data-route-path'), '/about');
+    record.reveals = await page.evaluate(() => window.__reveals.map(({ path, label }) => ({ path, label })));
+    assert(!record.reveals.some(item => item.label === '画廊结果'));
+    assert.equal(await page.locator('.route-content').getAttribute('data-route-path'), '/about');
+    assert.equal(await page.locator('.gallery-row-item').count(), 0);
   });
   await scenario('refresh-restarts-entrance', {}, async ({ page, go, ready }) => {
     await go('/login'); await ready(); await page.reload({ waitUntil: 'domcontentloaded' }); await ready();
     assert(await page.evaluate(() => window.__reveals.length > 1));
   });
-  await scenario('mobile-reduced-motion-still-waits', { reduced: true, mobile: true }, async ({ page, gate, seen, go, hidden, ready }) => {
-    const held = gate('/api/v1/paintings'); await go('/gallery'); await seen(held); await hidden();
+  await scenario('mobile-reduced-motion-shows-shell', { reduced: true, mobile: true }, async ({ page, gate, seen, go, ready }) => {
+    const held = gate('/api/v1/paintings'); await go('/gallery'); await seen(held);
+    assert(await page.getByRole('searchbox', { name: '关键词', exact: true }).isEditable());
+    await page.locator('main[data-gallery-ready]').getByRole('status').filter({ hasText: '正在读取画作目录' }).waitFor();
+    await page.screenshot({ path: `${output}/gallery-mobile-shell.png` });
     held.release.resolve(); await ready(); assert.equal(await page.evaluate(() => window.__reveals.length), 0);
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   });
@@ -215,27 +276,72 @@ try {
     });
   }
   await scenario('timeout-keeps-partial-content-hidden', { fastDeadline: true }, async ({ page, gate, seen, go, ready }) => {
-    const held = gate('/api/v1/paintings'); await go('/gallery'); await seen(held);
+    const held = gate('/api/v1/workflow/node-types'); await go('/studio'); await seen(held);
     await page.clock.fastForward(31000); await page.clock.resume();
     await page.getByRole('heading', { name: '页面暂未准备完成' }).waitFor();
     assert.equal(await page.locator('.route-content').getAttribute('data-route-phase'), 'error');
     held.release.resolve();
     await page.setViewportSize({ width: 1200, height: 900 });
     assert.equal(await page.locator('.route-content').getAttribute('data-route-phase'), 'error');
-    await page.locator('.primary-nav a[href="/about"]').click(); await ready();
+    await page.locator('.primary-nav a[href="/about"]').click(); await page.waitForURL('**/about'); await ready();
     assert.equal(await page.locator('.route-preparation-error').count(), 0);
   });
-  await scenario('community-shadow-initial-read-is-gated', {}, async ({ page, gate, seen, go, hidden, ready }) => {
-    const held = gate('/api/community/v2/api/posts'); await go('/community'); await seen(held); await hidden();
-    assert.equal(await page.locator('[data-testid="community-v2"]').getAttribute('data-page-ready'), 'false');
-    held.release.resolve(); await ready();
-    assert.equal(await page.locator('[data-testid="community-v2"]').getAttribute('data-page-ready'), 'true');
+  for (const mobile of [false, true]) await scenario(`community-shell-before-first-feed-${mobile?'mobile':'desktop'}`, { mobile }, async ({ page, gate, seen, go }) => {
+    const profile = gate('/api/user/profile');
+    const template = gate('/community-v2/template.html');
+    const posts = gate('/api/community/v2/api/posts');
+    await go('/community'); await seen(profile);
+    assert(await page.getByRole('main').getByRole('heading', { level: 1 }).isVisible());
+    assert.equal(await page.getByTestId('community-v2').count(), 0);
+    profile.release.resolve(); await seen(template);
+    assert(await page.getByRole('main').getByRole('heading', { level: 1 }).isVisible());
+    template.release.resolve(); await seen(posts);
+    const host = page.getByTestId('community-v2');
+    await host.locator(mobile ? '#community-menu' : '.topbar').waitFor();
+    await host.getByRole('status').filter({ hasText: '正在读取当前栏目' }).waitFor();
+    if (mobile) await host.locator('#community-menu').click();
+    assert(await host.locator('.topbar [data-view="rooms"]').isEnabled());
+    if (mobile) await host.locator('#community-menu').press('Escape');
+    assert.equal(await host.locator('#view-home').evaluate(node => getComputedStyle(node).visibility), 'hidden');
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({ path: `${output}/community-first-feed-${mobile?'mobile':'desktop'}-pending.png` });
+    posts.release.resolve(); await host.locator('#view-home[data-content-phase="ready"]').waitFor();
+    assert.equal(await host.getByRole('status').filter({ hasText: '正在读取当前栏目' }).count(), 0);
   });
-  await scenario('knowledge-waits-for-last-metric-and-chart', {}, async ({ page, gate, seen, go, hidden, ready }) => {
+  await scenario('community-startup-failure-shows-retry', {}, async ({ page, state, go }) => {
+    state.communityFail = { '/api/user/profile': true };
+    await go('/community');
+    await page.getByRole('heading', { name: '社区加载失败' }).waitFor();
+    assert(await page.getByRole('button', { name: '重新加载' }).isVisible());
+    assert(!await page.getByTestId('community-v2').isVisible());
+  });
+  await scenario('knowledge-independent-metrics-and-charts', {}, async ({ page, gate, seen, go, ready }) => {
     const held = gate('/api/v1/knowledge/painting-statistics/category');
-    await go('/knowledge'); await seen(held); await hidden(); held.release.resolve(); await ready();
+    await go('/knowledge'); await seen(held);
+    await page.locator('[data-knowledge-metric="sentiment"] canvas').waitFor();
+    assert(await page.getByRole('tab', { name: '国画统计' }).isVisible());
+    held.release.resolve(); await ready();
     assert(await page.locator('.knowledge-chart canvas').count() >= 2);
     assert.equal(await page.locator('.knowledge-chart[data-page-ready="false"]').count(), 0);
+  });
+  await scenario('knowledge-shell-and-counts-before-slow-metric', { mobile: true }, async ({ page, gate, seen, go }) => {
+    const profile = gate('/api/user/profile');
+    const statistics = gate('/api/v1/knowledge/painting-statistics');
+    const category = gate('/api/v1/knowledge/painting-statistics/category');
+    await go('/knowledge'); await seen(profile);
+    await page.getByRole('main').getByRole('heading', { level: 1 }).waitFor({ timeout: 3000 });
+    assert(await page.getByRole('button', { name: '国画统计' }).isDisabled());
+    profile.release.resolve(); await seen(statistics);
+    assert(await page.getByRole('tab', { name: '诗词图谱' }).isEnabled());
+    assert(await page.getByRole('status').filter({ hasText: '正在读取画作统计' }).isVisible());
+    statistics.release.resolve(); await seen(category);
+    await page.getByText('国画作品数', { exact: true }).waitFor({ timeout: 3000 });
+    await page.getByRole('status').filter({ hasText: '正在读取作品分类' }).waitFor();
+    await page.screenshot({ path: `${output}/knowledge-first-metric-pending.png` });
+    await page.getByRole('tab', { name: '诗词图谱' }).click();
+    await page.getByRole('heading', { name: '诗词关系' }).waitFor();
+    category.release.resolve();
+    assert(await page.getByRole('tab', { name: '诗词图谱', selected: true }).isVisible());
   });
   for(const mobile of [false,true])await scenario(`community-sidebar-only-${mobile?'mobile':'desktop'}`, {mobile}, async ({page,gate,seen,go,ready,record})=>{
     await go('/community');await ready();
@@ -307,9 +413,11 @@ try {
     held.release.resolve();await host.locator('.nav-link[data-view="favorites"]').click();await host.locator('#view-favorites[data-content-phase="ready"]').waitFor();
     assert(await host.locator('#view-favorites').isVisible());assert.equal(await host.getByRole('alert').filter({hasText:'内容暂未准备完成'}).count(),0);
   });
-  await scenario('community-deep-refresh-still-gates-page',{},async({page,gate,seen,go,hidden,ready})=>{
-    const held=gate('/api/community/v2/api/posts');await go('/community?view=favorites');await seen(held);await hidden();held.release.resolve();await ready();
-    assert(await page.locator('[data-testid="community-v2"] .topbar').isVisible());
+  await scenario('community-deep-refresh-keeps-sidebar-usable',{},async({page,gate,seen,go,ready})=>{
+    const held=gate('/api/community/v2/api/posts');await go('/community?view=favorites');await seen(held);
+    const host=page.getByTestId('community-v2');await host.locator('.topbar').waitFor();
+    assert.equal(await host.locator('#view-favorites').evaluate(node=>getComputedStyle(node).visibility),'hidden');
+    held.release.resolve();await ready();assert(await host.locator('#view-favorites').isVisible());
   });
   await scenario('community-detail-local-readiness-and-cancel',{},async({page,state,gate,seen,go,ready})=>{
     state.communityPosts=[{id:7,author:{id:42,username:'isolated',nickname:'隔离社区'},content:'详情内容',images:[],tags:[],likeCount:0,coinCount:0,commentCount:0,createTime:'2026-11-12 00:00:00'}];
@@ -330,6 +438,15 @@ try {
     await go('/studio'); await page.waitForURL('**/login?**'); await ready();
     assert.equal(await page.locator('.studio-page').count(), 0);
   });
+  await scenario('anonymous-progressive-routes-only-show-public-placeholders', { anonymous: true }, async ({ page, go, record }) => {
+    for (const path of ['/knowledge', '/community?view=favorites']) {
+      await go(path);
+      await page.waitForURL(url => url.pathname === '/login' && url.searchParams.get('next') === path);
+      assert.equal(await page.getByRole('tab', { name: '国画统计' }).count(), 0);
+      assert.equal(await page.getByTestId('community-v2').count(), 0);
+    }
+    assert(!record.calls.some(call => call.path.startsWith('/api/v1/knowledge/') || call.path === '/api/posts'));
+  });
   for (const route of ['studio', 'assistant', 'me', 'knowledge']) await scenario(`authenticated-${route}`, {}, async ({ page, go, ready }) => {
     await go('/'+route); await ready();
     assert.equal(await page.locator('.route-content').getAttribute('data-route-path'), '/'+route);
@@ -337,18 +454,19 @@ try {
   });
   for (const mobile of [false, true]) await scenario(`module-switch-cache-${mobile?'mobile':'desktop'}`, {mobile}, async ({page,gate,seen,go,ready,record}) => {
     const held=gate('/api/v1/knowledge/poetry-graph');await go('/knowledge');await ready();
-    assert.equal(await page.evaluate(()=>window.__reveals.filter(item=>item.id==='artlive-content-reveal').length),0,'Initial regions defer to page entrance');
+    assert(await page.evaluate(()=>window.__reveals.some(item=>item.id==='artlive-content-reveal'&&item.label==='国画统计概览')));
     const routeCount=await page.evaluate(()=>window.__reveals.filter(item=>item.id==='artlive-route-reveal').length);
     await page.getByRole('tab',{name:'诗词图谱'}).click();await seen(held);
-    const region=page.locator('[data-content-label="知识库模块"]');
-    assert.equal(await region.evaluate(element=>getComputedStyle(element).opacity),'0');
+    const region=page.getByRole('tabpanel',{name:'诗词图谱'});
+    assert(await region.getByRole('status').filter({hasText:'正在读取诗词图谱'}).isVisible());
     assert(await page.locator('.knowledge-tabs').isVisible());assert(await page.locator('.module-header').isVisible());
-    held.release.resolve();await region.locator('#knowledge-poetry').waitFor();await page.locator('[data-content-label="知识库模块"][data-content-phase="ready"]').waitFor();
+    const graph=page.locator('[data-content-label="诗词关系图"][data-content-phase="ready"]');
+    held.release.resolve();await graph.waitFor();
     const before=await page.evaluate(()=>window.__reveals.length);
-    await page.getByRole('tab',{name:'国画统计'}).click();await page.locator('[data-content-label="知识库模块"][data-content-phase="ready"]').waitFor();
+    await page.getByRole('tab',{name:'国画统计'}).click();await page.locator('[data-content-label="国画统计概览"][data-content-phase="ready"]').waitFor();
     assert(await page.evaluate(count=>window.__reveals.length>count,before));
     await page.getByRole('tab',{name:'国画统计'}).press('ArrowRight');await page.getByRole('tab',{name:'诗词图谱',selected:true}).waitFor();
-    await page.locator('[data-content-label="知识库模块"][data-content-phase="ready"]').waitFor();
+    await graph.waitFor();
     assert.equal(record.calls.filter(call=>call.path==='/api/v1/knowledge/poetry-graph').length,1,'Cached module is not refetched');
     assert.equal(await page.evaluate(()=>window.__reveals.filter(item=>item.id==='artlive-route-reveal').length),routeCount);
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
@@ -360,11 +478,11 @@ try {
     const input=page.getByRole('searchbox',{name:'搜索作者地域分布'}),form=page.getByRole('search',{name:'搜索作者地域分布'});
     await input.fill('新查询');assert.equal(await page.evaluate(()=>window.__reveals.length),count,'Draft typing does not start entrance');
     const held=gate('/api/v1/knowledge/painting-statistics/geography','新查询');await form.getByRole('button',{name:'搜索',exact:true}).click();await seen(held);
-    assert.equal(await scope.evaluate(element=>getComputedStyle(element).opacity),'0');assert(await input.isVisible());assert.equal(await input.inputValue(),'新查询');
+    assert.equal(await scope.count(),0);assert(await input.isVisible());assert.equal(await input.inputValue(),'新查询');
     assert(await page.locator('[data-knowledge-metric="dynasty"]').isVisible());
     held.release.resolve();await page.locator('[data-content-label="作者地域分布"][data-content-phase="ready"]').waitFor();
     await scope.getByText('新查询1',{exact:true}).waitFor();
-    const entries=await page.evaluate(()=>window.__reveals.filter(item=>item.id==='artlive-content-reveal'));
+    const entries=await page.evaluate(start=>window.__reveals.slice(start).filter(item=>item.id==='artlive-content-reveal'),count);
     assert(entries.length>0 && entries.every(item=>item.label==='作者地域分布'));
   });
   await scenario('metric-latest-request-wins', {}, async ({page,gate,seen,go,ready}) => {
@@ -385,7 +503,7 @@ try {
     delete state.fail['/api/v1/knowledge/painting-statistics/geography'];await scope.getByRole('button',{name:'重新加载'}).click();await scope.getByText('失败1',{exact:true}).waitFor();
   });
   await scenario('local-metric-search-and-sort', {}, async ({page,go,ready}) => {
-    await go('/knowledge');await ready();await page.getByRole('tab',{name:'诗词图谱'}).click();await page.locator('[data-content-label="知识库模块"][data-content-phase="ready"]').waitFor();
+    await go('/knowledge');await ready();await page.getByRole('tab',{name:'诗词图谱'}).click();await page.locator('[data-content-label="诗词关系图"][data-content-phase="ready"]').waitFor();
     const input=page.getByRole('searchbox',{name:'搜索关系标签'}),scope=page.locator('[data-content-label="关系标签"]');
     await input.fill('不存在');await page.getByRole('search',{name:'搜索关系标签'}).getByRole('button',{name:'搜索',exact:true}).click();await scope.getByRole('heading',{name:'暂无匹配项目'}).waitFor();
     await input.fill('');await scope.getByText('创作',{exact:true}).waitFor();await page.getByRole('combobox',{name:'关系标签排序'}).selectOption('name');await page.locator('[data-content-label="关系标签"][data-content-phase="ready"]').waitFor();
@@ -418,7 +536,8 @@ try {
   await scenario('local-reduced-motion-and-timeout', {reduced:true,fastDeadline:true}, async ({page,gate,seen,go,ready}) => {
     await go('/knowledge');await ready();const held=gate('/api/v1/knowledge/painting-statistics/geography','等待');
     await page.getByRole('searchbox',{name:'搜索作者地域分布'}).fill('等待');await page.getByRole('search',{name:'搜索作者地域分布'}).getByRole('button',{name:'搜索',exact:true}).click();await seen(held);
-    await page.clock.fastForward(31000);await page.clock.resume();await page.getByRole('heading',{name:'作者地域分布暂未准备完成'}).waitFor();
+    await page.clock.fastForward(11000);await page.clock.resume();
+    await page.getByRole('region',{name:'正在读取作者地域分布'}).getByRole('button',{name:'重新读取'}).waitFor();
     assert(await page.locator('.knowledge-tabs').isVisible());assert.equal(await page.locator('.route-content').getAttribute('data-route-phase'),'ready');
     held.release.resolve();assert.equal(await page.evaluate(()=>window.__reveals.length),0);
   });

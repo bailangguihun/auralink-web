@@ -29,7 +29,7 @@ type HiddenImage = { image: HTMLImageElement; visibility: string; priority: stri
 type Transfer = {
   from: string; to: string; paintingId: string; generation: number;
   direction: "open" | "return"; galleryKind?: GalleryOrigin["kind"];
-  source: string; bitmap: ArtworkRect; frame: ArtworkRect;
+  source: string; originalSource: string; bitmap: ArtworkRect; frame: ArtworkRect;
   overlay: HTMLDivElement; image: HTMLCanvasElement;
   scene: HTMLDivElement; scenery: HTMLElement; backgroundReady: boolean; sourceNode: HiddenImage; gestureHeld: boolean;
   phase: "waiting" | "moving" | "settling" | "fading"; arrived: boolean;
@@ -206,7 +206,11 @@ export function ArtworkTransition() {
         if (document.querySelector(".detail-page .state-error, .detail-page .state-empty")) fade(transfer);
         return;
       }
-      if ((target.currentSrc || target.src) !== transfer.source) { if (transfer.phase === "waiting") fade(transfer); return; }
+      const targetSource = target.currentSrc || target.src;
+      if (targetSource !== transfer.source && (target.dataset.artworkOriginal || targetSource) !== transfer.originalSource) {
+        if (transfer.phase === "waiting") fade(transfer);
+        return;
+      }
       if (transfer.target?.image !== target) {
         if (transfer.target) {
           const old = transfer.target;
@@ -321,13 +325,14 @@ export function ArtworkTransition() {
       // A stale viewport/query cannot safely replay the old gallery scene.
       // Keep native navigation rather than flying over the wrong background.
       if (!destinationGeometry) return;
+      const originalSource = source.dataset.artworkOriginal || source.currentSrc || source.src;
       if (!returning) {
         const gallery = source.closest<HTMLElement>("main.gallery-page");
         const scene = gallery && captureGalleryScene(gallery, source);
         origin.current = location.pathname === "/gallery" && scene
           ? { paintingId, generation, kind: owner?.matches(".daily-card") ? "daily" : "card", savedAt: Date.now(),
             bitmap, frame, viewport: viewportKey(), feedKey: feedKey(generation), scene } : null;
-        saveArtworkPreview({ paintingId, generation, source: source.currentSrc || source.src,
+        saveArtworkPreview({ paintingId, generation, source: source.currentSrc || source.src, originalSource,
           title: owner?.dataset.artworkTitle || source.alt || "无题", author: owner?.dataset.artworkAuthor || "佚名",
           period: owner?.dataset.artworkPeriod || "年代未详", width: source.naturalWidth, height: source.naturalHeight, savedAt: Date.now() });
       }
@@ -363,7 +368,7 @@ export function ArtworkTransition() {
       const transfer: Transfer = {
         from: location.pathname, to: destination.pathname, paintingId, generation: latest.current.generation,
         direction: returning ? "return" : "open", galleryKind: returning ? entry?.kind : undefined,
-        source: source.currentSrc || source.src, bitmap, frame, overlay, image, phase: "waiting", arrived: false, stableFrames: 0,
+        source: source.currentSrc || source.src, originalSource, bitmap, frame, overlay, image, phase: "waiting", arrived: false, stableFrames: 0,
         scene, scenery: destinationGeometry.scenery, backgroundReady: false, sourceNode, gestureHeld: false,
         observer, timer: setTimeout(() => fade(transfer), ARTWORK_READY_TIMEOUT_MS), raf: 0, animations: [],
         flown: false, finishFlight: () => {},

@@ -83,6 +83,7 @@ async function geometry(page, count, { singleColumn = false, fullyJustified = co
     const gridBox = element.getBoundingClientRect();
     return {
       width: gridBox.width, height: gridBox.height, top: gridBox.top + scrollY,
+      footerGap: document.querySelector('[aria-label="画作加载"]')?.getBoundingClientRect().top - gridBox.bottom,
       rows: [...element.querySelectorAll('.gallery-row')].map(row => {
         const box = row.getBoundingClientRect(), style = getComputedStyle(row);
         return { x: box.left - gridBox.left, y: box.top - gridBox.top, width: box.width, height: box.height, gap: parseFloat(style.columnGap) || 0,
@@ -124,9 +125,7 @@ async function geometry(page, count, { singleColumn = false, fullyJustified = co
     }
   });
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'No horizontal overflow');
-  const footer = await page.getByRole('region', { name: '画作加载', exact: true }).boundingBox();
-  const gridBox = await grid.boundingBox();
-  assert(footer && footer.y >= gridBox.y + gridBox.height - 1, 'Load control clears the finished bottom row');
+  assert(result.footerGap >= -1, `Load control clears the finished bottom row (gap ${result.footerGap}px)`);
   assert.equal(await page.getByRole('button', { name: '下一页', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '上一页', exact: true }).count(), 0);
   return { ...result, items: all, maxBottomDifference };
@@ -138,6 +137,21 @@ function assertStable(before, after) {
     const current = actual.get(previous.id); assert(current);
     for (const key of ['x', 'y', 'width', 'height']) assert(Math.abs(current[key] - previous[key]) <= 1, `Already displayed ${previous.title} keeps ${key}`);
   }
+}
+
+async function openArtwork(page, card) {
+  const link = card.locator('a').first();
+  await link.evaluate(element => {
+    // A real click may first scroll the title link into view.
+    element.addEventListener('click', () => {
+      window.__galleryReturnOffset = element.closest('[data-painting-id]').getBoundingClientRect().top;
+    }, { capture: true, once: true });
+  });
+  await link.click();
+  await page.waitForURL(/\/gallery\/[^/]+$/);
+  const offset = await page.evaluate(() => window.__galleryReturnOffset);
+  assert(Number.isFinite(offset));
+  return offset;
 }
 
 async function applyKeyword(page, keyword) {
@@ -510,8 +524,10 @@ try {
     const detailAndBack = async () => {
       const target = cards(page).nth(17), id = await target.getAttribute('data-painting-id');
       await target.evaluate(element => scrollTo(0, element.getBoundingClientRect().top + scrollY - 120));
-      const offset = (await target.boundingBox()).y, before = catalogCalls(state).length;
-      await target.locator('a').first().click(); await page.waitForURL(/\/gallery\/[^/]+$/);
+      const setupOffset = (await target.boundingBox()).y, before = catalogCalls(state).length;
+      const offset = await openArtwork(page, target);
+      const restoration = { id, setupOffset, offset };
+      (record.restorations ??= []).push(restoration);
       await page.getByRole('heading', { name: '隔离详情山水', exact: true, level: 1 }).waitFor();
       await page.getByRole('link', { name: '返回画廊', exact: true }).click(); await page.waitForURL(/\/gallery$/);
       await geometry(page, 24);
@@ -519,6 +535,7 @@ try {
         const element = document.querySelector(`[data-painting-id="${id}"]`);
         return element && Math.abs(element.getBoundingClientRect().top - offset) <= 8;
       }, { id, offset }, { timeout: 10000 });
+      restoration.returnedOffset = (await page.locator(`[data-painting-id="${id}"]`).boundingBox()).y;
       assert.equal(catalogCalls(state).length, before, 'Ordinary detail return still restores the current batches without refetching');
     };
     await geometry(page, 12);
@@ -544,24 +561,30 @@ try {
     await moreButton(page).click(); await geometry(page, 24);
     assert(moreCalls(state).some(call => call.query.includes('orderDate=2026-10-31')));
   });
-  await scenario('detail-restoration', {}, async ({ page, state, shot }) => {
-    await geometry(page, 12); await moreButton(page).click(); await geometry(page, 24);
+  for (const variant of [
+    { name: 'detail-restoration', options: {} },
+    { name: 'detail-restoration-missing-dimensions', options: { missing: true, mixed: true } },
+  ]) await scenario(variant.name, variant.options, async ({ page, state, shot, record }) => {
+    await geometry(page, 12); await moreButton(page).click();
+    const before = await geometry(page, 24);
     const target = cards(page).nth(17), id = await target.getAttribute('data-painting-id');
     await target.evaluate(element => scrollTo(0, element.getBoundingClientRect().top + scrollY - 120));
-    const offset = (await target.boundingBox()).y;
     const callsBefore = catalogCalls(state).length;
-    await target.locator('a').first().click(); await page.waitForURL(/\/gallery\/[^/]+$/);
+    const offset = await openArtwork(page, target);
     await page.getByRole('heading', { name: '隔离详情山水', exact: true, level: 1 }).waitFor();
     await page.getByRole('link', { name: '返回画廊', exact: true }).click(); await page.waitForURL(/\/gallery$/);
-    await geometry(page, 24);
-    await page.waitForFunction(({ id, offset }) => {
-      const element = document.querySelector(`[data-painting-id="${id}"]`); return element && Math.abs(element.getBoundingClientRect().top - offset) <= 8;
-    }, { id, offset }, { timeout: 10000 });
+    const after = await geometry(page, 24);
+    assertStable(before, after);
+    await page.waitForFunction(() => document.querySelector('[data-gallery-restoring="false"]'));
+    const returnedOffset = (await target.boundingBox()).y;
+    record.restoration = { id, offset, returnedOffset };
+    assert(Math.abs(returnedOffset - offset) <= 8, `The opened work returns to its viewport offset (${offset}px → ${returnedOffset}px)`);
     assert.equal(catalogCalls(state).length, callsBefore, 'Returning restores the loaded feed instead of fetching page zero');
     await shot('restored', false);
     await applyKeyword(page, '保留筛选'); await page.getByRole('heading', { name: '保留筛选 1', exact: true }).waitFor(); await geometry(page, 12);
     await cards(page).first().locator('a').first().click(); await page.waitForURL(/\/gallery\/[^/]+$/);
-    await page.getByRole('link', { name: '返回画廊', exact: true }).click(); await page.waitForURL(/\/gallery$/);
+    await page.getByRole('link', { name: '返回画廊', exact: true }).click();
+    await page.waitForURL(url => url.pathname === '/gallery' && url.searchParams.get('keyword') === '保留筛选');
     await page.getByRole('heading', { name: '保留筛选 1', exact: true }).waitFor(); await geometry(page, 12);
     assert.equal(await page.getByRole('searchbox', { name: '关键词', exact: true }).inputValue(), '保留筛选');
   });

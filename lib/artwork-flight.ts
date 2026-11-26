@@ -3,7 +3,7 @@
  * it never supplies permissions, favorites or private detail data.
  */
 export type ArtworkPreview = {
-  paintingId: string; generation: number; source: string;
+  paintingId: string; generation: number; source: string; originalSource?: string;
   title: string; author: string; period: string;
   width: number; height: number; savedAt: number;
 };

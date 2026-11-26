@@ -41,13 +41,16 @@ async function scenario(name,fn,options={}) {
 try {
  for(const mobile of [false,true])for(const route of ['gallery','knowledge','studio','assistant','me'])await scenario(`${mobile?'mobile':'desktop'}-${route}`,async({page,state,record,go,shot,noOverflow})=>{
   state.delays={'/api/user/profile':400,'/api/v1/paintings':1900,'/api/v1/paintings/daily':1100,'/api/v1/knowledge/painting-statistics':1800,'/api/v1/workflow/node-types':1700,'/api/v1/me/workflows':2600,'/api/v1/me/creations':2100,'/api/v1/assistant/status':1300,'/api/v1/me/favorites/paintings':1800};
-  await go('/'+route+(route==='assistant'?`?session=${id(1)}`:''));await page.locator('.paper-skeleton').first().waitFor({state:'attached'});assert.equal(await page.locator('.route-content').evaluate(el=>getComputedStyle(el).opacity),'0');await noOverflow();await shot('loading');
+  await go('/'+route+(route==='assistant'?`?session=${id(1)}`:''));await page.locator('.paper-skeleton').first().waitFor({state:'attached'});
+  await page.waitForFunction(opacity=>{const element=document.querySelector('.route-content');return element&&getComputedStyle(element).opacity===opacity;},['gallery','knowledge'].includes(route)?'1':'0');await noOverflow();await shot('loading');
   record.loadingGeometry=await page.evaluate(()=>Object.fromEntries(['.page-header','.gallery-filters','.daily-media','.knowledge-tabs'].flatMap(selector=>{const el=[...document.querySelectorAll(selector)].find(node=>node.getBoundingClientRect().height>0);if(!el)return [];const b=el.getBoundingClientRect();return [[selector,{x:b.x,y:b.y,width:b.width,height:b.height}]];})));
   assert(mobile ? await page.getByRole('button',{name:'打开导航'}).isVisible() : await page.getByRole('navigation',{name:'主导航'}).isVisible());
   if(route==='studio')assert(await page.getByRole('button',{name:'执行流程',exact:true,includeHidden:true}).isDisabled());
   if(route==='assistant')assert(await page.getByRole('button',{name:'发送',exact:true,includeHidden:true}).isDisabled());
   const selectors={gallery:'[aria-label="画作目录"] .painting-card h3',knowledge:'.knowledge-count strong',studio:'.creation-card h3',assistant:'[data-testid="assistant-message"]',me:'.profile-facts dd'};
-  await page.locator(selectors[route]).first().waitFor();await page.locator('.route-content[data-route-phase="ready"]').waitFor();await noOverflow();await shot('ready');
+  await page.locator(selectors[route]).first().waitFor();await page.locator('.route-content[data-route-phase="ready"]').waitFor();
+  if(route==='knowledge')await page.locator('.knowledge-chart[data-page-ready="true"] canvas').first().waitFor();
+  await noOverflow();await shot('ready');
   record.readyGeometry=await page.evaluate(()=>Object.fromEntries(['.page-header','.gallery-filters','.daily-media','.knowledge-tabs'].flatMap(selector=>{const el=[...document.querySelectorAll(selector)].find(node=>node.getBoundingClientRect().height>0);if(!el)return [];const b=el.getBoundingClientRect();return [[selector,{x:b.x,y:b.y,width:b.width,height:b.height}]];})));
   if(route==='gallery')assert(Math.abs(record.loadingGeometry['.daily-media'].height-record.readyGeometry['.daily-media'].height)<=1,'Image container remains stable');
   assert.equal(await page.locator('.paper-skeleton').count(),0,'No remaining decorative placeholders after ready');
@@ -56,13 +59,14 @@ try {
   record.reducedMotion=await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches);assert(record.reducedMotion);
  },{mobile});
  await scenario('gallery-independent-query-race',async({page,state,go,shot,noOverflow})=>{
-  state.delays['/api/v1/paintings/daily']=1700;await go('/gallery');await page.locator('.painting-card h3').first().waitFor({state:'attached'});assert.equal(await page.locator('.route-content').evaluate(el=>getComputedStyle(el).opacity),'0');await shot('preparing');await page.locator('.route-content[data-route-phase="ready"]').waitFor();
+  state.delays['/api/v1/paintings/daily']=1700;await go('/gallery');await page.locator('.painting-card h3').first().waitFor();assert(await page.getByText('正在选择今日画作',{exact:true}).isVisible());await shot('preparing');
   state.delay=u=>u.searchParams.get('keyword')==='旧查询'?1600:u.searchParams.get('keyword')==='新查询'?500:0;
   const input=page.getByRole('searchbox',{name:'关键词',exact:true});await input.fill('旧查询');await page.getByRole('button',{name:'检索画作'}).click();
   // Filters remount when the committed query changes; type into that new form.
   await page.waitForFunction(()=>document.querySelector('.gallery-filters input[name="keyword"]')?.defaultValue==='旧查询');
   await input.fill('新查询');await page.getByRole('button',{name:'检索画作'}).click();
-  assert.equal(await page.locator('.painting-card h3').count(),0,'Old query hidden immediately');await page.getByRole('heading',{name:'新查询 1',exact:true}).waitFor();await sleep(1800);assert.equal(await page.getByRole('heading',{name:/旧查询/}).count(),0);assert.equal(await input.inputValue(),'新查询');
+  await page.waitForFunction(()=>document.querySelector('.gallery-filters input[name="keyword"]')?.defaultValue==='新查询');
+  assert.equal(await page.locator('.painting-card h3').count(),0,'Old query hidden when the new query commits');await page.getByRole('heading',{name:'新查询 1',exact:true}).waitFor();await sleep(1800);assert.equal(await page.getByRole('heading',{name:/旧查询/}).count(),0);assert.equal(await input.inputValue(),'新查询');
   state.delays['/api/v1/paintings']=900;state.delay=null;await page.getByRole('button',{name:'加载更多画作',exact:true}).click();assert(await page.getByRole('region',{name:'画作加载'}).isVisible());await page.getByRole('heading',{name:'新查询 13',exact:true}).waitFor();await page.getByRole('heading',{name:'新查询 1',exact:true}).waitFor();await noOverflow();await shot('append');
  },{ignoreAbort:true});
  await scenario('profile-independent-failure-retry-account',async({page,state,go,shot})=>{
@@ -110,7 +114,10 @@ try {
   state.delays['/api/v1/paintings/'+id(90)]=1400;state.delays['/api/v1/assets/'+id(1090)+'/content']=1500;await go('/gallery/'+id(90));await page.getByRole('status',{includeHidden:true}).filter({hasText:'正在展开作品详情'}).waitFor({state:'attached'});await shot('detail-skeleton');await page.locator('.detail-info > header h1').waitFor();await noOverflow();await shot('image-pending');await sleep(2000);assert(await page.locator('main.detail-page .detail-media img').evaluate(el=>el.complete&&el.naturalWidth>0));await shot('image-ready');
  },{mobile:true});
  await scenario('rapid-route-navigation',async({page,state,go,noOverflow,shot})=>{
-  state.delays['/api/v1/paintings']=2000;await go('/gallery');await page.getByRole('status',{includeHidden:true}).filter({hasText:'正在读取画作目录'}).waitFor({state:'attached'});await page.getByRole('navigation',{name:'主导航'}).getByRole('link',{name:'知识库'}).click();await page.locator('.knowledge-count strong').first().waitFor();await sleep(2300);assert.equal(await page.locator('.painting-card').count(),0);await page.getByRole('navigation',{name:'主导航'}).getByRole('link',{name:'画廊',exact:true}).click();await page.locator('.painting-card h3').first().waitFor();await noOverflow();await shot('revisit');
+  state.delays['/api/v1/paintings']=2000;
+  const catalogRead=page.waitForRequest(request=>request.method()==='GET'&&new URL(request.url()).origin===api&&new URL(request.url()).pathname==='/api/v1/paintings');
+  await Promise.all([catalogRead,go('/gallery')]);
+  await page.getByRole('navigation',{name:'主导航'}).getByRole('link',{name:'知识库'}).click();await page.locator('.knowledge-count strong').first().waitFor();await sleep(2300);assert.equal(await page.locator('.painting-card').count(),0);await page.getByRole('navigation',{name:'主导航'}).getByRole('link',{name:'画廊',exact:true}).click();await page.locator('.painting-card h3').first().waitFor();await noOverflow();await shot('revisit');
  },{ignoreAbort:true});
 }finally{await browser.close();await writeFile(`${out}/BROWSER_RESULT.json`,JSON.stringify(report,null,2));}
 if(report.cases.some(c=>c.status!=='PASS')||report.blocked.length)process.exitCode=1;

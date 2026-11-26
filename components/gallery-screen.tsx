@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useMemo, useState } from "react";
 
 import { DailyPainting } from "@/components/daily-painting";
+import { hasArtworkTransition } from "@/components/artwork-transition";
 import { ModuleHeader } from "@/components/module-header";
 import { ContentReveal } from "@/components/content-reveal";
 import { LoadingSection, LoadingStatus, PaintingGridSkeleton, PendingIndicator } from "@/components/loading";
@@ -53,6 +54,7 @@ function GalleryContent() {
   const displayedCount = presentation.key === viewKey ? Math.min(presentation.count, fetchedCount) : 0;
   const preparing = displayedCount < fetchedCount;
   const busy = loading || catalog.loadingMore || preparing;
+  const artwork = () => hasArtworkTransition("/gallery", sessionIdentity.generation);
 
   const submitQuery = (nextQuery: PaintingQuery) => {
     resetGalleryViewport();
@@ -96,7 +98,7 @@ function GalleryContent() {
         <span className="catalog-status">{page ? `${page.totalElements} 幅可浏览画作` : error ? "目录读取失败" : "正在读取目录"}</span>
       </ModuleHeader>
 
-      <DailyPainting painting={daily} loading={dailyLoading} error={dailyError} onRetry={recommendation.retry} />
+      <DailyPainting painting={daily} loading={dailyLoading} error={dailyError} onRetry={recommendation.retry} artwork={artwork} />
 
       <form key={queryKey} className="gallery-filters glass-panel" onSubmit={applyFilters}>
         <label className="filter-search"><span className="sr-only">关键词</span><SearchIcon /><input name="keyword" type="search" maxLength={200} placeholder="搜索作品、作者、风格或意境" defaultValue={query.keyword} /></label>
@@ -115,19 +117,19 @@ function GalleryContent() {
       </form>
 
       {actionError ? <p className="inline-error" role="alert">收藏操作未完成：{actionError} <button className="text-button" onClick={() => setError(null)}>关闭提示</button></p> : null}
-      <ContentReveal entryKey={viewKey} ready={!loading && !preparing} label="画廊结果">
       {loading ? page ? <LoadingStatus label="正在更新当前目录，暂保留已读取的结果" /> : <LoadingSection label="正在读取画作目录" onRetry={catalog.retry}><PaintingGridSkeleton count={6} rows /></LoadingSection> : null}
-      {!loading && error ? <StatePanel kind="error" title="画作目录加载失败" description={`${error}${page ? " 当前保留同一查询上次成功读取的结果。" : ""}`} actionLabel="重新加载" onAction={() => { setError(null); catalog.retry(); }} /> : null}
-      {!loading && !error && page && fetchedCount === 0 ? <StatePanel kind="empty" title="暂未找到匹配的作品" description="请尝试减少筛选条件或使用其他关键词。" /> : null}
-      {catalog.notice ? <p className="gallery-notice" role="status">{catalog.notice}</p> : null}
-      {fetchedCount ? (
+      {page || error ? <ContentReveal entryKey={viewKey} ready={!loading && !preparing} label="画廊结果" artwork={artwork}>
+        {!loading && error ? <StatePanel kind="error" title="画作目录加载失败" description={`${error}${page ? " 当前保留同一查询上次成功读取的结果。" : ""}`} actionLabel="重新加载" onAction={() => { setError(null); catalog.retry(); }} /> : null}
+        {!loading && !error && page && fetchedCount === 0 ? <StatePanel kind="empty" title="暂未找到匹配的作品" description="请尝试减少筛选条件或使用其他关键词。" /> : null}
+        {catalog.notice ? <p className="gallery-notice" role="status">{catalog.notice}</p> : null}
+        {fetchedCount ? (
           <GalleryRows key={viewKey} batches={catalog.batches} viewKey={viewKey} restoreReady={!dailyLoading} onPrepared={onPrepared}
             renderPainting={(painting, priority) => {
               const renderedPainting = { ...painting, favorited: isFavorited(painting.paintingId, painting.favorited) };
               return <PaintingCard painting={renderedPainting} authenticated={authenticated} favoriteBusy={isFavoriteBusy(painting.paintingId)} onFavorite={toggleFavorite} masonry priority={priority} />;
             }} />
-      ) : null}
-      </ContentReveal>
+        ) : null}
+      </ContentReveal> : null}
       {page && fetchedCount > 0 ? <section className="gallery-load-more" aria-label="画作加载" aria-busy={busy}>
         <p className="gallery-progress" role="status">已展示 {displayedCount} / {page.totalElements} 幅</p>
         {catalog.moreError ? <p className="inline-error" role="alert">{catalog.moreError} 已展示的画作仍保留。</p> : null}

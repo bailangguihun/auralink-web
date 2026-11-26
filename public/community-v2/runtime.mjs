@@ -156,7 +156,7 @@ export async function mountCommunity(host, options) {
    if(inactive())return;
    closeMenu();const url=new URL(globalThis.location.href);url.searchParams.set('view',view);if(view!=='room')url.searchParams.delete('room');if(view!=='detail')url.searchParams.delete('post');globalThis.history.replaceState(globalThis.history.state,'',url);
    const main=body.querySelector('.main-content'),target=body.querySelector('#view-'+view);
-   if(main&&target&&(view!==previousView||['preparing','error'].includes(target.dataset.contentPhase))){
+   if(main&&target&&(!presentations.has(main)||view!==previousView||['preparing','error'].includes(target.dataset.contentPhase))){
     for(const [scope,stop] of presentations)if(scope!==main&&!target.contains(scope)){stop();presentations.delete(scope);}
     target.dataset.contentLabel='社区模块 '+view;context.present(main,ready,[target]);
    }
@@ -165,12 +165,13 @@ export async function mountCommunity(host, options) {
   onPost(id){if(inactive())return;const url=new URL(globalThis.location.href);url.searchParams.set('post',String(id));globalThis.history.replaceState(globalThis.history.state,'',url);},
   onReady(){
    if(inactive())return;
-   bootReady=true;updateReadiness();
+   bootReady=true;updateReadiness();options.onShellReady?.();
    if(journalProblem)instanceWindow.communityApp.showNotice(journalProblem,'error');
    if(params.get('post'))void runTask(instanceWindow.communityApp.openDetail(Number(params.get('post'))));
    else if(params.get('room'))void runTask(instanceWindow.roomFeature.openRoom(params.get('room')));
    else if(params.get('code'))void runTask(instanceWindow.roomFeature.joinPrivate(params.get('code')));
-  }
+  },
+  onStartupError(){if(!inactive())options.onShellError?.();}
  };
  mountPosts(context);mountRooms(context);mountVoice(context);
  const disposeDrafts=installDrafts(body,context,options);

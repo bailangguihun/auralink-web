@@ -81,7 +81,10 @@ async function scenario(name, options, run) {
     if (method === 'OPTIONS') { await route.fulfill({ status: 204, headers }); return; }
     const call = { method, path: u.pathname, query: u.search, authenticated: Boolean(request.headers().authorization), complete: false, aborted: false };
     state.calls.push(call); requests.set(request, call);
-    if (!['GET', 'HEAD'].includes(method) || ![...READS, '/api/user/profile', ...(options.assistant ? ASSISTANT_READS : [])].includes(u.pathname) && !u.pathname.startsWith('/api/v1/assets/')) {
+    const foregroundMetric = u.pathname.startsWith(STATS + '/') && new URL(page.url()).pathname === '/knowledge';
+    const allowedRead = [...READS, '/api/user/profile', ...(options.assistant ? ASSISTANT_READS : [])].includes(u.pathname)
+      || u.pathname.startsWith('/api/v1/assets/') || foregroundMetric;
+    if (!['GET', 'HEAD'].includes(method) || !allowedRead) {
       state.forbidden.push({ method, path: u.pathname }); await route.fulfill({ status: 405, headers, contentType: 'application/json', body: JSON.stringify({ message: 'Unpermitted fixture operation' }) }); return;
     }
     state.maxPendingReads = Math.max(state.maxPendingReads, state.calls.filter(c => READS.includes(c.path) && !c.complete && !c.aborted).length);
@@ -111,9 +114,9 @@ async function scenario(name, options, run) {
     await page.waitForURL(url => url.pathname === href);
     if (heading) await page.getByRole('heading', { name: heading, exact: true }).waitFor();
   };
-  const open = async (href = '/') => {
+  const open = async (href = '/', state = 'visible') => {
     await page.goto(web + href, { waitUntil: 'domcontentloaded' });
-    await page.locator('[data-navigation-page], main').first().waitFor();
+    await page.locator('[data-navigation-page], main').first().waitFor({ state });
     if (options.authenticated) await page.getByRole('button', { name: '退出', exact: true }).waitFor();
   };
   try {
@@ -157,6 +160,7 @@ try {
     assert.equal(state.maxPendingReads, 1);
     await navigate('/gallery', '笔墨之间，自有天地'); await page.locator('.gallery-painting-card').first().waitFor(); await pump(4);
     assert.equal(calls(CATALOG).length, 1); assert.equal(calls(DAILY).length, 1);
+    assert(!state.calls.some(call => call.path.startsWith(STATS + '/')), 'Metric panels only read after entering knowledge');
     await navigate('/knowledge'); await page.getByRole('tabpanel', { name: '国画统计' }).waitFor();
     await page.getByRole('tab', { name: '诗词图谱' }).click(); await page.getByRole('region', { name: '诗词图谱浏览器' }).waitFor(); await pump(4);
     assert.equal(calls(STATS).length, 1); assert.equal(calls(GRAPH).length, 1);
@@ -180,14 +184,14 @@ try {
   });
   await scenario('assistant-api-priority-and-unavailable-resume', { authenticated: true, assistant: true }, async ({ page, state, calls, gate, release, open, pump, until }) => {
     const status = gate(ASSISTANT_READS[0]); state.failures[ASSISTANT_READS[0]] = 503;
-    await open('/assistant'); await until(() => calls(ASSISTANT_READS[0]).some(c => !c.aborted), 'foreground assistant status'); await pump(12);
+    await open('/assistant', 'attached'); await until(() => calls(ASSISTANT_READS[0]).some(c => !c.aborted), 'foreground assistant status'); await pump(12);
     for (const path of READS) assert.equal(calls(path).length, 0, 'Assistant loading blocks background data');
     release(ASSISTANT_READS[0], status); await page.getByRole('heading', { name: '助手暂不可用', exact: true }).waitFor();
     await until(() => calls(GRAPH).some(c => c.complete), 'unavailable terminal state permits background queue');
     assert.equal(calls(ASSISTANT_READS[1]).length, 0); assert.equal(calls(ASSISTANT_READS[2]).length, 0);
   });
   await scenario('assistant-capability-api-priority', { authenticated: true, assistant: true }, async ({ calls, gate, release, open, pump, until }) => {
-    const models = gate(ASSISTANT_READS[1]); await open('/assistant'); await until(() => calls(ASSISTANT_READS[1]).length === 1, 'foreground model registry check'); await pump(12);
+    const models = gate(ASSISTANT_READS[1]); await open('/assistant', 'attached'); await until(() => calls(ASSISTANT_READS[1]).length === 1, 'foreground model registry check'); await pump(12);
     for (const path of READS) assert.equal(calls(path).length, 0, 'Capability loading blocks background data');
     release(ASSISTANT_READS[1], models); await until(() => calls(GRAPH).some(c => c.complete), 'completed capability check permits background queue');
     assert.equal(calls(ASSISTANT_READS[2]).length, 1);

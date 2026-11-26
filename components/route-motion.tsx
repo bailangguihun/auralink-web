@@ -6,9 +6,10 @@ import { useSession } from "@/components/session-provider";
 import { hasArtworkTransition } from "@/components/artwork-transition";
 import { startPresentation } from "@/lib/content-presentation";
 
-/** Keep the destination mounted and measurable, but hidden from the first SSR paint. */
+/** Routes own their entrance unless their sections reveal independently. */
 export function RouteMotion({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const progressive = pathname === "/gallery" || pathname === "/knowledge" || pathname === "/community";
   const { status, sessionIdentity } = useSession();
   const latest = useRef({ status, generation: sessionIdentity.generation });
   latest.current = { status, generation: sessionIdentity.generation };
@@ -17,7 +18,7 @@ export function RouteMotion({ children }: { children: ReactNode }) {
 
   useLayoutEffect(() => {
     const root = content.current;
-    if (!root) return;
+    if (!root || progressive) return;
     setFailedPath(null);
     const presentation = startPresentation(root, {
       kind: "route", page: true,
@@ -27,10 +28,10 @@ export function RouteMotion({ children }: { children: ReactNode }) {
       onTimeout: () => setFailedPath(pathname),
     });
     return presentation.cancel;
-  }, [pathname]);
+  }, [pathname, progressive]);
 
   return <>
-    <div ref={content} className="route-content" data-route-path={pathname} data-route-phase="preparing">{children}</div>
+    <div ref={content} className="route-content" data-route-path={pathname} data-route-phase={progressive ? "ready" : "preparing"}>{children}</div>
     {failedPath === pathname ? <main className="page-shell route-preparation-error"><section className="state-panel state-error" role="alert">
       <div><h1>页面暂未准备完成</h1><p>部分内容仍未完成读取，请重新载入，或通过顶部导航前往其他页面。</p>
         <button className="button button-primary" onClick={() => location.reload()}>重新载入页面</button></div>

@@ -3,6 +3,7 @@
 import { SessionLink as Link } from "@/components/session-link";
 
 import { ArrowIcon } from "@/components/icons";
+import { ContentReveal } from "@/components/content-reveal";
 import { DailyPaintingSkeleton, LoadingSection, LoadingStatus } from "@/components/loading";
 import { MediaImage } from "@/components/media-image";
 import type { PaintingSummary } from "@/lib/types";
@@ -12,6 +13,7 @@ type DailyPaintingProps = {
   loading: boolean;
   error?: string | null;
   onRetry?: () => void;
+  artwork?: () => boolean;
 };
 
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" });
@@ -24,24 +26,26 @@ function DailyHeading() {
 }
 
 /** Presentation only: the gallery retains ownership of the independent daily request. */
-export function DailyPainting({ painting, loading, error, onRetry }: DailyPaintingProps) {
+export function DailyPainting({ painting, loading, error, onRetry, artwork }: DailyPaintingProps) {
   const title = painting?.title || "无题";
 
   return <section className="daily-panel glass-panel" aria-label="每日一画">
     {painting ? (
-      <Link className="daily-card content-reveal" data-artwork-source={painting.paintingId} data-artwork-title={painting.title || "无题"} data-artwork-author={painting.authorName || "佚名"} data-artwork-period={painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"} data-artwork-link={painting.paintingId} href={`/gallery/${painting.paintingId}`} prefetch={false} aria-label={`查看${title}详情`}>
-        <div className="daily-media"><MediaImage image={painting.image} alt={title} loading="eager" /></div>
-        <div className="daily-copy">
-          <DailyHeading />
-          <h3 title={title}>{title}</h3>
-          <p className="daily-meta">
-            <span className="daily-author">{painting.authorName || "佚名"}</span><span aria-hidden="true">·</span>
-            <span className="daily-dynasty">{painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"}</span>
-          </p>
-          {painting.artisticConception ? <p className="daily-description">{painting.artisticConception}</p> : null}
-          <b className="daily-action">查看作品 <ArrowIcon /></b>
-        </div>
-      </Link>
+      <ContentReveal entryKey={painting.paintingId} label="每日一画" artwork={artwork}>
+        <Link className="daily-card" data-route-reveal="" data-artwork-source={painting.paintingId} data-artwork-title={painting.title || "无题"} data-artwork-author={painting.authorName || "佚名"} data-artwork-period={painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"} data-artwork-link={painting.paintingId} href={`/gallery/${painting.paintingId}`} prefetch={false} aria-label={`查看${title}详情`}>
+          <div className="daily-media" data-progressive-images=""><MediaImage image={painting.image} preferThumbnail alt={title} loading="eager" /></div>
+          <div className="daily-copy">
+            <DailyHeading />
+            <h3 title={title}>{title}</h3>
+            <p className="daily-meta">
+              <span className="daily-author">{painting.authorName || "佚名"}</span><span aria-hidden="true">·</span>
+              <span className="daily-dynasty">{painting.creationDynastyNormalized || painting.creationDynastyRaw || "年代未详"}</span>
+            </p>
+            {painting.artisticConception ? <p className="daily-description">{painting.artisticConception}</p> : null}
+            <b className="daily-action">查看作品 <ArrowIcon /></b>
+          </div>
+        </Link>
+      </ContentReveal>
     ) : loading ? (
       <LoadingSection label="正在选择今日画作" onRetry={onRetry}><DailyPaintingSkeleton /></LoadingSection>
     ) : (

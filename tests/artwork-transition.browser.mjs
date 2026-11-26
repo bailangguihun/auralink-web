@@ -19,7 +19,8 @@ assert(output, 'ARTWORK_BROWSER_OUTPUT is required');
 await mkdir(output, { recursive: true });
 const selected = process.env.ARTWORK_CASES?.split(',');
 const caseNames = [
-  'fast-round-trip', 'slow-detail-read', 'slow-route-code', 'slow-return-daily-read',
+  'fast-round-trip', 'catalog-thumbnail-round-trip', 'catalog-thumbnail-fallback',
+  'slow-detail-read', 'slow-route-code', 'slow-return-daily-read',
   'mobile-slow-round-trip', 'cold-route-beyond-five-seconds', 'user-cancellation-restores-content',
   'reduced-motion-keeps-navigation', 'session-change-clears-transfer', 'detail-read-failure-after-flight',
   'clipped-image-title-entry', 'undecoded-image-navigation', 'programmatic-scroll-keeps-flight',
@@ -36,6 +37,9 @@ if (selected) for (const name of selected) assert(caseNames.includes(name), `Unk
 const paintingId = id(90);
 const detailPath = `/gallery/${paintingId}`;
 const detailApi = `/api/v1/paintings/${paintingId}`;
+const originalImage = `/api/v1/assets/${id(1090)}/content`;
+const thumbnailFor = assetId => `/api/v1/assets/public-catalog-thumbnails/v1/${assetId}/${'a'.repeat(64)}.jpg`;
+const thumbnailImage = thumbnailFor(id(1090));
 const dailyApi = '/api/v1/paintings/daily';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -78,6 +82,15 @@ function adjustImageMetadata(value) {
     fileSize: artworkImage.bytes.length, mimeType: artworkImage.contentType,
   });
   for (const item of Object.values(value)) if (item && typeof item === 'object') adjustImageMetadata(item);
+}
+
+function addThumbnails(value, missingDimensions) {
+  if (!value || typeof value !== 'object' || Buffer.isBuffer(value)) return;
+  if (value.image?.assetId) {
+    value.image.thumbnailUrl = thumbnailFor(value.image.assetId);
+    if (missingDimensions) Object.assign(value.image, { width: null, height: null });
+  }
+  for (const item of Object.values(value)) if (item && typeof item === 'object') addThumbnails(item, missingDimensions);
 }
 
 async function scenario(name, options, run) {
@@ -269,7 +282,9 @@ async function scenario(name, options, run) {
     if (url.pathname === detailApi && options.detailDelayMs) {
       call.injectedDelayMs = options.detailDelayMs; await delay(options.detailDelayMs);
     }
-    const response = artworkImage && url.pathname.startsWith('/api/v1/assets/')
+    const response = options.thumbnailFailure && url.pathname === thumbnailImage
+      ? { status: 404, contentType: 'text/plain', body: '' }
+      : artworkImage && url.pathname.startsWith('/api/v1/assets/')
       ? { status: 200, contentType: artworkImage.contentType, body: artworkImage.bytes }
       : url.pathname === '/api/v1/critic/capability'
       ? { status: 200, contentType: 'application/json', body: { submissionAvailable: false, reason: 'Synthetic read-only fixture; model submissions disabled' } }
@@ -284,6 +299,9 @@ async function scenario(name, options, run) {
       }
     }
     adjustImageMetadata(response.body);
+    if (options.catalogThumbnails) {
+      addThumbnails(response.body, url.pathname === '/api/v1/paintings' && url.searchParams.get('page') === '1');
+    }
     try {
       await route.fulfill({ status: response.status, headers, contentType: response.contentType,
         body: typeof response.body === 'object' && !Buffer.isBuffer(response.body) ? JSON.stringify(response.body) : response.body });
@@ -509,9 +527,10 @@ async function scenario(name, options, run) {
       try { pathname = new URL(entry.url).pathname; } catch { return true; }
       return !((pathname === `${detailApi}/guide` && entry.text.includes('404'))
         || (pathname === `${detailApi}/critic` && entry.text.includes('503'))
+        || (pathname === thumbnailImage && options.thumbnailFailure && entry.text.includes('404'))
         || (pathname === detailApi && options.detailStatus && entry.text.includes(String(options.detailStatus))));
     });
-    assert.deepEqual(record.unexpectedConsole, [], 'Only the fixture guide-not-found and critic-unavailable HTTP errors are expected');
+    assert.deepEqual(record.unexpectedConsole, [], 'Only the HTTP errors injected by the fixture are expected');
     record.status = 'PASS';
     if (process.env.ARTWORK_CAPTURE_FRAMES === '1') await page.screenshot({ path: `${output}/${name}-final.png` });
   } catch (error) {
@@ -534,6 +553,43 @@ try {
   await scenario('fast-round-trip', {}, async ({ openGallery, openPainting, completedFlight, detailVisible, returnToGallery, deferredReads, cleared }) => {
     await openGallery(); await openPainting(); await completedFlight('open'); await detailVisible(); await cleared(); await deferredReads();
     await returnToGallery(); await completedFlight('return'); await cleared();
+  });
+  await scenario('catalog-thumbnail-round-trip', { catalogThumbnails: true }, async ({
+    page, openGallery, openPainting, completedFlight, detailVisible, returnToGallery, cleared, gate, release, record,
+  }) => {
+    await openGallery();
+    const card = page.locator(`.gallery-row-item [data-artwork-source="${paintingId}"] img`);
+    assert.equal(await card.getAttribute('src'), api + thumbnailImage);
+    const daily = page.locator('.daily-card img');
+    await daily.waitFor({ state: 'attached' });
+    assert.equal(await daily.getAttribute('src'), api + thumbnailImage);
+    assert(record.calls.some(call => call.path === thumbnailImage));
+    assert(!record.calls.some(call => call.path === originalImage), 'The gallery has not downloaded the original');
+    const detail = gate(detailApi);
+    await openPainting(); await completedFlight('open'); await observed(detail);
+    const detailImage = page.locator(`.detail-page [data-artwork-target="${paintingId}"] img`);
+    await detailImage.waitFor({ state: 'attached' });
+    assert.equal(await detailImage.getAttribute('src'), api + thumbnailImage);
+    release(detailApi, detail); await detailVisible(); await cleared();
+    assert.equal(await detailImage.getAttribute('src'), api + originalImage);
+    assert(record.calls.some(call => call.path === originalImage));
+    await returnToGallery(); await completedFlight('return'); await cleared();
+    assert.equal(await card.getAttribute('src'), api + thumbnailImage);
+    await page.getByRole('button', { name: /加载更多画作/ }).click();
+    const nextId = id(1102);
+    const appended = page.locator(`.gallery-row-item [data-artwork-source="${id(102)}"] img`);
+    await appended.waitFor({ state: 'attached' });
+    assert.equal(await appended.getAttribute('src'), api + thumbnailFor(nextId));
+    assert(record.calls.some(call => call.path === thumbnailFor(nextId)));
+    assert(!record.calls.some(call => call.path === `/api/v1/assets/${nextId}/content`), 'Measuring and displaying appended works only needs thumbnails');
+  });
+  await scenario('catalog-thumbnail-fallback', { catalogThumbnails: true, thumbnailFailure: true }, async ({ page, openGallery, record }) => {
+    await openGallery();
+    const card = page.locator(`.gallery-row-item [data-artwork-source="${paintingId}"] img`);
+    assert.equal(await card.getAttribute('src'), api + originalImage);
+    const thumbIndex = record.calls.findIndex(call => call.path === thumbnailImage);
+    const originalIndex = record.calls.findIndex(call => call.path === originalImage);
+    assert(thumbIndex >= 0 && originalIndex > thumbIndex, 'Original loads only after the unavailable thumbnail');
   });
   await scenario('slow-detail-read', {}, async ({ page, openGallery, openPainting, completedFlight, detailVisible, gate, release, previewVisible, deferredReads, cleared }) => {
     await openGallery(); const detail = gate(detailApi); await openPainting();

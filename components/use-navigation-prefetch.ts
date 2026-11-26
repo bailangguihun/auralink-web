@@ -30,7 +30,7 @@ function currentPageReady() {
   const main = document.querySelector("[data-navigation-page]") || document.querySelector("main");
   if (!main) return false;
   if (presentationRoots(main as HTMLElement).some(scope => Array.from(scope.querySelectorAll<HTMLElement>('[data-content-phase="preparing"], [data-content-phase="entering"]')).some(participating))) return false;
-  const loadingSelector = '[aria-busy="true"], .paper-skeleton, .loading-status';
+  const loadingSelector = '[data-page-ready="false"], [aria-busy="true"], .paper-skeleton, .loading-status';
   if ((main.matches(loadingSelector) && main.getClientRects().length > 0)
     || Array.from(main.querySelectorAll(loadingSelector))
     .some(node => node.getClientRects().length > 0)) return false;

@@ -38,6 +38,7 @@ export type PaintingImage = {
   height: number | null;
   contentUrl: string;
   downloadUrl: string;
+  thumbnailUrl?: string | null;
 };
 
 export type PaintingSummary = {

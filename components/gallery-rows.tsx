@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { justifiedRows } from "@/lib/gallery-rows";
 import { artworkAspectRatio } from "@/lib/masonry-layout";
-import { resolveMediaUrl } from "@/lib/media";
+import { resolveCatalogThumbnailUrl, resolveMediaUrl } from "@/lib/media";
 import type { PaintingSummary } from "@/lib/types";
 import { PaintingGridSkeleton, LoadingStatus } from "@/components/loading";
 import { startPresentation } from "@/lib/content-presentation";
@@ -17,7 +17,7 @@ function catalogRatio(painting: PaintingSummary): number {
 }
 
 function prepareRatio(painting: PaintingSummary, signal: AbortSignal): Promise<number> {
-  const source = resolveMediaUrl(painting.image?.contentUrl);
+  const source = resolveCatalogThumbnailUrl(painting.image) ?? resolveMediaUrl(painting.image?.contentUrl);
   if (!source) return Promise.resolve(4 / 3);
   const cached = ratios.get(source);
   if (cached) return Promise.resolve(cached);
@@ -69,10 +69,6 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
   }, [prepared, batches]);
   const mountedVersion = useRef(viewportVersion);
   const restoring = useRef(savedViewport?.key === viewKey && Date.now() - savedViewport.savedAt < 20 * 60_000 ? savedViewport : undefined);
-  const [wasRestoring] = useState(() => Boolean(restoring.current));
-  const progressiveFirstBatch = !wasRestoring && Boolean(batches[0]?.some(painting =>
-    painting.image?.contentUrl && (!(Number(painting.image.width) > 0) || !(Number(painting.image.height) > 0))
-  ));
 
   useLayoutEffect(() => {
     const node = container.current;
@@ -102,8 +98,8 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
       const next = [...existing];
       for (let i = existing.length; i < batches.length; i++) {
         const batch = batches[i];
-        // Keep the initial rows stable without fetching images to discover dimensions.
-        const sizes = i === 0 && progressiveFirstBatch ? batch.map(catalogRatio) : await Promise.all(batch.map(painting => prepareRatio(painting, controller.signal)));
+        // Use the same first-batch geometry on entry and when restoring a scroll anchor.
+        const sizes = i === 0 ? batch.map(catalogRatio) : await Promise.all(batch.map(painting => prepareRatio(painting, controller.signal)));
         if (controller.signal.aborted) return;
         next.push({ batch, ratios: sizes });
         preparedRef.current = [...next];
@@ -111,7 +107,7 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
       }
     })();
     return () => controller.abort();
-  }, [batches, progressiveFirstBatch]);
+  }, [batches]);
 
   const count = visiblePrepared.reduce((sum, entry) => sum + entry.batch.length, 0);
   const firstBatchIds = useMemo(() => new Set(batches[0]?.map(painting => painting.paintingId)), [batches]);
@@ -205,7 +201,7 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
 
   return <div ref={container} className="gallery-rows" data-gallery-restoring={Boolean(restoring.current)} role="region" aria-label="画作目录" aria-busy={pending} style={{ "--gallery-gap": `${gap}px` } as CSSProperties}>
     {rows.map((row, rowIndex) => <div className="gallery-row" key={row.paintings[0].paintingId} style={{ marginLeft: row.left, "--gallery-row-image-height": `${row.height}px` } as CSSProperties}>
-      {row.paintings.map((painting, index) => <div className="gallery-row-item" data-painting-id={painting.paintingId} data-progressive-images={progressiveFirstBatch && firstBatchIds.has(painting.paintingId) ? "" : undefined} key={painting.paintingId} style={{ width: row.widths[index] }}>
+      {row.paintings.map((painting, index) => <div className="gallery-row-item" data-painting-id={painting.paintingId} data-progressive-images={firstBatchIds.has(painting.paintingId) ? "" : undefined} key={painting.paintingId} style={{ width: row.widths[index] }}>
         {renderPainting(painting, rowIndex === 0)}
       </div>)}
     </div>)}

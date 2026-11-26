@@ -2,7 +2,7 @@
 
 import { useState, type CSSProperties } from "react";
 
-import { resolveMediaUrl } from "@/lib/media";
+import { resolveCatalogThumbnailUrl, resolveMediaUrl } from "@/lib/media";
 import { artworkAspectRatio } from "@/lib/masonry-layout";
 import type { PaintingImage } from "@/lib/types";
 
@@ -12,13 +12,18 @@ type MediaImageProps = {
   className?: string;
   layout?: "fixed" | "artwork";
   loading?: "eager" | "lazy";
+  preferThumbnail?: boolean;
 };
 
-export function MediaImage({ image, alt, className, layout = "fixed", loading }: MediaImageProps) {
+export function MediaImage({ image, alt, className, layout = "fixed", loading, preferThumbnail = false }: MediaImageProps) {
+  const [failedThumbnail, setFailedThumbnail] = useState<string | null>(null);
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const [readySource, setReadySource] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState<{ source: string; width: number; height: number } | null>(null);
-  const source = resolveMediaUrl(image?.contentUrl);
+  const originalSource = resolveMediaUrl(image?.contentUrl);
+  const thumbnail = preferThumbnail ? resolveCatalogThumbnailUrl(image) : null;
+  const usingThumbnail = thumbnail !== null && failedThumbnail !== thumbnail;
+  const source = usingThumbnail ? thumbnail : originalSource;
   const failed = !source || failedSource === source;
   const size = dimensions?.source === source ? dimensions : image;
   const naturalRatio = size?.width && size.height && Number.isFinite(size.width) && Number.isFinite(size.height) && size.width > 0 && size.height > 0
@@ -31,10 +36,13 @@ export function MediaImage({ image, alt, className, layout = "fixed", loading }:
     ) : (
   // The backend returns public logical MediaAsset URLs. A native image element
   // keeps the API origin dynamic without allowing arbitrary remote hosts.
-    <img key={source} className={`${className || ""} ${readySource === source ? "content-reveal" : "media-loading"}`} src={source} width={image?.width || undefined} height={image?.height || undefined} alt={alt} loading={loading} decoding="async" onLoad={event => {
+    <img key={source} className={`${className || ""} ${readySource === source ? "content-reveal" : "media-loading"}`} src={source} data-artwork-original={usingThumbnail ? originalSource ?? undefined : undefined} width={image?.width || undefined} height={image?.height || undefined} alt={alt} loading={loading} decoding="async" onLoad={event => {
       setReadySource(source);
       if (layout === "artwork") setDimensions({ source, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
-    }} onError={() => setFailedSource(source)} />
+    }} onError={() => {
+      if (usingThumbnail) setFailedThumbnail(source);
+      else setFailedSource(source);
+    }} />
   );
 
   return layout === "artwork" ? <div className="artwork-preview" style={{ "--artwork-aspect-ratio": artworkAspectRatio(size?.width, size?.height), "--artwork-natural-ratio": naturalRatio } as CSSProperties} data-image-state={failed ? "failed" : readySource === source ? "ready" : "loading"}>

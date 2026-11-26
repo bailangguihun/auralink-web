@@ -5,17 +5,19 @@ import { startPresentation } from "@/lib/content-presentation";
 
 /** Changing entryKey hides this result in the commit before it can paint.
  * Children stay mounted: input state, cached tabs and request ownership survive. */
-export function ContentReveal({ entryKey, ready = true, children, label, className = "" }: {
-  entryKey: string; ready?: boolean; children: ReactNode; label: string; className?: string;
+export function ContentReveal({ entryKey, ready = true, children, label, className = "", artwork }: {
+  entryKey: string; ready?: boolean; children: ReactNode; label: string; className?: string; artwork?: () => boolean;
 }) {
   const element = useRef<HTMLDivElement>(null);
-  const available = useRef(ready); available.current = ready;
+  const latest = useRef({ ready, artwork }); latest.current = { ready, artwork };
   const [failed, setFailed] = useState<string | null>(null);
   useLayoutEffect(() => {
     const root = element.current;
     if (!root) return;
     root.hidden = false; setFailed(null);
-    const presentation = startPresentation(root, { ready: () => available.current, onTimeout: () => setFailed(entryKey) });
+    const presentation = startPresentation(root, {
+      ready: () => latest.current.ready, artwork: () => latest.current.artwork?.() ?? false, onTimeout: () => setFailed(entryKey),
+    });
     return presentation.cancel;
   }, [entryKey]);
   return <>

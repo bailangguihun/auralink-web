@@ -112,13 +112,13 @@ function RemoteMetricContent({ metric, title, unit, display = "bars", searchable
   const retry = () => { revision.current = undefined; setAttempt(value => value + 1); };
   return <div className="knowledge-metric-browser" aria-busy={busy || undefined}>
     {searchable ? <SearchControls title={title} query={query.q} sort={query.sort} chronological={chronological} onQuery={search} onSort={sort} /> : null}
-    <ContentReveal entryKey={displayKey} ready={!busy} label={title}>
-    {!busy && state.error ? <StatePanel compact kind="error" title="统计读取失败" description={state.error} actionLabel="重新加载" onAction={retry} />
-      : busy || !state.data ? <LoadingSection label={`正在读取${title}`} onRetry={retry}><ChartSkeleton compact /></LoadingSection>
-      : <><PageControls title={title} page={state.data.page} pages={state.data.totalPages} total={state.data.totalItems} onPage={page => setQuery(old => ({ ...old, page }))} />
-        <MetricValues title={title} items={state.data.items} unit={unit} display={display} />
-      </>}
-    </ContentReveal>
+    {busy ? <LoadingSection label={`正在读取${title}`} onRetry={retry}><ChartSkeleton compact /></LoadingSection>
+      : <ContentReveal entryKey={displayKey} label={title}>
+        {state.error ? <StatePanel compact kind="error" title="统计读取失败" description={state.error} actionLabel="重新加载" onAction={retry} />
+          : state.data ? <><PageControls title={title} page={state.data.page} pages={state.data.totalPages} total={state.data.totalItems} onPage={page => setQuery(old => ({ ...old, page }))} />
+            <MetricValues title={title} items={state.data.items} unit={unit} display={display} />
+          </> : null}
+      </ContentReveal>}
   </div>;
 }
 

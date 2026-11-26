@@ -10,7 +10,9 @@
 .topbar .user-menu { display:grid; grid-template-columns:32px 1fr; gap:14px 12px; }
 .topbar .coin-balance { grid-column:1/-1; justify-self:start; }
 .topbar #logout { justify-self:start; }
-.main-content { width:min(1060px,92%); min-width:0; padding-top:48px; }
+.main-content { position:relative; width:min(1060px,92%); min-width:0; padding-top:48px; }
+.community-view-loading { display:none; position:absolute; left:0; right:0; margin-top:0; }
+.main-content:has(> .view:not(.hidden)[data-content-phase="preparing"]) > .community-view-loading { display:block; }
 .notice { top:calc(var(--platform-header-height,80px) + 16px); z-index:40; }
 .room-workspace { width:100%; margin:0; left:auto; transform:none; height:calc(100dvh - var(--platform-header-height,80px) - 70px); }
 .canvas-toolbar { flex-wrap:wrap; }

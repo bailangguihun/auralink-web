@@ -15,7 +15,7 @@ await mkdir(output, { recursive: true });
 const assets = await Promise.all([
   ['Bg1.jpg', 2048, 2352], ['Bg2.jpg', 2048, 1101], ['Bg3.jpeg', 1600, 1158], ['Bg4.jpg', 2896, 2350],
 ].map(async ([file, width, height]) => ({ width, height, body: await readFile(new URL(`../public/artlive-reference/${file}`, import.meta.url)) })));
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, executablePath: process.env.GALLERY_CHROMIUM });
 const report = { boundary: 'Local production build, synthetic API records, bounded fixture favorite writes. Browser plugin not available; Playwright fallback. No production I/O.', cases: [], errors: [] };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const artworkRatios = [.504, .373, 2.21, .576, .271, .544, .488, .512, 2.153, .487, .804, .427];
@@ -83,6 +83,7 @@ async function geometry(page, count, { singleColumn = false, fullyJustified = co
     const gridBox = element.getBoundingClientRect();
     return {
       width: gridBox.width, height: gridBox.height, top: gridBox.top + scrollY,
+      footerGap: document.querySelector('[aria-label="画作加载"]')?.getBoundingClientRect().top - gridBox.bottom,
       rows: [...element.querySelectorAll('.gallery-row')].map(row => {
         const box = row.getBoundingClientRect(), style = getComputedStyle(row);
         return { x: box.left - gridBox.left, y: box.top - gridBox.top, width: box.width, height: box.height, gap: parseFloat(style.columnGap) || 0,
@@ -124,9 +125,7 @@ async function geometry(page, count, { singleColumn = false, fullyJustified = co
     }
   });
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'No horizontal overflow');
-  const footer = await page.getByRole('region', { name: '画作加载', exact: true }).boundingBox();
-  const gridBox = await grid.boundingBox();
-  assert(footer && footer.y >= gridBox.y + gridBox.height - 1, 'Load control clears the finished bottom row');
+  assert(result.footerGap >= -1, `Load control clears the finished bottom row (gap ${result.footerGap}px)`);
   assert.equal(await page.getByRole('button', { name: '下一页', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '上一页', exact: true }).count(), 0);
   return { ...result, items: all, maxBottomDifference };
@@ -140,6 +139,21 @@ function assertStable(before, after) {
   }
 }
 
+async function openArtwork(page, card) {
+  const link = card.locator('a').first();
+  await link.evaluate(element => {
+    // A real click may first scroll the title link into view.
+    element.addEventListener('click', () => {
+      window.__galleryReturnOffset = element.closest('[data-painting-id]').getBoundingClientRect().top;
+    }, { capture: true, once: true });
+  });
+  await link.click();
+  await page.waitForURL(/\/gallery\/[^/]+$/);
+  const offset = await page.evaluate(() => window.__galleryReturnOffset);
+  assert(Number.isFinite(offset));
+  return offset;
+}
+
 async function applyKeyword(page, keyword) {
   await page.getByRole('searchbox', { name: '关键词', exact: true }).fill(keyword);
   await page.getByRole('button', { name: '检索画作', exact: true }).click();
@@ -150,7 +164,7 @@ async function scenario(name, options, run) {
   const record = { name }; report.cases.push(record);
   const context = await browser.newContext({ viewport: { width: options.width || 1440, height: 1000 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
   const state = { ...newState(), total: 36, missing: false, slow: 0, broken: false, extreme: false, queryDelay: 0, moreDelay: 0, failPageOnce: null, currentDate: '2026-10-30', favorites: new Map(), calls: [], blocked: [], ...options };
-  await context.addInitScript(() => localStorage.setItem('artlive.session.token.v1', 'ISOLATED_GALLERY_TEST'));
+  if (!options.anonymous) await context.addInitScript(() => localStorage.setItem('artlive.session.token.v1', 'ISOLATED_GALLERY_TEST'));
   if (options.noResizeObserver) await context.addInitScript(() => { window.ResizeObserver = undefined; });
   const page = await context.newPage();
   const errors = [], logs = [];
@@ -435,6 +449,65 @@ try {
     await page.getByRole('button', { name: '清除', exact: true }).click();
     await page.getByRole('heading', { name: '布局预览 1', exact: true }).waitFor(); await geometry(page, 12);
   });
+  await scenario('shareable-filters', {}, async ({ page, state }) => {
+    await geometry(page, 12);
+    await page.getByText('更多筛选', { exact: true }).click();
+    await page.getByLabel('关键词', { exact: true }).fill('江山 & 水');
+    await page.getByLabel('作者', { exact: true }).fill('钱杜');
+    await page.locator('select[name="sort"]').selectOption('author');
+    await page.locator('select[name="direction"]').selectOption('desc');
+    await page.getByRole('button', { name: '检索画作', exact: true }).click();
+    const expected = { keyword: '江山 & 水', author: '钱杜', sort: 'author', direction: 'desc' };
+    const filtered = page.getByRole('heading', { name: '江山 & 水 1', exact: true });
+    await filtered.waitFor();
+    const filteredUrl = page.url();
+    assert.deepEqual(Object.fromEntries(new URL(filteredUrl).searchParams), expected);
+    const beforeReload = catalogCalls(state).length;
+    await page.reload();
+    await filtered.waitFor();
+    const request = new URLSearchParams(catalogCalls(state).slice(beforeReload).at(-1).query);
+    for (const [name, value] of Object.entries(expected)) assert.equal(request.get(name), value);
+    assert.equal(await page.getByLabel('关键词', { exact: true }).inputValue(), expected.keyword);
+    await page.getByText('更多筛选', { exact: true }).click();
+    assert.equal(await page.getByLabel('作者', { exact: true }).inputValue(), expected.author);
+    assert.equal(await page.locator('select[name="sort"]').inputValue(), expected.sort);
+    assert.equal(await page.locator('select[name="direction"]').inputValue(), expected.direction);
+    await moreButton(page).click();
+    await waitCards(page, 24);
+    await cards(page).nth(17).locator('a').first().click();
+    await page.getByRole('heading', { name: '隔离详情山水', exact: true, level: 1 }).waitFor();
+    await page.getByRole('link', { name: '返回画廊', exact: true }).click();
+    await page.waitForURL(filteredUrl);
+    await waitCards(page, 24);
+    await page.getByRole('button', { name: '清除', exact: true }).click();
+    await page.waitForURL(`${web}/gallery`);
+    const unfiltered = page.getByRole('heading', { name: '布局预览 1', exact: true });
+    await unfiltered.waitFor();
+    await page.goBack();
+    await page.waitForURL(filteredUrl);
+    await filtered.waitFor();
+    await page.goForward();
+    await unfiltered.waitFor();
+  });
+
+  await scenario('header-login-return', { anonymous: true }, async ({ page }) => {
+    const daily = page.getByRole('region', { name: '每日一画', exact: true }).getByRole('link', { name: /查看.+详情/ });
+    await daily.waitFor();
+    const login = new URL(await daily.getAttribute('href'), web);
+    const target = login.searchParams.get('next');
+    assert.match(target, /^\/gallery\/[^/]+$/);
+    await daily.click();
+    await page.waitForURL(login.href);
+    const headerLogin = page.getByRole('banner').getByRole('link', { name: '登录', exact: true });
+    assert.equal(new URL(await headerLogin.getAttribute('href'), web).href, login.href);
+    await headerLogin.click();
+    await page.waitForURL(login.href);
+    await page.getByRole('navigation', { name: '身份入口' }).getByRole('link', { name: '注册' }).click();
+    await page.waitForURL(url => url.pathname === '/register' && url.searchParams.get('next') === target);
+    await headerLogin.click();
+    await page.waitForURL(login.href);
+  });
+
   await scenario('same-query-restart', {}, async ({ page, state, record }) => {
     const firstPageCalls = () => catalogCalls(state).filter(call => Number(new URLSearchParams(call.query).get('page') || 0) === 0).length;
     const submit = page.getByRole('button', { name: '检索画作', exact: true });
@@ -451,8 +524,10 @@ try {
     const detailAndBack = async () => {
       const target = cards(page).nth(17), id = await target.getAttribute('data-painting-id');
       await target.evaluate(element => scrollTo(0, element.getBoundingClientRect().top + scrollY - 120));
-      const offset = (await target.boundingBox()).y, before = catalogCalls(state).length;
-      await target.locator('a').first().click(); await page.waitForURL(/\/gallery\/[^/]+$/);
+      const setupOffset = (await target.boundingBox()).y, before = catalogCalls(state).length;
+      const offset = await openArtwork(page, target);
+      const restoration = { id, setupOffset, offset };
+      (record.restorations ??= []).push(restoration);
       await page.getByRole('heading', { name: '隔离详情山水', exact: true, level: 1 }).waitFor();
       await page.getByRole('link', { name: '返回画廊', exact: true }).click(); await page.waitForURL(/\/gallery$/);
       await geometry(page, 24);
@@ -460,6 +535,7 @@ try {
         const element = document.querySelector(`[data-painting-id="${id}"]`);
         return element && Math.abs(element.getBoundingClientRect().top - offset) <= 8;
       }, { id, offset }, { timeout: 10000 });
+      restoration.returnedOffset = (await page.locator(`[data-painting-id="${id}"]`).boundingBox()).y;
       assert.equal(catalogCalls(state).length, before, 'Ordinary detail return still restores the current batches without refetching');
     };
     await geometry(page, 12);
@@ -485,24 +561,30 @@ try {
     await moreButton(page).click(); await geometry(page, 24);
     assert(moreCalls(state).some(call => call.query.includes('orderDate=2026-10-31')));
   });
-  await scenario('detail-restoration', {}, async ({ page, state, shot }) => {
-    await geometry(page, 12); await moreButton(page).click(); await geometry(page, 24);
+  for (const variant of [
+    { name: 'detail-restoration', options: {} },
+    { name: 'detail-restoration-missing-dimensions', options: { missing: true, mixed: true } },
+  ]) await scenario(variant.name, variant.options, async ({ page, state, shot, record }) => {
+    await geometry(page, 12); await moreButton(page).click();
+    const before = await geometry(page, 24);
     const target = cards(page).nth(17), id = await target.getAttribute('data-painting-id');
     await target.evaluate(element => scrollTo(0, element.getBoundingClientRect().top + scrollY - 120));
-    const offset = (await target.boundingBox()).y;
     const callsBefore = catalogCalls(state).length;
-    await target.locator('a').first().click(); await page.waitForURL(/\/gallery\/[^/]+$/);
+    const offset = await openArtwork(page, target);
     await page.getByRole('heading', { name: '隔离详情山水', exact: true, level: 1 }).waitFor();
     await page.getByRole('link', { name: '返回画廊', exact: true }).click(); await page.waitForURL(/\/gallery$/);
-    await geometry(page, 24);
-    await page.waitForFunction(({ id, offset }) => {
-      const element = document.querySelector(`[data-painting-id="${id}"]`); return element && Math.abs(element.getBoundingClientRect().top - offset) <= 8;
-    }, { id, offset }, { timeout: 10000 });
+    const after = await geometry(page, 24);
+    assertStable(before, after);
+    await page.waitForFunction(() => document.querySelector('[data-gallery-restoring="false"]'));
+    const returnedOffset = (await target.boundingBox()).y;
+    record.restoration = { id, offset, returnedOffset };
+    assert(Math.abs(returnedOffset - offset) <= 8, `The opened work returns to its viewport offset (${offset}px → ${returnedOffset}px)`);
     assert.equal(catalogCalls(state).length, callsBefore, 'Returning restores the loaded feed instead of fetching page zero');
     await shot('restored', false);
     await applyKeyword(page, '保留筛选'); await page.getByRole('heading', { name: '保留筛选 1', exact: true }).waitFor(); await geometry(page, 12);
     await cards(page).first().locator('a').first().click(); await page.waitForURL(/\/gallery\/[^/]+$/);
-    await page.getByRole('link', { name: '返回画廊', exact: true }).click(); await page.waitForURL(/\/gallery$/);
+    await page.getByRole('link', { name: '返回画廊', exact: true }).click();
+    await page.waitForURL(url => url.pathname === '/gallery' && url.searchParams.get('keyword') === '保留筛选');
     await page.getByRole('heading', { name: '保留筛选 1', exact: true }).waitFor(); await geometry(page, 12);
     assert.equal(await page.getByRole('searchbox', { name: '关键词', exact: true }).inputValue(), '保留筛选');
   });

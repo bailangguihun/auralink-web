@@ -1,8 +1,10 @@
 "use client";
 
-import { FormEvent, useCallback, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 
 import { DailyPainting } from "@/components/daily-painting";
+import { hasArtworkTransition } from "@/components/artwork-transition";
 import { ModuleHeader } from "@/components/module-header";
 import { ContentReveal } from "@/components/content-reveal";
 import { LoadingSection, LoadingStatus, PaintingGridSkeleton, PendingIndicator } from "@/components/loading";
@@ -10,13 +12,14 @@ import { useReadResource } from "@/components/use-read-resource";
 import { SearchIcon } from "@/components/icons";
 import { PaintingCard } from "@/components/painting-card";
 import { GalleryRows, resetGalleryViewport } from "@/components/gallery-rows";
-import { getGalleryFeedSnapshot, useGalleryFeed } from "@/components/use-gallery-feed";
+import { useGalleryFeed } from "@/components/use-gallery-feed";
 import { useFavorites } from "@/components/favorite-provider";
 import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { INITIAL_GALLERY_QUERY } from "@/lib/gallery-order";
 import { galleryFeedKey } from "@/lib/gallery-feed";
+import { galleryHref, readGalleryQuery } from "@/lib/gallery-query";
 import { DAILY_PAINTING_KEY, DAILY_PAINTING_TTL_MS } from "@/lib/navigation-data";
 import type { PaintingQuery, PaintingSummary } from "@/lib/types";
 
@@ -29,7 +32,10 @@ function GalleryContent() {
   const { token, status, sessionIdentity, signOutIfCurrent, isCurrentSession } = useSession();
   const { isFavorited, isFavoriteBusy, toggleFavorite: toggleSessionFavorite } = useFavorites();
   const authenticated = status === "authenticated" && Boolean(token);
-  const [query, setQuery] = useState<PaintingQuery>(() => getGalleryFeedSnapshot(sessionIdentity.generation)?.query || INITIAL_GALLERY_QUERY);
+  const search = useSearchParams().toString();
+  const urlQuery = useMemo(() => readGalleryQuery(new URLSearchParams(search)), [search]);
+  const [repeatedSearch, setRepeatedSearch] = useState<{ source: PaintingQuery; query: PaintingQuery }>();
+  const query = repeatedSearch?.source === urlQuery ? repeatedSearch.query : urlQuery;
   const [actionError, setError] = useState<string | null>(null);
   const loadDaily = useCallback((signal: AbortSignal) => api.dailyPainting(token, signal), [token]);
   const ready = status !== "loading";
@@ -48,28 +54,27 @@ function GalleryContent() {
   const displayedCount = presentation.key === viewKey ? Math.min(presentation.count, fetchedCount) : 0;
   const preparing = displayedCount < fetchedCount;
   const busy = loading || catalog.loadingMore || preparing;
+  const artwork = () => hasArtworkTransition("/gallery", sessionIdentity.generation);
+
+  const submitQuery = (nextQuery: PaintingQuery) => {
+    resetGalleryViewport();
+    const href = galleryHref(nextQuery);
+    if (href === `${location.pathname}${location.search}`) {
+      // Submitting the same filters still restarts pagination without adding a history entry.
+      setRepeatedSearch({ source: urlQuery, query: nextQuery });
+    } else {
+      window.history.pushState(null, "", `${href}${location.hash}`);
+    }
+  };
 
   const applyFilters = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    resetGalleryViewport();
-    const form = new FormData(event.currentTarget);
-    setQuery({
-      keyword: String(form.get("keyword") || "").trim(),
-      dynasty: String(form.get("dynasty") || "").trim(),
-      category: String(form.get("category") || "").trim(),
-      author: String(form.get("author") || "").trim(),
-      subject: String(form.get("subject") || "").trim(),
-      sort: form.get("sort") as PaintingQuery["sort"],
-      direction: form.get("direction") as PaintingQuery["direction"],
-      page: 0,
-      size: 12,
-    });
+    submitQuery(readGalleryQuery(new FormData(event.currentTarget)));
   };
 
   const clearFilters = (form: HTMLFormElement) => {
-    resetGalleryViewport();
     form.reset();
-    setQuery({ ...INITIAL_GALLERY_QUERY });
+    submitQuery({ ...INITIAL_GALLERY_QUERY });
   };
 
   const toggleFavorite = async (painting: PaintingSummary) => {
@@ -93,7 +98,7 @@ function GalleryContent() {
         <span className="catalog-status">{page ? `${page.totalElements} 幅可浏览画作` : error ? "目录读取失败" : "正在读取目录"}</span>
       </ModuleHeader>
 
-      <DailyPainting painting={daily} loading={dailyLoading} error={dailyError} onRetry={recommendation.retry} />
+      <DailyPainting painting={daily} loading={dailyLoading} error={dailyError} onRetry={recommendation.retry} artwork={artwork} />
 
       <form key={queryKey} className="gallery-filters glass-panel" onSubmit={applyFilters}>
         <label className="filter-search"><span className="sr-only">关键词</span><SearchIcon /><input name="keyword" type="search" maxLength={200} placeholder="搜索作品、作者、风格或意境" defaultValue={query.keyword} /></label>
@@ -112,19 +117,19 @@ function GalleryContent() {
       </form>
 
       {actionError ? <p className="inline-error" role="alert">收藏操作未完成：{actionError} <button className="text-button" onClick={() => setError(null)}>关闭提示</button></p> : null}
-      <ContentReveal entryKey={viewKey} ready={!loading && !preparing} label="画廊结果">
       {loading ? page ? <LoadingStatus label="正在更新当前目录，暂保留已读取的结果" /> : <LoadingSection label="正在读取画作目录" onRetry={catalog.retry}><PaintingGridSkeleton count={6} rows /></LoadingSection> : null}
-      {!loading && error ? <StatePanel kind="error" title="画作目录加载失败" description={`${error}${page ? " 当前保留同一查询上次成功读取的结果。" : ""}`} actionLabel="重新加载" onAction={() => { setError(null); catalog.retry(); }} /> : null}
-      {!loading && !error && page && fetchedCount === 0 ? <StatePanel kind="empty" title="暂未找到匹配的作品" description="请尝试减少筛选条件或使用其他关键词。" /> : null}
-      {catalog.notice ? <p className="gallery-notice" role="status">{catalog.notice}</p> : null}
-      {fetchedCount ? (
+      {page || error ? <ContentReveal entryKey={viewKey} ready={!loading && !preparing} label="画廊结果" artwork={artwork}>
+        {!loading && error ? <StatePanel kind="error" title="画作目录加载失败" description={`${error}${page ? " 当前保留同一查询上次成功读取的结果。" : ""}`} actionLabel="重新加载" onAction={() => { setError(null); catalog.retry(); }} /> : null}
+        {!loading && !error && page && fetchedCount === 0 ? <StatePanel kind="empty" title="暂未找到匹配的作品" description="请尝试减少筛选条件或使用其他关键词。" /> : null}
+        {catalog.notice ? <p className="gallery-notice" role="status">{catalog.notice}</p> : null}
+        {fetchedCount ? (
           <GalleryRows key={viewKey} batches={catalog.batches} viewKey={viewKey} restoreReady={!dailyLoading} onPrepared={onPrepared}
             renderPainting={(painting, priority) => {
               const renderedPainting = { ...painting, favorited: isFavorited(painting.paintingId, painting.favorited) };
               return <PaintingCard painting={renderedPainting} authenticated={authenticated} favoriteBusy={isFavoriteBusy(painting.paintingId)} onFavorite={toggleFavorite} masonry priority={priority} />;
             }} />
-      ) : null}
-      </ContentReveal>
+        ) : null}
+      </ContentReveal> : null}
       {page && fetchedCount > 0 ? <section className="gallery-load-more" aria-label="画作加载" aria-busy={busy}>
         <p className="gallery-progress" role="status">已展示 {displayedCount} / {page.totalElements} 幅</p>
         {catalog.moreError ? <p className="inline-error" role="alert">{catalog.moreError} 已展示的画作仍保留。</p> : null}

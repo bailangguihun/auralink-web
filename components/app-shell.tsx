@@ -11,18 +11,22 @@ import { ProtectedRoute } from "@/components/protected-route";
 import { requiresAuthentication } from "@/lib/navigation";
 import { RouteMotion } from "@/components/route-motion";
 import { ArtworkTransition } from "@/components/artwork-transition";
+import { KnowledgeLoading } from "@/components/page-loading";
+import { CommunityPageLoading } from "@/components/community/community-loading";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const home = pathname === "/";
   const content = <>{children}{!home ? <><SiteFooter /><BackToTop /></> : null}</>;
+  const fallback = pathname === "/knowledge" ? <KnowledgeLoading />
+    : pathname === "/community" ? <CommunityPageLoading /> : undefined;
   return (
     <>
       <Script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js" strategy="afterInteractive" />
       <Navigation />
       <MiniAppBackButton />
       <ArtworkTransition />
-      <RouteMotion>{requiresAuthentication(pathname) ? <ProtectedRoute>{content}</ProtectedRoute> : content}</RouteMotion>
+      <RouteMotion>{requiresAuthentication(pathname) ? <ProtectedRoute fallback={fallback}>{content}</ProtectedRoute> : content}</RouteMotion>
     </>
   );
 }

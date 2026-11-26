@@ -13,21 +13,28 @@ import { useSession } from "@/components/session-provider";
 import { StatePanel } from "@/components/state-panel";
 import { ApiError, errorMessage } from "@/lib/api";
 import { getArtworkPreview, isArtworkFlightActive, waitForArtworkFlight, type ArtworkPreview } from "@/lib/artwork-flight";
-import { resolveMediaUrl } from "@/lib/media";
+import { getGalleryFeedSnapshot } from "@/lib/gallery-feed";
+import { INITIAL_GALLERY_QUERY } from "@/lib/gallery-order";
+import { galleryHref } from "@/lib/gallery-query";
+import { resolveCatalogThumbnailUrl, resolveMediaUrl } from "@/lib/media";
 import { readPaintingDetail } from "@/lib/painting-detail-data";
 import type { PaintingDetail, PaintingImage } from "@/lib/types";
 
 /** Only reuse the public bitmap already displayed by this app, never a new media origin. */
 function previewImage(preview: ArtworkPreview): PaintingImage | null {
   try {
-    const path = new URL(preview.source).pathname;
+    const original = preview.originalSource ?? preview.source;
+    const path = new URL(original).pathname;
     const match = /^\/api\/v1\/assets\/([0-9a-f-]{36})\/content$/i.exec(path);
-    if (!match || resolveMediaUrl(path) !== preview.source) return null;
-    return {
+    if (!match || resolveMediaUrl(path) !== original) return null;
+    const image: PaintingImage = {
       assetId: match[1], mimeType: "", fileSize: null,
       width: preview.width, height: preview.height,
       contentUrl: path, downloadUrl: "",
+      thumbnailUrl: original === preview.source ? undefined : new URL(preview.source).pathname,
     };
+    if (image.thumbnailUrl && resolveCatalogThumbnailUrl(image) !== preview.source) return null;
+    return image;
   } catch { return null; }
 }
 
@@ -39,6 +46,7 @@ export function PaintingDetailScreen({ paintingId }: { paintingId: string }) {
 function PaintingDetailContent({ paintingId }: { paintingId: string }) {
   const { token, sessionIdentity, signOutIfCurrent, isCurrentSession } = useSession();
   const { isFavorited, isFavoriteBusy, toggleFavorite: toggleSessionFavorite } = useFavorites();
+  const [backHref] = useState(() => galleryHref(getGalleryFeedSnapshot(sessionIdentity.generation)?.query ?? INITIAL_GALLERY_QUERY));
   // This component is keyed by artwork and login generation. Keep its public
   // preview until the authoritative read settles, even after the flight ends.
   const [preview] = useState(() => {
@@ -100,9 +108,9 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
     }
   };
 
-  if (loading && !preview) return <div data-artwork-text-ready={String(textReady)} style={textReady ? undefined : { visibility: "hidden" }} aria-hidden={!textReady || undefined}><Link className="text-button" href="/gallery">返回画廊</Link><LoadingSection label="正在展开作品详情" onRetry={() => setAttempt(value => value + 1)}><DetailSkeleton /></LoadingSection></div>;
-  if (!loading && error && !painting) return <><Link className="text-button" href="/gallery">返回画廊</Link><StatePanel kind="error" title="作品详情加载失败" description={error} actionLabel="重新读取作品" onAction={() => setAttempt(value => value + 1)} /></>;
-  if (!painting && (!loading || !preview)) return <StatePanel kind="empty" title="作品不存在或当前不可用" actionLabel="返回画廊" actionHref="/gallery" />;
+  if (loading && !preview) return <div data-artwork-text-ready={String(textReady)} style={textReady ? undefined : { visibility: "hidden" }} aria-hidden={!textReady || undefined}><Link className="text-button" href={backHref}>返回画廊</Link><LoadingSection label="正在展开作品详情" onRetry={() => setAttempt(value => value + 1)}><DetailSkeleton /></LoadingSection></div>;
+  if (!loading && error && !painting) return <><Link className="text-button" href={backHref}>返回画廊</Link><StatePanel kind="error" title="作品详情加载失败" description={error} actionLabel="重新读取作品" onAction={() => setAttempt(value => value + 1)} /></>;
+  if (!painting && (!loading || !preview)) return <StatePanel kind="empty" title="作品不存在或当前不可用" actionLabel="返回画廊" actionHref={backHref} />;
 
   const favorited = painting ? isFavorited(painting.paintingId, painting.favorited) : false;
   const title = painting ? painting.title || "无题" : preview!.title || "无题";
@@ -136,10 +144,10 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
   return (
     <div className="detail-layout" data-artwork-preview={!painting ? "true" : undefined} data-artwork-text-ready={String(textReady)}>
       <ArtworkViewer title={title} author={author} period={period} paintingId={paintingId} concealText={!textReady}
-        image={<MediaImage image={painting ? painting.image : preview!.image} alt={title} />}
+        image={<MediaImage image={painting ? painting.image : preview!.image} preferThumbnail={!painting} alt={title} />}
         error={painting ? error : null}
         actions={<>
-          <Link className="button detail-back" data-artwork-return={paintingId} href="/gallery"><ArrowIcon direction="left" /> 返回画廊</Link>
+          <Link className="button detail-back" data-artwork-return={paintingId} href={backHref}><ArrowIcon direction="left" /> 返回画廊</Link>
           {painting ? <Link className="button" aria-label="引用作品发帖" href={"/community?paintingId=" + encodeURIComponent(painting.paintingId)}><span aria-hidden="true" className="detail-quote-mark">“</span>引用发帖</Link>
             : <button className="button" type="button" disabled aria-label="引用作品发帖"><span aria-hidden="true" className="detail-quote-mark">“</span>引用发帖</button>}
           <button className={`button detail-favorite${favorited ? " button-primary" : ""}`} type="button" aria-pressed={painting ? favorited : undefined} disabled={!painting || isFavoriteBusy(painting.paintingId)} onClick={toggleFavorite}><HeartIcon filled={favorited} /> {favorited ? "已收藏" : "收藏"}</button>

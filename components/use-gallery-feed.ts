@@ -88,15 +88,17 @@ export function useGalleryFeed(query: PaintingQuery, token: string | null | unde
     // the previous query. Only a fresh route mount restores the retained feed.
     const submittedAgain = configuredQuery.current !== normalizedQuery;
     configuredQuery.current = normalizedQuery;
+    const previous = stateRef.current;
     const initial = submittedAgain
-      ? { key, feed: emptyGalleryFeed(normalizedQuery), loading: true, loadingMore: false, error: null, moreError: null }
+      ? { key, feed: previous.key === key ? previous.feed : emptyGalleryFeed(normalizedQuery),
+        loading: true, loadingMore: false, error: null, moreError: null }
       : initialState(key, normalizedQuery, generation);
-    publish({ ...initial, loading: ready && !initial.feed.page });
+    publish({ ...initial, loading: ready && (submittedAgain || !initial.feed.page) });
     if (ready) {
       // Remember new filters even if the first request is still pending when the
       // user leaves. A successful retained page needs no network round trip.
       saveGalleryFeedSnapshot(generation, initial.feed);
-      if (!initial.feed.page) void requestPage(false, submittedAgain);
+      if (submittedAgain || !initial.feed.page) void requestPage(false, submittedAgain);
     }
     return () => {
       inFlight.current?.abort();

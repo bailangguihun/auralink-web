@@ -39,6 +39,8 @@ export type PaintingImage = {
   contentUrl: string;
   downloadUrl: string;
   thumbnailUrl?: string | null;
+  previewUrl?: string | null;
+  smallPreviewUrl?: string | null;
 };
 
 export type PaintingSummary = {

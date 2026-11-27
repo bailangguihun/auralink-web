@@ -1,7 +1,7 @@
 // Controlled browser fixtures only: no real account, backend, business or model writes.
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
-import { newState, responseFor, id } from './fixtures/loading-runtime.mjs';
+import { newState, responseFor, id, thumbnailUrl } from './fixtures/loading-runtime.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const web = process.env.REVEAL_WEB_URL || 'http://localhost:3000';
@@ -53,7 +53,7 @@ async function scenario(name, options, run) {
       record.calls.push({ path: url.pathname, method, query: url.search });
       const headers = { 'access-control-allow-origin': web, 'access-control-allow-methods': 'GET,HEAD,OPTIONS', 'access-control-allow-headers': 'authorization,content-type', 'cache-control': 'no-store' };
       if (method === 'OPTIONS') return route.fulfill({ status: 204, headers });
-      if (options.brokenImage && url.pathname === `/api/v1/assets/${id(1091)}/content`) return route.fulfill({ status: 404, headers });
+      if (options.brokenImage && url.pathname === thumbnailUrl(id(1091))) return route.fulfill({ status: 404, headers });
       const metric = url.pathname.match(/^\/api\/v1\/knowledge\/painting-statistics\/([^/]+)$/);
       const q = url.searchParams.get('q') || '', pageNumber = Number(url.searchParams.get('page') || 0), size = Number(url.searchParams.get('size') || 12);
       const total = q === '无结果' ? 0 : metric?.[1] === 'geography' && state.metricPages ? 201 : 1;
@@ -151,7 +151,7 @@ try {
   await scenario('gallery-shell-and-cards-survive-slow-daily-and-image', {}, async ({ page, gate, seen, go, record }) => {
     const list = gate('/api/v1/paintings');
     const daily = gate('/api/v1/paintings/daily');
-    const image = gate(`/api/v1/assets/${id(1091)}/content`);
+    const image = gate(thumbnailUrl(id(1091)));
     await go('/gallery'); await seen(list); await seen(daily);
     const gallery = page.locator('main[data-gallery-ready]');
     const heading = gallery.getByRole('heading', { name: '笔墨之间，自有天地' });
@@ -190,7 +190,7 @@ try {
     assert(await page.evaluate(count => window.__reveals.filter(item => item.label === '画廊结果').length > count, groups.length));
   });
   await scenario('gallery-offscreen-images-stay-lazy', { mobile: true }, async ({ page, gate, seen, go, ready }) => {
-    const held = gate(`/api/v1/assets/${id(1101)}/content`);
+    const held = gate(thumbnailUrl(id(1101)));
     await go('/gallery'); await ready();
     const image = page.locator('.gallery-row-item img').last();
     assert.equal(await image.getAttribute('loading'), 'lazy');
@@ -226,7 +226,7 @@ try {
     assert.equal(catalogReads(), count);
   });
   await scenario('broken-image-fallback-does-not-block', { brokenImage: true }, async ({ page, go, ready }) => {
-    await go('/gallery'); await ready(); assert(await page.locator('.media-fallback').count() > 0);
+    await go('/gallery'); await ready(); await page.locator('.gallery-row-item .media-fallback').first().waitFor();
   });
   await scenario('rapid-navigation-discards-old-wait', {}, async ({ page, gate, seen, go, ready, record }) => {
     const held = gate('/api/v1/paintings');
@@ -510,13 +510,18 @@ try {
   });
   await scenario('gallery-append-only-new-items', {}, async ({page,gate,seen,go,ready}) => {
     await go('/gallery');await ready();await page.evaluate(()=>{window.__oldGalleryCard=document.querySelector('.gallery-row-item');window.__oldGalleryIds=[...document.querySelectorAll('.gallery-row-item')].map(node=>node.dataset.paintingId);window.__reveals=[];});
-    const held=gate(`/api/v1/assets/${id(1113)}/content`);await page.getByRole('button',{name:'加载更多画作',exact:true}).click();await seen(held);
+    const thumbnail = page.locator(`.gallery-row-item[data-painting-id="${id(113)}"] img`);
+    const held = gate(thumbnailUrl(id(1113)));
+    await page.getByRole('button', {name:'加载更多画作', exact:true}).click();
+    await thumbnail.scrollIntoViewIfNeeded(); await seen(held);
     assert(await page.evaluate(()=>document.querySelector('.gallery-row-item')===window.__oldGalleryCard));
     assert.equal(await page.locator('.gallery-row-item').count(),24);assert(await page.locator('.gallery-row-item').first().isVisible());
-    held.release.resolve();await page.getByRole('button',{name:'加载更多画作',exact:true}).waitFor();
-    await page.waitForFunction(()=>[...document.querySelectorAll('.gallery-row-item img')].every(image=>image.complete&&image.naturalWidth>0));
+    await page.getByRole('button', {name:'加载更多画作', exact:true}).waitFor();
+    assert(await thumbnail.evaluate(image => image.loading === 'lazy' && !image.complete));
     await page.waitForFunction(()=>window.__reveals.filter(item=>item.id==='artlive-content-reveal').length>=12);
     assert(await page.evaluate(()=>window.__reveals.every(item=>item.id==='artlive-content-reveal'&&item.paintingId&&!window.__oldGalleryIds.includes(item.paintingId))));
+    held.release.resolve();
+    await page.waitForFunction(src => [...document.images].some(image => image.src.endsWith(src) && image.naturalWidth > 0), thumbnailUrl(id(1113)));
   });
   await scenario('community-tag-and-latest-search-are-local', {}, async ({page,state,gate,seen,go,ready,record}) => {
     state.communityTags=[{name:'山水',postCount:1}];state.communityPosts=[{id:7,author:{id:42,username:'isolated',nickname:'隔离社区',role:'user'},content:'初始分享',images:[],tags:['山水'],likeCount:0,coinCount:0,commentCount:0,createTime:'2026-11-12 00:00:00'}];

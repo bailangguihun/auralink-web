@@ -3,70 +3,33 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { justifiedRows } from "@/lib/gallery-rows";
 import { artworkAspectRatio } from "@/lib/masonry-layout";
-import { resolveCatalogThumbnailUrl, resolveMediaUrl } from "@/lib/media";
 import type { PaintingSummary } from "@/lib/types";
-import { PaintingGridSkeleton, LoadingStatus } from "@/components/loading";
 import { startPresentation } from "@/lib/content-presentation";
 import { StatePanel } from "@/components/state-panel";
 
-// Public asset dimensions only: no account data, tokens, or persistent storage.
-const ratios = new Map<string, number>();
 function catalogRatio(painting: PaintingSummary): number {
   const { width, height } = painting.image ?? {};
   return width && height && width > 0 && height > 0 ? artworkAspectRatio(width, height) : 4 / 3;
 }
 
-function prepareRatio(painting: PaintingSummary, signal: AbortSignal): Promise<number> {
-  const source = resolveCatalogThumbnailUrl(painting.image) ?? resolveMediaUrl(painting.image?.contentUrl);
-  if (!source) return Promise.resolve(4 / 3);
-  const cached = ratios.get(source);
-  if (cached) return Promise.resolve(cached);
-  const { width, height } = painting.image!;
-  if (width && height && width > 0 && height > 0) return Promise.resolve(artworkAspectRatio(width, height));
-  return new Promise(resolve => {
-    const image = new Image();
-    const finish = (ratio: number, remember = false) => {
-      clearTimeout(timer);
-      image.onload = image.onerror = null;
-      signal.removeEventListener("abort", cancel);
-      if (remember) {
-        if (ratios.size >= 1000) ratios.delete(ratios.keys().next().value!);
-        ratios.set(source, ratio);
-      }
-      resolve(ratio);
-    };
-    const cancel = () => { finish(4 / 3); image.removeAttribute("src"); };
-    // A slow/broken image must not block an entire batch indefinitely.
-    const timer = setTimeout(() => finish(4 / 3), 8000);
-    image.onload = () => finish(artworkAspectRatio(image.naturalWidth, image.naturalHeight), true);
-    image.onerror = () => finish(4 / 3);
-    signal.addEventListener("abort", cancel, { once: true });
-    if (signal.aborted) cancel(); else image.src = source;
-  });
-}
-
-type PreparedBatch = { batch: PaintingSummary[]; ratios: number[] };
 type Viewport = { key: string; paintingId?: string; offset: number; scrollY: number; savedAt: number };
 let savedViewport: Viewport | undefined;
 let viewportVersion = 0;
 export function resetGalleryViewport() { savedViewport = undefined; viewportVersion++; }
+export function hasSavedGalleryViewport(generation: number) {
+  return savedViewport?.key.startsWith(`${generation}:`) === true
+    && Date.now() - savedViewport.savedAt < 20 * 60_000;
+}
 
 export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, renderPainting }: {
   batches: PaintingSummary[][];
   viewKey: string;
   restoreReady: boolean;
   onPrepared: (count: number) => void;
-  renderPainting: (painting: PaintingSummary, priority: boolean) => ReactNode;
+  renderPainting: (painting: PaintingSummary, priority: boolean, previewSizes?: string) => ReactNode;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const [prepared, setPrepared] = useState<PreparedBatch[]>([]);
-  const preparedRef = useRef(prepared);
-  const visiblePrepared = useMemo(() => {
-    let length = 0;
-    while (length < prepared.length && prepared[length].batch === batches[length]) length++;
-    return length === prepared.length ? prepared : prepared.slice(0, length);
-  }, [prepared, batches]);
   const mountedVersion = useRef(viewportVersion);
   const restoring = useRef(savedViewport?.key === viewKey && Date.now() - savedViewport.savedAt < 20 * 60_000 ? savedViewport : undefined);
 
@@ -89,38 +52,19 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
     return () => { observer?.disconnect(); window.removeEventListener("resize", schedule); cancelAnimationFrame(frame); };
   }, []);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    let length = 0;
-    while (length < preparedRef.current.length && preparedRef.current[length].batch === batches[length]) length++;
-    const existing = preparedRef.current.slice(0, length);
-    void (async () => {
-      const next = [...existing];
-      for (let i = existing.length; i < batches.length; i++) {
-        const batch = batches[i];
-        // Use the same first-batch geometry on entry and when restoring a scroll anchor.
-        const sizes = i === 0 ? batch.map(catalogRatio) : await Promise.all(batch.map(painting => prepareRatio(painting, controller.signal)));
-        if (controller.signal.aborted) return;
-        next.push({ batch, ratios: sizes });
-        preparedRef.current = [...next];
-        setPrepared([...next]);
-      }
-    })();
-    return () => controller.abort();
+  const count = batches.reduce((sum, batch) => sum + batch.length, 0);
+  useLayoutEffect(() => {
+    if (!restoring.current) mountedVersion.current = viewportVersion;
   }, [batches]);
-
-  const count = visiblePrepared.reduce((sum, entry) => sum + entry.batch.length, 0);
-  const firstBatchIds = useMemo(() => new Set(batches[0]?.map(painting => painting.paintingId)), [batches]);
-  const pending = count < batches.reduce((sum, batch) => sum + batch.length, 0);
   const displayedIds = useRef(new Set<string>());
   const [presentationError, setPresentationError] = useState(false);
   const gap = width > 900 ? 20 : width > 680 ? 16 : 14;
   const rows = useMemo(() => {
     const result: { paintings: PaintingSummary[]; height: number; widths: number[]; left: number }[] = [];
     if (!width) return result;
-    for (const entry of visiblePrepared) {
-      let paintings = entry.batch;
-      let sizes = entry.ratios;
+    for (const batch of batches) {
+      let paintings = batch;
+      let sizes = batch.map(catalogRatio);
       // A short terminal batch joins only the previous final row. Earlier rows
       // and all normal 12-item additions keep their positions at the same width.
       if (paintings.length < 3 && result.length && width > 680) {
@@ -133,7 +77,7 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
       }
     }
     return result;
-  }, [visiblePrepared, width, gap]);
+  }, [batches, width, gap]);
 
   useLayoutEffect(() => {
     const node = container.current;
@@ -143,29 +87,35 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
     const prepared = () => { displayedIds.current = new Set(cards.map(card => card.dataset.paintingId!)); onPrepared(count); };
     if (!displayedIds.current.size || !next.length) { prepared(); return; }
     if (presentationError) { for (const card of next) card.hidden = true; return; }
-    const presentation = startPresentation(node, { regions: next, ready: () => !pending, onPrepared: prepared, onTimeout: () => setPresentationError(true) });
+    const presentation = startPresentation(node, { regions: next, onPrepared: prepared, onTimeout: () => setPresentationError(true) });
     return presentation.cancel;
-  }, [rows, count, pending, onPrepared, presentationError]);
+  }, [rows, count, onPrepared, presentationError]);
 
   useLayoutEffect(() => {
     const node = container.current;
     if (!node) return;
-    const save = () => {
+    let navigationCaptured = false;
+    const save = (anchor?: HTMLElement) => {
       if (mountedVersion.current !== viewportVersion) return;
       // Capture before navigation changes scroll position or removes the cards.
-      const item = Array.from(node.querySelectorAll<HTMLElement>("[data-painting-id]"))
+      const item = anchor ?? Array.from(node.querySelectorAll<HTMLElement>("[data-painting-id]"))
         .find(candidate => candidate.getBoundingClientRect().bottom > 90);
       if (!item) return;
       savedViewport = { key: viewKey, paintingId: item.dataset.paintingId, offset: item.getBoundingClientRect().top, scrollY: window.scrollY, savedAt: Date.now() };
     };
     const beforeNavigate = (event: MouseEvent) => {
-      if (event.target instanceof Element && event.target.closest("a[href]")) save();
+      if (!(event.target instanceof Element) || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target.closest("a[href]");
+      if (!link) return;
+      save(link.closest<HTMLElement>("[data-painting-id]") ?? undefined);
+      navigationCaptured = true;
     };
+    const saveOnExit = () => { if (!navigationCaptured) save(); };
     // Daily recommendations sit outside the rows but need the same scroll snapshot.
     const gallery = node.closest<HTMLElement>(".gallery-page") || node;
     gallery.addEventListener("click", beforeNavigate, true);
-    window.addEventListener("pagehide", save);
-    return () => { save(); gallery.removeEventListener("click", beforeNavigate, true); window.removeEventListener("pagehide", save); };
+    window.addEventListener("pagehide", saveOnExit);
+    return () => { saveOnExit(); gallery.removeEventListener("click", beforeNavigate, true); window.removeEventListener("pagehide", saveOnExit); };
   }, [viewKey]);
 
   useEffect(() => {
@@ -180,7 +130,7 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
   }, []);
 
   useEffect(() => {
-    if (!restoring.current || pending || !width || !restoreReady) return;
+    if (!restoring.current || !width || !restoreReady) return;
     let frame = 0;
     let disposed = false;
     void document.fonts.ready.then(() => {
@@ -188,24 +138,32 @@ export function GalleryRows({ batches, viewKey, restoreReady, onPrepared, render
       frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
         const snapshot = restoring.current;
         if (!snapshot) return;
-        const anchor = Array.from(container.current?.querySelectorAll<HTMLElement>("[data-painting-id]") || [])
-          .find(item => item.dataset.paintingId === snapshot.paintingId);
-        window.scrollTo({ top: anchor ? window.scrollY + anchor.getBoundingClientRect().top - snapshot.offset : snapshot.scrollY, behavior: "instant" });
+        if (mountedVersion.current === viewportVersion) {
+          const anchor = Array.from(container.current?.querySelectorAll<HTMLElement>("[data-painting-id]") || [])
+            .find(item => item.dataset.paintingId === snapshot.paintingId);
+          window.scrollTo({ top: anchor ? window.scrollY + anchor.getBoundingClientRect().top - snapshot.offset : snapshot.scrollY, behavior: "instant" });
+        }
         restoring.current = undefined;
         // Shared-image returns must wait for this scroll, not just mounted cards.
         if (container.current) container.current.dataset.galleryRestoring = "false";
       }); });
     });
     return () => { disposed = true; cancelAnimationFrame(frame); };
-  }, [pending, width, restoreReady, count]);
+  }, [width, restoreReady, count]);
 
-  return <div ref={container} className="gallery-rows" data-gallery-restoring={Boolean(restoring.current)} role="region" aria-label="画作目录" aria-busy={pending} style={{ "--gallery-gap": `${gap}px` } as CSSProperties}>
+  return <div ref={container} className="gallery-rows" data-gallery-restoring={Boolean(restoring.current)} role="region" aria-label="画作目录" style={{ "--gallery-gap": `${gap}px` } as CSSProperties}>
     {rows.map((row, rowIndex) => <div className="gallery-row" key={row.paintings[0].paintingId} style={{ marginLeft: row.left, "--gallery-row-image-height": `${row.height}px` } as CSSProperties}>
-      {row.paintings.map((painting, index) => <div className="gallery-row-item" data-painting-id={painting.paintingId} data-progressive-images={firstBatchIds.has(painting.paintingId) ? "" : undefined} key={painting.paintingId} style={{ width: row.widths[index] }}>
-        {renderPainting(painting, rowIndex === 0)}
-      </div>)}
+      {row.paintings.map((painting, index) => {
+        const { width, height } = painting.image ?? {};
+        // Match the contained image and its zoom inside the card's one-pixel border.
+        const slot = width && height && width > 0 && height > 0
+          ? Math.ceil(Math.min(row.widths[index] - 2, row.height * width / height) * 1.08)
+          : null;
+        return <div className="gallery-row-item" data-painting-id={painting.paintingId} data-progressive-images="" key={painting.paintingId} style={{ width: row.widths[index] }}>
+          {renderPainting(painting, rowIndex === 0, slot && slot > 0 ? `${slot}px` : undefined)}
+        </div>;
+      })}
     </div>)}
     {presentationError ? <StatePanel kind="error" title="新增画作预览暂未准备完成" description="请重新筛选或刷新页面后重试。" actionLabel="刷新页面" onAction={() => location.reload()} /> : null}
-    {pending ? <div className="gallery-preparing"><PaintingGridSkeleton count={3} rows /><LoadingStatus label="正在准备画作预览" /></div> : null}
   </div>;
 }

@@ -19,7 +19,8 @@ assert(output, 'ARTWORK_BROWSER_OUTPUT is required');
 await mkdir(output, { recursive: true });
 const selected = process.env.ARTWORK_CASES?.split(',');
 const caseNames = [
-  'fast-round-trip', 'catalog-thumbnail-round-trip', 'catalog-thumbnail-fallback',
+  'fast-round-trip', 'catalog-thumbnail-round-trip', 'catalog-thumbnail-fallback', 'catalog-thumbnail-mobile', 'catalog-daily-view',
+  'responsive-thumbnail-open', 'responsive-thumbnail-high-dpr', 'responsive-thumbnail-fallback',
   'slow-detail-read', 'slow-route-code', 'slow-return-daily-read',
   'mobile-slow-round-trip', 'cold-route-beyond-five-seconds', 'user-cancellation-restores-content',
   'reduced-motion-keeps-navigation', 'session-change-clears-transfer', 'detail-read-failure-after-flight',
@@ -38,8 +39,9 @@ const paintingId = id(90);
 const detailPath = `/gallery/${paintingId}`;
 const detailApi = `/api/v1/paintings/${paintingId}`;
 const originalImage = `/api/v1/assets/${id(1090)}/content`;
-const thumbnailFor = assetId => `/api/v1/assets/public-catalog-thumbnails/v1/${assetId}/${'a'.repeat(64)}.jpg`;
+const thumbnailFor = (assetId, compact = false) => `/api/v1/assets/public-catalog-thumbnails/v2/${compact ? "480/" : ""}${assetId}/${'a'.repeat(64)}.jpg`;
 const thumbnailImage = thumbnailFor(id(1090));
+const smallThumbnailImage = thumbnailFor(id(1090), true);
 const dailyApi = '/api/v1/paintings/daily';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -75,6 +77,26 @@ if (process.env.ARTWORK_IMAGE_FILE) {
     report.imageFixture = { filename, bytes: bytes.length, contentType, ...dimensions, sha256: createHash('sha256').update(bytes).digest('hex') };
   } finally { await probe.close(); }
 }
+const responsiveImages = new Map();
+if (!selected || selected.some(name => name.startsWith('responsive-thumbnail-'))) {
+  const probe = await browser.newPage();
+  try {
+    for (const width of [480, 720]) {
+      const contents = await probe.evaluate(width => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = width * 3 / 4;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#efe3d0';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = '#593c2c';
+        context.fillRect(width / 4, width / 4, width / 2, width / 8);
+        return canvas.toDataURL('image/jpeg').split(',')[1];
+      }, width);
+      responsiveImages.set(width, Buffer.from(contents, 'base64'));
+    }
+  } finally { await probe.close(); }
+}
 function adjustImageMetadata(value) {
   if (!artworkImage || !value || typeof value !== 'object' || Buffer.isBuffer(value)) return;
   if (value.image?.contentUrl?.startsWith('/api/v1/assets/')) Object.assign(value.image, {
@@ -84,13 +106,17 @@ function adjustImageMetadata(value) {
   for (const item of Object.values(value)) if (item && typeof item === 'object') adjustImageMetadata(item);
 }
 
-function addThumbnails(value, missingDimensions) {
+function addThumbnails(value, missingDimensions, responsive) {
   if (!value || typeof value !== 'object' || Buffer.isBuffer(value)) return;
   if (value.image?.assetId) {
     value.image.thumbnailUrl = thumbnailFor(value.image.assetId);
+    if (responsive) {
+      value.image.previewUrl = value.image.thumbnailUrl;
+      value.image.smallPreviewUrl = thumbnailFor(value.image.assetId, true);
+    }
     if (missingDimensions) Object.assign(value.image, { width: null, height: null });
   }
-  for (const item of Object.values(value)) if (item && typeof item === 'object') addThumbnails(item, missingDimensions);
+  for (const item of Object.values(value)) if (item && typeof item === 'object') addThumbnails(item, missingDimensions, responsive);
 }
 
 async function scenario(name, options, run) {
@@ -101,6 +127,7 @@ async function scenario(name, options, run) {
   const gates = new Map();
   const context = await browser.newContext({
     viewport: options.viewport || { width: options.mobile ? 390 : 1440, height: options.mobile ? 844 : 1000 },
+    deviceScaleFactor: options.deviceScaleFactor,
     hasTouch: Boolean(options.touch),
     isMobile: Boolean(options.isMobile),
     reducedMotion: options.reducedMotion ? 'reduce' : 'no-preference', serviceWorkers: 'block',
@@ -282,8 +309,16 @@ async function scenario(name, options, run) {
     if (url.pathname === detailApi && options.detailDelayMs) {
       call.injectedDelayMs = options.detailDelayMs; await delay(options.detailDelayMs);
     }
-    const response = options.thumbnailFailure && url.pathname === thumbnailImage
+    const failingOriginal = options.originalFailure && url.pathname === originalImage
+      && record.calls.filter(entry => entry.path === originalImage).length === 1;
+    const failingThumbnail = (options.thumbnailFailure && url.pathname === thumbnailImage)
+      || (options.smallThumbnailFailure && url.pathname === smallThumbnailImage);
+    const responsiveImage = options.responsiveThumbnails && url.pathname.startsWith('/api/v1/assets/public-catalog-thumbnails/')
+      ? responsiveImages.get(url.pathname.includes('/v2/480/') ? 480 : 720) : null;
+    const response = failingOriginal || failingThumbnail
       ? { status: 404, contentType: 'text/plain', body: '' }
+      : responsiveImage
+      ? { status: 200, contentType: 'image/jpeg', body: responsiveImage }
       : artworkImage && url.pathname.startsWith('/api/v1/assets/')
       ? { status: 200, contentType: artworkImage.contentType, body: artworkImage.bytes }
       : url.pathname === '/api/v1/critic/capability'
@@ -298,9 +333,9 @@ async function scenario(name, options, run) {
         response.body.generatedText = account === 'A' ? '旧账号响应只用于隔离验证。' : '新账号响应已经确认。';
       }
     }
-    adjustImageMetadata(response.body);
+    if (!options.responsiveThumbnails) adjustImageMetadata(response.body);
     if (options.catalogThumbnails) {
-      addThumbnails(response.body, url.pathname === '/api/v1/paintings' && url.searchParams.get('page') === '1');
+      addThumbnails(response.body, url.pathname === '/api/v1/paintings' && url.searchParams.get('page') === '1', options.responsiveThumbnails);
     }
     try {
       await route.fulfill({ status: response.status, headers, contentType: response.contentType,
@@ -492,10 +527,11 @@ async function scenario(name, options, run) {
     await captureMoving('open');
   };
   const detailVisible = async () => {
-    await page.locator(`.detail-page .detail-layout:not([data-artwork-preview]) [data-artwork-target="${paintingId}"] img`).waitFor({ state: 'visible' });
+    await page.locator(`.detail-page .detail-layout:not([data-artwork-preview]) [data-artwork-target="${paintingId}"] img:not([hidden])`).waitFor({ state: 'visible' });
     await page.waitForFunction(paintingId => {
-      const image = document.querySelector(`.detail-page .detail-layout:not([data-artwork-preview]) [data-artwork-target="${paintingId}"] img`);
-      return image?.complete && image.naturalWidth > 0 && getComputedStyle(image).visibility === 'visible';
+      const image = document.querySelector(`.detail-page .detail-layout:not([data-artwork-preview]) [data-artwork-target="${paintingId}"] img:not([hidden])`);
+      return image?.complete && image.naturalWidth > 0 && getComputedStyle(image).visibility === 'visible'
+        && new URL(image.currentSrc).pathname.endsWith('/content');
     }, paintingId);
     if (process.env.ARTWORK_CAPTURE_FRAMES === '1') await page.screenshot({ path: `${output}/${name}-detail-loaded.png` });
   };
@@ -528,6 +564,8 @@ async function scenario(name, options, run) {
       return !((pathname === `${detailApi}/guide` && entry.text.includes('404'))
         || (pathname === `${detailApi}/critic` && entry.text.includes('503'))
         || (pathname === thumbnailImage && options.thumbnailFailure && entry.text.includes('404'))
+        || (pathname === smallThumbnailImage && options.smallThumbnailFailure && entry.text.includes('404'))
+        || (pathname === originalImage && options.originalFailure && entry.text.includes('404'))
         || (pathname === detailApi && options.detailStatus && entry.text.includes(String(options.detailStatus))));
     });
     assert.deepEqual(record.unexpectedConsole, [], 'Only the HTTP errors injected by the fixture are expected');
@@ -567,10 +605,13 @@ try {
     assert(!record.calls.some(call => call.path === originalImage), 'The gallery has not downloaded the original');
     const detail = gate(detailApi);
     await openPainting(); await completedFlight('open'); await observed(detail);
-    const detailImage = page.locator(`.detail-page [data-artwork-target="${paintingId}"] img`);
+    const detailImage = page.locator(`.detail-page [data-artwork-target="${paintingId}"] img:not([hidden])`);
     await detailImage.waitFor({ state: 'attached' });
     assert.equal(await detailImage.getAttribute('src'), api + thumbnailImage);
-    release(detailApi, detail); await detailVisible(); await cleared();
+    const hd = gate(originalImage);
+    release(detailApi, detail); await observed(hd);
+    assert.equal(await detailImage.getAttribute('src'), api + thumbnailImage, 'Preview remains visible during the original request');
+    release(originalImage, hd); await detailVisible(); await cleared();
     assert.equal(await detailImage.getAttribute('src'), api + originalImage);
     assert(record.calls.some(call => call.path === originalImage));
     await returnToGallery(); await completedFlight('return'); await cleared();
@@ -580,16 +621,90 @@ try {
     const appended = page.locator(`.gallery-row-item [data-artwork-source="${id(102)}"] img`);
     await appended.waitFor({ state: 'attached' });
     assert.equal(await appended.getAttribute('src'), api + thumbnailFor(nextId));
-    assert(record.calls.some(call => call.path === thumbnailFor(nextId)));
+    await appended.scrollIntoViewIfNeeded();
+    await page.waitForFunction(asset => performance.getEntriesByName(asset).length > 0, api + thumbnailFor(nextId));
     assert(!record.calls.some(call => call.path === `/api/v1/assets/${nextId}/content`), 'Measuring and displaying appended works only needs thumbnails');
   });
-  await scenario('catalog-thumbnail-fallback', { catalogThumbnails: true, thumbnailFailure: true }, async ({ page, openGallery, record }) => {
+  await scenario('catalog-thumbnail-fallback', { catalogThumbnails: true, thumbnailFailure: true }, async ({ page, openGallery, openPainting, detailVisible, record }) => {
+    await openGallery({ decoded: false });
+    const card = page.locator(`.gallery-row-item [data-artwork-source="${paintingId}"]`);
+    const retry = card.getByRole('button', { name: '重试缩略图' });
+    await retry.waitFor();
+    const beforeRetry = record.calls.filter(call => call.path === thumbnailImage).length;
+    await retry.click();
+    await retry.waitFor();
+    assert(record.calls.filter(call => call.path === thumbnailImage).length > beforeRetry);
+    assert(!record.calls.some(call => /\/assets\/[^/]+\/content$/.test(call.path)), 'A failed preview and retry never load an original');
+    await openPainting(); await detailVisible();
+    assert.deepEqual(record.calls.filter(call => /\/assets\/[^/]+\/content$/.test(call.path)).map(call => call.path), [originalImage]);
+  });
+  await scenario('catalog-daily-view', { catalogThumbnails: true }, async ({ page, openGallery, detailVisible, returnToGallery, cleared, record }) => {
     await openGallery();
-    const card = page.locator(`.gallery-row-item [data-artwork-source="${paintingId}"] img`);
-    assert.equal(await card.getAttribute('src'), api + originalImage);
-    const thumbIndex = record.calls.findIndex(call => call.path === thumbnailImage);
-    const originalIndex = record.calls.findIndex(call => call.path === originalImage);
-    assert(thumbIndex >= 0 && originalIndex > thumbIndex, 'Original loads only after the unavailable thumbnail');
+    const image = page.locator('.daily-media img');
+    await image.scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => document.querySelector('.daily-media img')?.naturalWidth > 0);
+    assert.equal(await image.getAttribute('src'), api + thumbnailImage);
+    const box = await image.boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForURL(url => url.pathname === detailPath);
+    await detailVisible(); await cleared();
+    assert.deepEqual(record.calls.filter(call => /\/assets\/[^/]+\/content$/.test(call.path)).map(call => call.path), [originalImage]);
+    await returnToGallery(); await cleared();
+    assert.equal(await image.getAttribute('src'), api + thumbnailImage);
+  });
+  const responsiveOptions = { mobile: true, catalogThumbnails: true, responsiveThumbnails: true };
+  const cardImage = `.gallery-row-item [data-artwork-source="${paintingId}"] img`;
+  const originalReads = record => record.calls.filter(call => /\/assets\/[^/]+\/content$/.test(call.path));
+  await scenario('responsive-thumbnail-open', responsiveOptions, async ({ page, openGallery, openPainting, gate, release, detailVisible, record }) => {
+    await openGallery();
+    assert.equal(await page.locator(cardImage).evaluate(image => image.currentSrc), api + smallThumbnailImage);
+    assert.equal(await page.locator('.daily-media img').evaluate(image => image.currentSrc), api + smallThumbnailImage);
+    assert.equal(originalReads(record).length, 0);
+    const hd = gate(originalImage);
+    await openPainting(); await observed(hd);
+    const preview = page.locator('[data-artwork-target] img:not([hidden])');
+    await preview.waitFor({ state: 'attached' });
+    assert.equal(await preview.getAttribute('src'), api + smallThumbnailImage, 'Keep the same preview while the original is pending');
+    assert(!record.calls.some(call => call.path === thumbnailImage), 'Opening the detail did not download the other thumbnail size');
+    release(originalImage, hd); await detailVisible();
+    assert.deepEqual(originalReads(record).map(call => call.path), [originalImage]);
+  });
+  await scenario('responsive-thumbnail-high-dpr', { ...responsiveOptions, deviceScaleFactor: 2 }, async ({ page, openGallery, record }) => {
+    await openGallery();
+    assert.equal(await page.locator(cardImage).evaluate(image => image.currentSrc), api + thumbnailImage);
+    assert.equal(originalReads(record).length, 0);
+  });
+  await scenario('responsive-thumbnail-fallback', { ...responsiveOptions, smallThumbnailFailure: true }, async ({ page, openGallery, record }) => {
+    await openGallery();
+    const image = page.locator(cardImage);
+    assert.equal(await image.evaluate(node => node.currentSrc), api + thumbnailImage);
+    assert.equal(await image.getAttribute('srcset'), null);
+    assert(record.calls.some(call => call.path === smallThumbnailImage));
+    assert.equal(originalReads(record).length, 0);
+  });
+  await scenario('catalog-thumbnail-mobile', { mobile: true, catalogThumbnails: true, originalFailure: true }, async ({ page, openGallery, openPainting, detailVisible, record }) => {
+    await openGallery();
+    const search = page.getByRole('searchbox', { name: '关键词' });
+    await search.fill('山水');
+    await page.getByText('更多筛选', { exact: true }).click();
+    await page.getByLabel('分类', { exact: true }).fill('花鸟');
+    const filterRead = page.waitForRequest(request => {
+      const url = new URL(request.url());
+      return url.pathname === '/api/v1/paintings' && url.searchParams.get('keyword') === '山水'
+        && url.searchParams.get('category') === '花鸟';
+    });
+    await page.getByRole('button', { name: '检索画作' }).click();
+    await filterRead;
+    const card = page.locator(`.gallery-row-item [data-artwork-source="${paintingId}"]`);
+    await card.locator('img').waitFor({ state: 'visible' });
+    await card.hover();
+    assert(!record.calls.some(call => /\/assets\/[^/]+\/content$/.test(call.path)), 'Searching and hovering never request originals');
+    await openPainting();
+    const retry = page.getByRole('button', { name: '重试高清图' });
+    await retry.waitFor();
+    assert.equal(await page.locator('[data-artwork-target] img:not([hidden])').getAttribute('src'), api + thumbnailImage);
+    await retry.click(); await detailVisible();
+    assert.deepEqual(record.calls.filter(call => /\/assets\/[^/]+\/content$/.test(call.path)).map(call => call.path), [originalImage, originalImage]);
   });
   await scenario('slow-detail-read', {}, async ({ page, openGallery, openPainting, completedFlight, detailVisible, gate, release, previewVisible, deferredReads, cleared }) => {
     await openGallery(); const detail = gate(detailApi); await openPainting();
@@ -675,7 +790,7 @@ try {
     await openPainting(); await completedFlight('open'); await detailVisible(); await cleared();
   });
   await scenario('undecoded-image-navigation', {}, async ({ page, openGallery, openPainting, detailVisible, gate, release, cleared, animations }) => {
-    const assetPath = painting(90).image.contentUrl;
+    const assetPath = painting(90).image.thumbnailUrl;
     await openGallery();
     const image = gate(assetPath), detail = gate(detailApi);
     // A fresh page waits for its images before enabling interaction. Change an

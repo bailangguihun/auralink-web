@@ -1,7 +1,7 @@
 // Rendered Web with isolated API fixtures only; no production writes or auth acceptance.
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { newState, responseFor, painting } from './fixtures/loading-runtime.mjs';
+import { id, newState, responseFor, painting } from './fixtures/loading-runtime.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 function localOrigin(name) {
@@ -178,14 +178,16 @@ async function scenario(name, options, run) {
     const headers = { 'access-control-allow-origin': web, 'access-control-allow-methods': 'GET,HEAD,OPTIONS,PUT,DELETE', 'access-control-allow-headers': 'authorization,content-type', 'cache-control': 'no-store' };
     if (method === 'OPTIONS') { await route.fulfill({ status: 204, headers }); return; }
     state.calls.push({ method, path: url.pathname, query: url.search });
+    if (url.pathname === '/api/user/profile' && state.profileGate) await state.profileGate;
     const favorite = url.pathname.match(/^\/api\/v1\/paintings\/([^/]+)\/favorite$/);
     if (favorite && ['PUT', 'DELETE'].includes(method)) {
       state.favorites.set(favorite[1], method === 'PUT'); await route.fulfill({ status: 204, headers }); return;
     }
     assert(['GET', 'HEAD'].includes(method), 'Only bounded synthetic favorite writes are permitted');
     if (url.pathname.startsWith('/api/v1/assets/')) {
-      const number = Number.parseInt(url.pathname.split('/')[4].slice(-12), 10);
+      const number = Number.parseInt(url.pathname.split('/')[url.pathname.includes('public-catalog-thumbnails') ? 6 : 4].slice(-12), 10);
       const index = Math.max(0, number - 1100), asset = assets[index % assets.length];
+      if (number === state.heldThumbnail && state.thumbnailGate) await state.thumbnailGate;
       if (number >= 1100 && number < 1112 && state.firstImageGate) await state.firstImageGate;
       if (index >= 12 && state.appendImageGate) await state.appendImageGate;
       if (state.slow) await sleep(state.slow);
@@ -249,6 +251,54 @@ async function scenario(name, options, run) {
 }
 
 try {
+  let releaseProfile;
+  const profileGate = new Promise(resolve => { releaseProfile = resolve; });
+  await scenario('public-gallery-during-session-restore', { profileGate, favorites: new Map([[id(100), true]]) }, async ({ page, state }) => {
+    const first = cards(page).first();
+    try {
+      await first.getByRole('link', { name: /查看.*详情/ }).click({ trial: true, timeout: 5000 });
+      await page.locator('.daily-card h3').waitFor({ timeout: 5000 });
+      assert(await page.getByText('确认账号', { exact: true }).isVisible());
+      assert(state.calls.some(call => call.path === '/api/user/profile'));
+      assert.equal(catalogCalls(state).length, 1);
+      assert.equal(state.calls.filter(call => call.path === '/api/v1/paintings/daily').length, 1);
+      assert.equal(await first.locator('button.favorite-button').count(), 0);
+      await applyKeyword(page, '山水');
+      await first.getByRole('heading', { name: '山水 1', exact: true }).waitFor({ timeout: 5000 });
+      assert(await page.getByText('确认账号', { exact: true }).isVisible());
+    } finally { releaseProfile(); }
+    await first.getByRole('button', { name: '取消收藏山水 1', exact: true }).waitFor();
+    assert.equal(catalogCalls(state).length, 2, 'Finishing profile restore does not restart the filtered catalog');
+    assert.equal(state.calls.filter(call => call.path === '/api/v1/paintings/daily').length, 1);
+  });
+
+  let releaseAppendProfile, releaseThumbnail;
+  const appendProfileGate = new Promise(resolve => { releaseAppendProfile = resolve; });
+  const thumbnailGate = new Promise(resolve => { releaseThumbnail = resolve; });
+  await scenario('append-and-open-during-slow-session-and-thumbnail', {
+    profileGate: appendProfileGate, thumbnailGate, heldThumbnail: 1112, width: 390,
+  }, async ({ page, state }) => {
+    const held = cards(page).nth(12);
+    const other = cards(page).nth(13);
+    const detailPath = `/gallery/${id(113)}`;
+    const detailRead = `/api/v1/paintings/${id(113)}`;
+    try {
+      await moreButton(page).click({ timeout: 5000 });
+      await held.getByRole('link', { name: /查看.*详情/ }).click({ trial: true, timeout: 5000 });
+      assert(state.calls.some(call => call.path.includes(`/v2/${id(1112)}/`)));
+      assert.equal(await held.locator('[data-image-state="ready"]').count(), 0);
+      assert.equal(await held.locator('img').getAttribute('loading'), 'lazy');
+      assert.equal(await cards(page).count(), 24);
+      assert(await moreButton(page).isEnabled());
+      assert(await page.getByText('确认账号', { exact: true }).isVisible());
+      await other.getByRole('link', { name: /查看.*详情/ }).click({ timeout: 5000 });
+      await page.waitForURL(url => url.pathname === detailPath, { waitUntil: 'commit', timeout: 5000 });
+      assert(!state.calls.some(call => call.path === detailRead || /^\/api\/v1\/assets\/[^/]+\/content$/.test(call.path)));
+    } finally { releaseAppendProfile(); releaseThumbnail(); }
+    await page.getByRole('heading', { name: '隔离详情山水', exact: true, level: 1 }).waitFor();
+    assert.equal(state.calls.filter(call => call.path === detailRead).length, 1);
+  });
+
   await scenario('desktop', {}, async ({ page, state, shot, record }) => {
     const first = await geometry(page, 12);
     record.firstBottomDifference = first.maxBottomDifference;
@@ -325,17 +375,19 @@ try {
     let releaseResponse, releaseImages;
     state.appendResponseGate = new Promise(resolve => { releaseResponse = resolve; });
     state.appendImageGate = new Promise(resolve => { releaseImages = resolve; });
-    state.missing = true; // Only the new batch now needs natural image sizes.
+    state.missing = true; // New rows reserve space from the fallback aspect ratio.
     try {
       if (variant.keyboard) await page.keyboard.press('Enter'); else await button.click();
       await page.getByRole('button', { name: '正在加载…', exact: true }).waitFor();
       await settle(); record.requesting = await snapshot();
       assertViewport(record.before, record.requesting, 'Request pending');
       releaseResponse();
-      await page.locator('.gallery-preparing').waitFor();
+      await cards(page).nth(12).waitFor({ state: 'attached' });
       await settle(); record.preparing = await snapshot();
-      assert(record.preparing.documentHeight > record.before.documentHeight, 'New preview placeholders really extend the document');
-      assertViewport(record.before, record.preparing, 'Image dimensions pending');
+      assert(record.preparing.documentHeight > record.before.documentHeight, 'New rows reserve space while thumbnails are pending');
+      assertViewport(record.before, record.preparing, 'Thumbnails pending');
+      await moreButton(page).waitFor({ timeout: 5000 });
+      assert(await moreButton(page).isEnabled(), 'The next page is available while the current thumbnails are pending');
       let expected = record.before;
       if (variant.userScroll) {
         await page.mouse.move(100, 450); await page.mouse.wheel(0, -240);
@@ -354,9 +406,9 @@ try {
     for (const width of [901, 900, 681, 680, 390, 320, 1440]) {
       await page.setViewportSize({ width, height: 844 }); await geometry(page, 12, { singleColumn: width <= 680 });
       if (width === 390) { await cards(page).first().scrollIntoViewIfNeeded(); await shot('mobile', false); }
-      await page.getByText('更多筛选', { exact: true }).click(); await page.getByLabel('作者', { exact: true }).click();
+      await page.locator('.gallery-filters summary').click(); await page.getByLabel('作者', { exact: true }).click();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-      await page.getByText('更多筛选', { exact: true }).click();
+      await page.locator('.gallery-filters summary').click();
     }
   });
   await scenario('mobile-browse', { width: 390 }, async ({ page, state, shot }) => {
@@ -441,7 +493,7 @@ try {
     assert(current.items.every(item => item.title.startsWith('新查询 ')), 'Late append cannot enter the new filter');
     assert.equal(await page.getByRole('heading', { name: '布局预览 13', exact: true }).count(), 0);
     assert(catalogCalls(state).some(call => call.query.includes('keyword=') && !call.query.includes('page=1')));
-    await page.getByText('更多筛选', { exact: true }).click(); await page.getByLabel('作者', { exact: true }).fill('测试作者');
+    await page.locator('.gallery-filters summary').click(); await page.getByLabel('作者', { exact: true }).fill('测试作者');
     await page.locator('select[name="sort"]').selectOption('author');
     await page.getByRole('button', { name: '检索画作', exact: true }).click(); await geometry(page, 12);
     await page.waitForFunction(() => document.querySelector('button[type="submit"][aria-busy="true"]') === null);
@@ -451,7 +503,7 @@ try {
   });
   await scenario('shareable-filters', {}, async ({ page, state }) => {
     await geometry(page, 12);
-    await page.getByText('更多筛选', { exact: true }).click();
+    await page.locator('.gallery-filters summary').click();
     await page.getByLabel('关键词', { exact: true }).fill('江山 & 水');
     await page.getByLabel('作者', { exact: true }).fill('钱杜');
     await page.locator('select[name="sort"]').selectOption('author');
@@ -468,7 +520,7 @@ try {
     const request = new URLSearchParams(catalogCalls(state).slice(beforeReload).at(-1).query);
     for (const [name, value] of Object.entries(expected)) assert.equal(request.get(name), value);
     assert.equal(await page.getByLabel('关键词', { exact: true }).inputValue(), expected.keyword);
-    await page.getByText('更多筛选', { exact: true }).click();
+    await page.locator('.gallery-filters summary').click();
     assert.equal(await page.getByLabel('作者', { exact: true }).inputValue(), expected.author);
     assert.equal(await page.locator('select[name="sort"]').inputValue(), expected.sort);
     assert.equal(await page.locator('select[name="direction"]').inputValue(), expected.direction);
@@ -517,8 +569,10 @@ try {
       const controlTop = (await control.boundingBox()).y, before = firstPageCalls();
       await control.click();
       await geometry(page, 12);
+      const after = (await control.boundingBox()).y;
+      (record.restartPositions ??= []).push({ before: controlTop, after });
       assert.equal(firstPageCalls(), before + 1, 'Explicit search/reset requests page zero again');
-      assert(Math.abs((await control.boundingBox()).y - controlTop) <= 8, 'Explicit restart stays at the filters instead of restoring an old artwork anchor');
+      assert(Math.abs(after - controlTop) <= 8, 'Explicit restart stays at the filters instead of restoring an old artwork anchor');
       assert.equal(await page.getByRole('heading', { name: '布局预览 13', exact: true }).count(), 0, 'Previously appended cards are removed');
     };
     const detailAndBack = async () => {

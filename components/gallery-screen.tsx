@@ -38,7 +38,9 @@ function GalleryContent() {
   const query = repeatedSearch?.source === urlQuery ? repeatedSearch.query : urlQuery;
   const [actionError, setError] = useState<string | null>(null);
   const loadDaily = useCallback((signal: AbortSignal) => api.dailyPainting(token, signal), [token]);
-  const ready = status !== "loading";
+  // The first identity is selected from local storage. The profile request can
+  // still be pending when the public reads start with that identity's cache.
+  const ready = sessionIdentity.generation > 0;
   const catalog = useGalleryFeed(query, token, ready, sessionIdentity.generation);
   const recommendation = useReadResource(DAILY_PAINTING_KEY, loadDaily, ready, DAILY_PAINTING_TTL_MS);
   const { page, error: readError } = catalog;
@@ -124,9 +126,9 @@ function GalleryContent() {
         {catalog.notice ? <p className="gallery-notice" role="status">{catalog.notice}</p> : null}
         {fetchedCount ? (
           <GalleryRows key={viewKey} batches={catalog.batches} viewKey={viewKey} restoreReady={!dailyLoading} onPrepared={onPrepared}
-            renderPainting={(painting, priority) => {
+            renderPainting={(painting, priority, previewSizes) => {
               const renderedPainting = { ...painting, favorited: isFavorited(painting.paintingId, painting.favorited) };
-              return <PaintingCard painting={renderedPainting} authenticated={authenticated} favoriteBusy={isFavoriteBusy(painting.paintingId)} onFavorite={toggleFavorite} masonry priority={priority} />;
+              return <PaintingCard painting={renderedPainting} authenticated={authenticated} favoriteBusy={isFavoriteBusy(painting.paintingId)} onFavorite={toggleFavorite} masonry priority={priority} previewSizes={previewSizes} />;
             }} />
         ) : null}
       </ContentReveal> : null}

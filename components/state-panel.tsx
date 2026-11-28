@@ -40,7 +40,7 @@ export function StatePanel({
         <h2>{title}</h2>
         {description ? <p>{description}</p> : null}
         {actionLabel && actionHref ? (
-          <Link className="button button-primary" href={actionHref}>{actionLabel}</Link>
+          <Link className="button button-primary" href={actionHref} prefetch={false}>{actionLabel}</Link>
         ) : null}
         {actionLabel && onAction ? (
           <button className="button button-primary" type="button" onClick={onAction}>{actionLabel}</button>

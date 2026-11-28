@@ -615,7 +615,7 @@ function CitationView({ citation }: { citation: Citation }) {
   const url = typeof citation.provenance.url === 'string' ? assistantMarkdownLink(citation.provenance.url) : null;
   return <article className={styles.citation}><header><strong>{title || (citation.sourceType === 'PLATFORM_ARTWORK' ? '平台作品' : citation.sourceType === 'WEB_RESULT' ? '网络资料' : '知识库资料')}</strong>{url ? <a href={url} target="_blank" rel="noopener noreferrer nofollow">在线阅读 ↗</a> : null}</header>
     {fields?.length ? fields.map((field, index) => <p key={index}>{field.label}：{field.value} <small>（{field.uncertainty || '未独立核验'}）{field.raw ? `原始文本：${field.raw}` : ''}</small></p>) : <p className={styles.body}>{citation.excerpt}</p>}
-    {safeArtwork ? <Link href={`/gallery/${artworkId}`}>查看当前受控作品详情</Link> : null}
+    {safeArtwork ? <Link href={`/gallery/${artworkId}`} prefetch={false}>查看当前受控作品详情</Link> : null}
     {deliveryObserved ? <small>已用于本轮回复</small> : null}
   </article>;
 }

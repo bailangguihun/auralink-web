@@ -36,7 +36,7 @@ export function AccountSessionScreen() {
         {user.createdAt ? <div><dt>注册时间</dt><dd>{formatProfileDate(user.createdAt)}</dd></div> : null}
       </dl>
       <div className="detail-actions">
-        <Link className="button" href="/me">我的收藏</Link>
+        <Link className="button" href="/me" prefetch={false}>我的收藏</Link>
         <button className="button" type="button" onClick={logout}>退出登录</button>
       </div>
     </section>

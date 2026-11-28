@@ -110,8 +110,8 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
     }
   };
 
-  if (loading && !preview) return <div data-artwork-text-ready={String(textReady)} style={textReady ? undefined : { visibility: "hidden" }} aria-hidden={!textReady || undefined}><Link className="text-button" href={backHref}>返回画廊</Link><LoadingSection label="正在展开作品详情" onRetry={() => setAttempt(value => value + 1)}><DetailSkeleton /></LoadingSection></div>;
-  if (!loading && error && !painting) return <><Link className="text-button" href={backHref}>返回画廊</Link><StatePanel kind="error" title="作品详情加载失败" description={error} actionLabel="重新读取作品" onAction={() => setAttempt(value => value + 1)} /></>;
+  if (loading && !preview) return <div data-artwork-text-ready={String(textReady)} style={textReady ? undefined : { visibility: "hidden" }} aria-hidden={!textReady || undefined}><Link className="text-button" href={backHref} prefetch={false}>返回画廊</Link><LoadingSection label="正在展开作品详情" onRetry={() => setAttempt(value => value + 1)}><DetailSkeleton /></LoadingSection></div>;
+  if (!loading && error && !painting) return <><Link className="text-button" href={backHref} prefetch={false}>返回画廊</Link><StatePanel kind="error" title="作品详情加载失败" description={error} actionLabel="重新读取作品" onAction={() => setAttempt(value => value + 1)} /></>;
   if (!painting && (!loading || !preview)) return <StatePanel kind="empty" title="作品不存在或当前不可用" actionLabel="返回画廊" actionHref={backHref} />;
 
   const favorited = painting ? isFavorited(painting.paintingId, painting.favorited) : false;
@@ -149,8 +149,8 @@ function PaintingDetailContent({ paintingId }: { paintingId: string }) {
         image={<ArtworkDetailImage image={painting?.image ?? null} preview={painting && !painting.image ? undefined : preview?.image} alt={title} />}
         error={painting ? error : null}
         actions={<>
-          <Link className="button detail-back" data-artwork-return={paintingId} href={backHref} scroll={!restoreGalleryScroll}><ArrowIcon direction="left" /> 返回画廊</Link>
-          {painting ? <Link className="button" aria-label="引用作品发帖" href={"/community?paintingId=" + encodeURIComponent(painting.paintingId)}><span aria-hidden="true" className="detail-quote-mark">“</span>引用发帖</Link>
+          <Link className="button detail-back" data-artwork-return={paintingId} href={backHref} prefetch={false} scroll={!restoreGalleryScroll}><ArrowIcon direction="left" /> 返回画廊</Link>
+          {painting ? <Link className="button" aria-label="引用作品发帖" href={"/community?paintingId=" + encodeURIComponent(painting.paintingId)} prefetch={false}><span aria-hidden="true" className="detail-quote-mark">“</span>引用发帖</Link>
             : <button className="button" type="button" disabled aria-label="引用作品发帖"><span aria-hidden="true" className="detail-quote-mark">“</span>引用发帖</button>}
           <button className={`button detail-favorite${favorited ? " button-primary" : ""}`} type="button" aria-pressed={painting ? favorited : undefined} disabled={!painting || isFavoriteBusy(painting.paintingId)} onClick={toggleFavorite}><HeartIcon filled={favorited} /> {favorited ? "已收藏" : "收藏"}</button>
         </>} />

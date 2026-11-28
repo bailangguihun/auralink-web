@@ -107,7 +107,7 @@ export function MeScreen() {
         <section className="me-unavailable-grid">
           <section className="me-creation-link glass-panel">
             <div><h2>我的作品</h2><p>真实 Creation 列表、状态与结果已在创作工坊接入。</p></div>
-            <Link className="button" href="/studio">前往创作工坊</Link>
+            <Link className="button" href="/studio" prefetch={false}>前往创作工坊</Link>
           </section>
           <StatePanel compact kind="unavailable" title="帖子与点赞" description="社区后端尚未开放。" />
         </section>

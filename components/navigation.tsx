@@ -7,7 +7,6 @@ import { Suspense, useEffect, useState } from "react";
 import { BrandIcon, CloseIcon, MenuIcon, UserIcon } from "@/components/icons";
 import { PendingIndicator } from "@/components/loading";
 import { useSession } from "@/components/session-provider";
-import { useNavigationPrefetch } from "@/components/use-navigation-prefetch";
 import { NavigationIndicator } from "@/components/navigation-indicator";
 import navigationMotion from "@/components/navigation-indicator.module.css";
 import { loginHref } from "@/lib/navigation";
@@ -36,7 +35,6 @@ export function Navigation() {
   const router = useRouter();
   const { status, user, signOut } = useSession();
   const [open, setOpen] = useState(false);
-  const prefetch = useNavigationPrefetch(pathname);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -67,9 +65,7 @@ export function Navigation() {
         {links.map(([href, label]) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return <Link key={href} href={href === "/" && pathname === "/" ? "/#home-welcome" : href} prefetch={false} aria-current={active ? "page" : undefined}
-            onClick={() => setOpen(false)}
-            onPointerEnter={event => { if (event.pointerType === "mouse") prefetch.prepare(href); }}
-            onFocus={() => prefetch.prepare(href)}>{label}</Link>;
+            onClick={() => setOpen(false)}>{label}</Link>;
         })}
         <NavigationIndicator pathname={pathname} menuOpen={open} />
       </nav>

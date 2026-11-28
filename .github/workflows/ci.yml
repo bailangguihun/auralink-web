@@ -27,6 +27,7 @@ jobs:
         run: |
           python3 tests/deploy-workflow-fixtures.py --bash bash
           python3 -B -m unittest discover -s tests -p 'test_deploy_artifact.py'
+          python3 -B -m unittest discover -s tests -p 'test_transfer_web_release.py'
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4

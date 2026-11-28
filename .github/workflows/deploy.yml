@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     outputs:
+      artifact_attempt: ${{ steps.pack.outputs.artifact_attempt }}
       build_id: ${{ steps.pack.outputs.build_id }}
       archive_sha256: ${{ steps.pack.outputs.archive_sha256 }}
       public_build_manifest_sha256: ${{ steps.pack.outputs.public_build_manifest_sha256 }}
@@ -38,6 +39,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           python3 -B scripts/package-web-release.py --commit "$GITHUB_SHA" --output "$RUNNER_TEMP/web-release"
+          printf 'artifact_attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           python3 - "$RUNNER_TEMP/web-release/web-release.json" <<'PY' >> "$GITHUB_OUTPUT"
           import json, sys
           with open(sys.argv[1]) as stream:
@@ -60,8 +62,9 @@ jobs:
     concurrency:
       group: production-deployment
       cancel-in-progress: false
-    timeout-minutes: 24
+    timeout-minutes: 35
     env:
+      WEB_ARTIFACT_ATTEMPT: ${{ needs.package.outputs.artifact_attempt }}
       WEB_BUILD_ID: ${{ needs.package.outputs.build_id }}
       WEB_ARCHIVE_SHA256: ${{ needs.package.outputs.archive_sha256 }}
       WEB_PUBLIC_BUILD_SHA256: ${{ needs.package.outputs.public_build_manifest_sha256 }}
@@ -69,7 +72,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: web-release-${{ github.run_id }}-${{ github.run_attempt }}
+          name: web-release-${{ github.run_id }}-${{ needs.package.outputs.artifact_attempt }}
           path: ${{ runner.temp }}/web-release
       - name: Push the verified release and invoke the installed R25 publisher
         shell: bash
@@ -83,7 +86,7 @@ jobs:
           set -Eeuo pipefail
           test "$GITHUB_REF" = refs/heads/release
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ && "$WEB_ARTIFACT_ATTEMPT" =~ ^[1-9][0-9]{0,19}$ ]]
           [[ "$WEB_BUILD_ID" =~ ^[A-Za-z0-9._-]{1,80}$ && "$WEB_ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]]
           [[ "$SERVER_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && "$SERVER_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
           [[ "$SERVER_PORT" =~ ^[1-9][0-9]{0,4}$ && "$SERVER_HOST_KEY" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}$ ]]
@@ -105,24 +108,36 @@ jobs:
           remote=(ssh "${options[@]}" -p "$SERVER_PORT" "$destination")
           root=/root/autodl-tmp/auralink-web-deploy
           publisher="$root/bin/deploy-web.sh"
-          release_id="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          release_id="$GITHUB_SHA-$GITHUB_RUN_ID-$WEB_ARTIFACT_ATTEMPT"
           archive="$RUNNER_TEMP/web-release/web.tar.gz"
-          printf '%s  %s\n' "$WEB_ARCHIVE_SHA256" "$archive" | sha256sum --check
-          chmod 600 "$archive"
-
-          if ! "${remote[@]}" "$publisher prepare-artifact $release_id" ||
-              ! timeout 300 scp "${options[@]}" -P "$SERVER_PORT" -p "$archive" "$destination:$root/incoming/$release_id/"; then
+          require_current_release() {
+            local latest
+            if ! latest=$(timeout 15 git ls-remote --exit-code origin refs/heads/release | cut -f1) ||
+                [ "$latest" != "$GITHUB_SHA" ]; then
+              echo 'The expected commit is no longer the confirmed Web release tip.' >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          }
+          require_current_release
+          if ! prepared=$(timeout 40 "${remote[@]}" "$publisher prepare-independent-artifact $release_id") ||
+              [ "$prepared" != 'DEPLOY_WEB=INDEPENDENT_INCOMING_READY' ]; then
+            printf '%s\n' "$prepared"
+            echo 'R25 could not prepare an independent Web release. Check the installed publisher and Core controller.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          transfer_started=$SECONDS
+          if ! python3 -B scripts/transfer_web_release.py --archive "$archive" --release "$release_id" \
+              --sha256 "$WEB_ARCHIVE_SHA256" --destination "$destination" --port "$SERVER_PORT" \
+              --identity "$key_dir/key" --known-hosts "$key_dir/known_hosts"; then
             echo 'Web release transfer failed. Publication has not started.' >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+          echo "Web archive transfer and checksum verified in $((SECONDS - transfer_started))s (artifact attempt $WEB_ARTIFACT_ATTEMPT)." >> "$GITHUB_STEP_SUMMARY"
+          publish_started=$SECONDS
           deadline=$((SECONDS + 180))
           while true; do
-            latest=$(timeout 15 git ls-remote --exit-code origin refs/heads/release | cut -f1)
-            if [ "$latest" != "$GITHUB_SHA" ]; then
-              echo 'Web release advanced while waiting for publication.' >> "$GITHUB_STEP_SUMMARY"
-              exit 1
-            fi
-            if result=$("${remote[@]}" "timeout --signal=TERM --kill-after=90 540 $publisher deploy-artifact $release_id $WEB_ARCHIVE_SHA256 $WEB_BUILD_ID" 2>&1); then
+            require_current_release
+            if result=$("${remote[@]}" "timeout --signal=TERM --kill-after=90 540 $publisher deploy-independent-artifact $release_id $WEB_ARCHIVE_SHA256 $WEB_BUILD_ID" 2>&1); then
               printf '%s\n' "$result"
               if grep -Fxq "DEPLOY_WEB=ARTIFACT_COMMITTED commit=$GITHUB_SHA build=$WEB_BUILD_ID" <<< "$result" ||
                   grep -Fxq "DEPLOY_WEB=ARTIFACT_CURRENT commit=$GITHUB_SHA build=$WEB_BUILD_ID" <<< "$result"; then
@@ -149,8 +164,27 @@ jobs:
                 echo 'Web publication timed out waiting for the R25 shared lease.' >> "$GITHUB_STEP_SUMMARY"
                 exit "$rc"
               fi
-              sleep 5
+              sleep $((2 + RANDOM % 4))
             fi
+          done
+          echo "R25 publication and receipt verified in $((SECONDS - publish_started))s, including lease wait." >> "$GITHUB_STEP_SUMMARY"
+
+          handoff_root=/root/autodl-tmp/artlive-r25-native-pg16/handoff-production-20260923T062101Z
+          supervisor="R25_ROOT=$handoff_root ARTLIVE_R25_HANDOFF_CONFIG=$handoff_root/runtime/handoff-control.env $handoff_root/operations/r25-production-app-supervisor.sh status"
+          deadline=$((SECONDS + 90))
+          while true; do
+            rc=0
+            result=$(timeout 40 "${remote[@]}" "$supervisor" 2>&1) || rc=$?
+            printf '%s\n' "$result"
+            if [ "$rc" -eq 0 ] && grep -Fxq 'R25_PRODUCTION_APP_SUPERVISOR=RUNNING' <<< "$result"; then
+              echo 'R25 application supervision verified.' >> "$GITHUB_STEP_SUMMARY"
+              break
+            fi
+            if [ "$rc" -ne 76 ] || [ "$SECONDS" -ge "$deadline" ]; then
+              echo 'Web publication receipt verified. R25 application supervision could not be verified.' >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            sleep $((2 + RANDOM % 4))
           done
       - name: Verify public Web, build marker and API
         shell: bash
